@@ -1,0 +1,2332 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MONTHLIV 운영 대시보드</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#F6F4EE;
+    --panel:#FFFFFF;
+    --ink:#1E2A32;
+    --ink-soft:#5B6B72;
+    --line:#E1DCCF;
+    --accent:#10767A;
+    --accent-ink:#0B5457;
+    --accent-soft:#E1F1F1;
+
+    --st-vacant:#8B96A0;   --st-vacant-bg:#EEF0F2;
+    --st-forsale:#2F6FED;  --st-forsale-bg:#E8EFFD;
+    --st-occupied:#10767A; --st-occupied-bg:#E1F1F1;
+    --st-leaving:#C98A2C;  --st-leaving-bg:#FBF0DD;
+    --st-hold:#C0473F;     --st-hold-bg:#FBE7E5;
+    --st-presell:#6C5FC7;  --st-presell-bg:#EDEBFA;
+
+    --ch-indep:#5B4FCF; --ch-33m2:#B5459A; --ch-liveany:#D6673E; --ch-etc:#7A8790;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:'Noto Sans KR', -apple-system, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+    font-size:14px; line-height:1.5;
+  }
+  .mono{ font-family:'JetBrains Mono', ui-monospace, monospace; }
+  #app{ max-width:1320px; margin:0 auto; padding:0 20px 60px; }
+  header.top{ position:sticky; top:0; z-index:20; background:var(--paper); padding:20px 0 16px; border-bottom:1px solid var(--line); }
+  .brand{ display:flex; align-items:baseline; justify-content:space-between; gap:16px; margin-bottom:16px; }
+  .brand h1{ font-size:20px; font-weight:800; letter-spacing:-0.02em; margin:0; }
+  .brand h1 .tag{
+    display:inline-block; margin-left:10px; font-family:'JetBrains Mono',monospace;
+    font-size:11px; font-weight:600; color:var(--accent-ink);
+    background:var(--accent-soft); padding:2px 8px; border-radius:20px; vertical-align:middle;
+  }
+  .brand .sub{ font-size:12px; color:var(--ink-soft); }
+
+  .nav-row{ display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap; }
+  .branch-picker{ display:flex; align-items:center; gap:8px; }
+  .branch-picker select{
+    font-family:inherit; font-weight:700; font-size:14px; padding:9px 34px 9px 12px;
+    border:1px solid var(--line); border-radius:10px; background:#fff; color:var(--ink);
+    -webkit-appearance:none; appearance:none;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><path d='M0 0l5 6 5-6z' fill='%235B6B72'/></svg>");
+    background-repeat:no-repeat; background-position:right 12px center;
+  }
+  .btn{
+    font-family:inherit; font-size:12.5px; font-weight:600; cursor:pointer;
+    border-radius:8px; padding:7px 12px; border:1px solid var(--line); background:var(--panel); color:var(--ink);
+  }
+  .btn:hover{ border-color:var(--accent); color:var(--accent-ink); }
+  .btn.primary{ background:var(--accent); border-color:var(--accent); color:#fff; }
+  .btn.primary:hover{ background:var(--accent-ink); border-color:var(--accent-ink); color:#fff; }
+  .btn.pill{ border-radius:999px; }
+  .btn.danger{ color:var(--st-hold); }
+  .btn.danger:hover{ border-color:var(--st-hold); color:var(--st-hold); }
+  .btn.small{ padding:4px 9px; font-size:11.5px; border-radius:6px; }
+  .btn:disabled{ opacity:.4; cursor:not-allowed; }
+  .btn.statstab{ font-weight:700; }
+  .btn.statstab.active{ background:var(--st-leaving-bg); border-color:var(--st-leaving); color:#8A5F14; }
+
+  .iconbtn{
+    width:26px; height:26px; border-radius:7px; border:1px solid var(--line); background:#fff;
+    color:var(--ink-soft); cursor:pointer; display:inline-flex; align-items:center; justify-content:center;
+    font-size:13px; line-height:1; padding:0; flex:none;
+  }
+  .iconbtn:hover{ border-color:var(--accent); color:var(--accent-ink); background:var(--accent-soft); }
+  .iconbtn.active{ background:var(--accent); border-color:var(--accent); color:#fff; }
+  .iconbtn.del:hover{ border-color:var(--st-hold); color:var(--st-hold); background:var(--st-hold-bg); }
+
+  .subnav{ display:inline-flex; gap:3px; background:#EFEAE0; padding:3px; border-radius:10px; margin:16px 0 16px; }
+  .subnav button{
+    border:none; background:none; cursor:pointer; font-family:inherit; font-weight:700;
+    font-size:12.5px; padding:7px 14px; border-radius:8px; color:var(--ink-soft);
+  }
+  .subnav button.active{ background:#fff; color:var(--ink); box-shadow:0 1px 2px rgba(0,0,0,.08); }
+
+  main{ padding-top:6px; }
+
+  select, input[type=text], input[type=date], input[type=tel], input[type=number], textarea{
+    font-family:inherit; font-size:12.5px; color:var(--ink);
+    border:1px solid var(--line); border-radius:6px; padding:6px 8px; background:#fff;
+  }
+  textarea{ width:100%; resize:vertical; min-height:38px; }
+  label.field-label{ display:block; font-size:11px; font-weight:600; color:var(--ink-soft); margin-bottom:3px; }
+
+  .badge{ display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px; white-space:nowrap; }
+  .badge.overdue-badge{ background:#C0473F; color:#fff; font-weight:800; animation:overduePulse 1.8s ease-in-out infinite; }
+  @keyframes overduePulse{ 0%,100%{ opacity:1; } 50%{ opacity:.65; } }
+  .badge.muted{ background:#F1EFE8; color:var(--ink-soft); }
+  .dot{ width:7px; height:7px; border-radius:50%; display:inline-block; }
+  .empty-hint{ padding:40px 20px; text-align:center; color:var(--ink-soft); font-size:13px; border:1px dashed var(--line); border-radius:12px; background:var(--panel); }
+
+  .branch-bar{
+    position:relative;
+    background:var(--panel); border:1px solid var(--line); border-radius:14px;
+    padding:16px 18px; margin-bottom:18px; display:grid; grid-template-columns:1.2fr 1fr 1fr; gap:16px;
+  }
+  .branch-bar .branch-edit-pencil{ position:absolute; top:14px; right:14px; }
+  .branch-bar .col h3{ margin:0 0 6px; font-size:11px; color:var(--ink-soft); font-weight:700; letter-spacing:.02em; }
+  .branch-bar input, .branch-bar textarea{ width:100%; }
+  .branch-bar .namewrap{ display:flex; gap:8px; align-items:center; }
+  .branch-bar .namewrap input{ font-size:16px; font-weight:800; border:none; background:transparent; padding:2px 0; }
+  .branch-bar .namewrap input:focus{ outline:none; border-bottom:1px solid var(--accent); }
+  .parking-cap-row select{ width:100px; }
+  .parking-cap-row{ margin-bottom:8px; }
+  .parking-summary{ font-size:12.5px; color:var(--ink-soft); margin-bottom:6px; }
+  .parking-summary.parking-unavailable{ font-size:14px; font-weight:800; color:var(--st-hold); margin-bottom:0; }
+  .parking-active-toggle{ color:var(--accent-ink); font-weight:700; text-decoration:underline; cursor:pointer; }
+  .parking-active-toggle:hover{ color:var(--accent); }
+  .parking-list{ background:#F4F1E9; border-radius:8px; padding:8px 10px; margin-bottom:8px; }
+  .parking-list-row{ display:flex; gap:8px; font-size:12px; padding:3px 0; }
+  .parking-list-row .rm{ font-family:'JetBrains Mono',monospace; font-weight:700; }
+  .parking-list-row .nm{ font-weight:600; }
+  .parking-list-row .car{ color:var(--ink-soft); margin-left:auto; font-family:'JetBrains Mono',monospace; }
+  .parking-list-empty{ font-size:12px; color:var(--ink-soft); }
+
+  .room-toolbar{ display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; gap:12px; flex-wrap:wrap; }
+  .room-toolbar .legend{ display:flex; gap:10px; flex-wrap:wrap; }
+
+  .add-room-form{
+    background:var(--panel); border:1.5px dashed var(--accent); border-radius:12px; padding:16px;
+    margin-bottom:16px; display:grid; grid-template-columns:1fr 1fr 1fr 1fr 1fr auto auto; gap:10px; align-items:end;
+  }
+  .add-room-form .fld{ display:flex; flex-direction:column; }
+  .add-room-form input, .add-room-form select{ width:100%; }
+
+  .add-branch-form{
+    background:var(--panel); border:1.5px dashed var(--accent); border-radius:12px; padding:16px;
+    margin-bottom:16px; display:grid; grid-template-columns:2fr 1fr auto auto; gap:10px; align-items:end;
+  }
+  .add-branch-form .fld{ display:flex; flex-direction:column; }
+  .add-branch-form input, .add-branch-form select{ width:100%; }
+
+  .branch-view-text{ font-size:14px; font-weight:600; padding:2px 0; }
+  .branch-view-text.title{ font-size:16px; font-weight:800; }
+  .branch-view-text.small{ font-size:12.5px; font-weight:400; color:var(--ink-soft); white-space:pre-wrap; }
+
+  .overdue-banner{
+    display:flex; align-items:flex-start; gap:12px; background:var(--st-hold-bg);
+    border:1.5px solid var(--st-hold); border-radius:12px; padding:14px 16px; margin-bottom:18px;
+  }
+  .overdue-banner-icon{ font-size:20px; line-height:1; flex:none; }
+  .overdue-banner-title{ font-weight:800; font-size:13.5px; color:var(--st-hold); margin-bottom:8px; }
+  .overdue-banner-rooms{ display:flex; flex-wrap:wrap; gap:6px; }
+  .overdue-room-chip{
+    font-family:'JetBrains Mono',monospace; font-weight:700; font-size:12px;
+    background:#fff; color:var(--st-hold); border:1px solid var(--st-hold); border-radius:6px; padding:3px 9px;
+    cursor:pointer;
+  }
+  .overdue-room-chip:hover{ background:var(--st-hold); color:#fff; }
+  .room-card.flash-highlight{
+    animation:cardFlash 2.2s ease-out;
+  }
+  @keyframes cardFlash{
+    0%{ box-shadow:0 0 0 4px var(--st-hold); }
+    70%{ box-shadow:0 0 0 4px var(--st-hold); }
+    100%{ box-shadow:0 0 0 0 transparent; }
+  }
+
+  .status-section{ margin-bottom:22px; }
+  .status-section .sec-head{
+    display:flex; align-items:center; gap:8px; margin-bottom:10px; padding-bottom:6px;
+    border-bottom:2px solid; cursor:pointer; user-select:none;
+  }
+  .status-section .sec-head:hover .name{ text-decoration:underline; }
+  .status-section .sec-head .name{ font-weight:800; font-size:14px; }
+  .status-section .sec-head .count-badge{
+    font-family:'JetBrains Mono',monospace; font-size:13px; font-weight:800;
+    padding:3px 11px; border-radius:20px;
+  }
+  .status-section .sec-head .sec-toggle-caret{ margin-left:auto; color:var(--ink-soft); font-size:13px; }
+  .status-section .sec-head.collapsed{ margin-bottom:0; border-bottom-style:dashed; opacity:.85; }
+  .status-section .sec-empty{ font-size:12px; color:var(--ink-soft); padding:8px 2px; }
+
+  .grid-rooms{ display:grid; grid-template-columns:repeat(auto-fill, minmax(280px,1fr)); gap:12px; align-items:start; }
+
+  /* ---- room card (view layout, matches reference mockup) ---- */
+  .room-card{ background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:hidden; border-left:5px solid var(--st-vacant); }
+  .rc-header{ display:flex; flex-direction:column; gap:6px; padding:12px 14px 8px; }
+  .rc-header-top{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .rc-title{ display:flex; align-items:baseline; gap:6px; min-width:0; flex:1; }
+  .rc-title .roomno{ font-family:'JetBrains Mono',monospace; font-weight:700; font-size:15px; white-space:nowrap; }
+  .rc-title .roomtype{ font-size:11.5px; color:var(--ink-soft); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .rc-header-badges{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .history-btn{
+    font-size:10px; font-weight:700; padding:3px 8px; border-radius:20px; border:1px solid var(--line);
+    background:#fff; color:var(--ink-soft); cursor:pointer; white-space:nowrap; flex:none;
+  }
+  .history-btn:hover, .history-btn.active{ border-color:var(--accent); color:var(--accent-ink); background:var(--accent-soft); }
+  .history-panel{ margin:0 14px 10px; background:#F4F1E9; border-radius:8px; padding:8px 10px; }
+  .history-entry{ padding:6px 0; border-bottom:1px dashed #E1DCCF; }
+  .history-entry:last-child{ border-bottom:none; }
+  .history-top{ display:flex; align-items:center; gap:10px; font-size:12px; }
+  .history-top .nm{ font-weight:700; }
+  .history-top .ph{ color:var(--ink-soft); }
+  .history-top .btn{ margin-left:auto; }
+  .history-period{ font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--ink-soft); margin-top:3px; }
+  .history-empty{ font-size:12px; color:var(--ink-soft); }
+  .rc-header-right{ display:flex; align-items:center; gap:6px; flex:none; }
+
+  .rc-note-chip{
+    margin:0 14px 8px; font-size:11.5px; color:var(--ink); background:#F4F1E9; border-radius:8px;
+    padding:6px 10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .rc-divider{ border:none; border-top:1px solid var(--line); margin:0; }
+
+  .rc-body{ padding:12px 14px 14px; }
+
+  .resident-block{ padding:9px 0; border-bottom:1px dashed #EAE5D8; }
+  .resident-block:last-child{ border-bottom:none; }
+  .resident-flags{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .resident-name-row{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:5px; }
+  .resident-name-row .nm{ font-weight:700; font-size:13.5px; }
+  .resident-name-row .acts{ display:flex; gap:5px; flex:none; }
+  .badge.tag-new{ background:#F1EFE8; color:var(--ink-soft); border:1px solid var(--line); }
+  .badge.tag-ext{ background:#FBF0DD; color:#8A5F14; border:1px solid #E3B25C; }
+  .badge.res-status{ background:#EEF0F2; color:var(--ink-soft); }
+  .badge.res-status.leaving{ background:var(--st-leaving-bg); color:var(--st-leaving); }
+  .badge.res-status.upcoming{ background:var(--st-forsale-bg); color:var(--st-forsale); }
+  .resident-period{ font-family:'JetBrains Mono',monospace; font-size:11.5px; color:var(--ink-soft); margin-top:4px; }
+  .resident-car{ font-size:11.5px; color:var(--ink-soft); margin-top:4px; font-family:'JetBrains Mono',monospace; }
+  .resident-memo{
+    margin-top:5px; font-size:11.5px; color:var(--ink); background:#F4F1E9; border-radius:6px;
+    padding:5px 9px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+
+  .empty-residents{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:6px 0 4px; }
+  .empty-residents .msg{ font-size:12.5px; color:var(--ink-soft); }
+
+  /* ---- edit mode ---- */
+  .edit-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px; }
+  .edit-grid input, .edit-grid select{ width:100%; }
+  .maint-chips{ display:flex; gap:6px; }
+  .flagchip{
+    font-size:10.5px; font-weight:700; padding:4px 9px; border-radius:6px;
+    border:1px solid var(--line); background:#fbfaf7; color:var(--ink-soft); cursor:pointer;
+  }
+  .flagchip.on.clean{ background:#FBEFD8; border-color:#E3B25C; color:#8A5F14; }
+  .flagchip.on.retouch{ background:#E3E8FD; border-color:#8B9FEE; color:#2E3F9E; }
+  .flagchip.on.presell{ background:var(--st-forsale-bg); border-color:var(--st-forsale); color:var(--st-forsale); }
+  .edit-section-label{ font-size:11px; font-weight:700; color:var(--ink-soft); letter-spacing:.02em; margin:14px 0 8px; display:flex; justify-content:space-between; align-items:center; }
+  .edit-section-label:first-child{ margin-top:0; }
+
+  .resident-edit-card{ border:1px solid var(--line); border-radius:10px; padding:10px; margin-bottom:8px; background:#FCFBF8; }
+  .resident-edit-card .redit-top{ display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+  .resident-edit-card .redit-title{ font-size:11px; font-weight:700; color:var(--ink-soft); letter-spacing:.02em; }
+  .resident-edit-card input[type=text], .resident-edit-card input[type=tel]{ width:100%; }
+  .resident-edit-card .redit-grid2{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px; }
+  .resident-edit-card .redit-grid2 select, .resident-edit-card .redit-grid2 input{ width:100%; }
+  .resident-edit-card .redit-inline-row{ display:flex; gap:8px; align-items:flex-end; margin-bottom:8px; }
+  .resident-edit-card .redit-inline-row > div:first-child{ flex:1; min-width:0; }
+  .resident-edit-card .redit-inline-row input{ width:100%; }
+  .resident-edit-card input.invalid, .resident-edit-card input.invalid:focus{ border-color:var(--st-hold); background:#FFF6F5; }
+  .field-label .req{ color:var(--st-hold); }
+
+  .tl-toolbar{ display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px; }
+  .tl-month-nav{ display:flex; align-items:center; gap:10px; }
+  .tl-month-nav .m-label{ font-family:'JetBrains Mono',monospace; font-weight:700; font-size:15px; min-width:110px; text-align:center; }
+  .tl-wrap{ background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:auto; }
+  .tl-grid{ display:grid; min-width:900px; }
+  .tl-headrow, .tl-row{ display:grid; grid-template-columns:220px 1fr; border-bottom:1px solid var(--line); }
+  .tl-headrow{ position:sticky; top:0; background:var(--panel); z-index:2; }
+  .tl-row:last-child{ border-bottom:none; }
+  .tl-label{ padding:10px 12px; font-size:12px; border-right:1px solid var(--line); display:flex; flex-direction:column; justify-content:center; gap:2px; }
+  .tl-label .rm{ font-family:'JetBrains Mono',monospace; font-weight:700; }
+  .tl-label .nm{ color:var(--ink-soft); font-size:11px; }
+  .tl-days{ position:relative; display:grid; }
+  .tl-headrow .tl-days{ height:34px; }
+  .tl-row .tl-days{ height:44px; }
+  .tl-daycell{ border-right:1px solid #EFEBE0; }
+  .tl-headrow .tl-daycell{ display:flex; align-items:center; justify-content:center; font-size:10px; color:var(--ink-soft); font-family:'JetBrains Mono',monospace; }
+  .tl-daycell.weekend{ background:#FBF8F1; }
+  .tl-bar{ position:absolute; top:8px; height:28px; border-radius:7px; display:flex; align-items:center; padding:0 8px; font-size:11px; font-weight:700; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tl-bar .tl-bar-name{ font-weight:700; flex:none; }
+  .tl-bar .tl-bar-memo{ font-weight:400; opacity:.9; margin-left:5px; overflow:hidden; text-overflow:ellipsis; }
+
+  .stat-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px; margin-bottom:20px; }
+  .stat-card{ background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; }
+  .stat-card .num{ font-family:'JetBrains Mono',monospace; font-size:28px; font-weight:800; }
+  .stat-card .lbl{ font-size:12px; color:var(--ink-soft); margin-top:2px; }
+  .stat-section{ background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px; margin-bottom:16px; }
+  .stat-section h3{ margin:0 0 12px; font-size:13px; }
+  .cleaning-cards-grid{ display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
+  .cleaning-card h3{ display:flex; align-items:center; gap:8px; }
+  .cleaning-card .cnt-badge{ font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:700; background:var(--accent-soft); color:var(--accent-ink); padding:2px 8px; border-radius:20px; }
+  .overdue-stats-card{ border-color:var(--st-hold); }
+  .overdue-stats-card h3{ color:var(--st-hold); }
+  .overdue-cnt-badge{ background:var(--st-hold-bg) !important; color:var(--st-hold) !important; }
+  .cleaning-row{ display:flex; align-items:center; gap:10px; font-size:12.5px; padding:6px 0; border-bottom:1px dashed var(--line); }
+  .cleaning-row:last-child{ border-bottom:none; }
+  .cleaning-row:hover{ background:#FAF8F2; }
+  .cleaning-row .br{ color:var(--ink-soft); flex:none; }
+  .cleaning-row .rm{ font-family:'JetBrains Mono',monospace; font-weight:700; flex:none; }
+  .cleaning-row .kind{ margin-left:auto; display:flex; align-items:center; gap:6px; flex:none; }
+  .cleaning-row .kind .mdate{ font-size:10.5px; color:var(--ink-soft); font-family:'JetBrains Mono',monospace; }
+  .cleaning-empty{ font-size:12px; color:var(--ink-soft); padding:4px 0; }
+  .channel-list{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+  .channel-chip{
+    display:inline-flex; align-items:center; gap:6px; font-size:12.5px; font-weight:600;
+    background:#F1EFE8; color:var(--ink); padding:6px 6px 6px 12px; border-radius:20px;
+  }
+  .channel-chip .iconbtn{ width:20px; height:20px; border-radius:50%; }
+  .channel-add-row{ display:flex; gap:8px; align-items:center; }
+  .channel-add-row input{ flex:1; max-width:280px; }
+  .memo-style-row{ display:flex; align-items:center; gap:6px; margin-top:6px; }
+  .memo-style-row .color-swatch{
+    width:20px; height:20px; border-radius:50%; border:2px solid transparent; cursor:pointer; padding:0;
+  }
+  .memo-style-row .color-swatch.active{ border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-soft); }
+  .memo-style-row .bold-toggle-btn{
+    width:24px; height:24px; border-radius:6px; border:1px solid var(--line); background:#fff;
+    color:var(--ink-soft); font-weight:800; font-size:12px; cursor:pointer; padding:0;
+  }
+  .memo-style-row .bold-toggle-btn.active{ background:var(--accent); border-color:var(--accent); color:#fff; }
+  .barrow{ display:grid; grid-template-columns:110px 1fr 40px; align-items:center; gap:10px; margin-bottom:8px; }
+  .barrow .barbg{ background:#EFEBE0; border-radius:6px; height:14px; overflow:hidden; }
+  .barrow .barfill{ height:100%; border-radius:6px; }
+  .barrow .cnt{ font-family:'JetBrains Mono',monospace; font-size:12px; text-align:right; }
+  table.branch-table{ width:100%; border-collapse:collapse; font-size:12.5px; }
+  table.branch-table th, table.branch-table td{ padding:8px 10px; border-bottom:1px solid var(--line); text-align:left; }
+  table.branch-table th{ color:var(--ink-soft); font-weight:700; font-size:11px; }
+
+  ::-webkit-scrollbar{ height:8px; width:8px; }
+  ::-webkit-scrollbar-thumb{ background:#D8D2C2; border-radius:4px; }
+
+  .modal-overlay{
+    position:fixed; inset:0; background:rgba(30,42,50,.45); z-index:1000;
+    display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  .modal-box{
+    background:#fff; border-radius:14px; padding:20px; max-width:380px; width:100%;
+    box-shadow:0 12px 40px rgba(0,0,0,.22);
+  }
+  .modal-msg{ font-size:13.5px; color:var(--ink); white-space:pre-wrap; line-height:1.6; margin-bottom:16px; }
+  .modal-btn-row{ display:flex; justify-content:flex-end; gap:8px; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+</head>
+<body>
+<div id="app">
+  <header class="top">
+    <div class="brand">
+      <h1>MONTHLIV 운영 대시보드 <span class="tag">OPS CONSOLE</span></h1>
+      <div class="sub" id="savedNote">불러오는 중…</div>
+    </div>
+    <div class="nav-row">
+      <div class="branch-picker">
+        <select id="branchSelect"></select>
+        <button class="btn small" id="addBranchBtn">+ 지점 추가</button>
+      </div>
+      <button class="btn statstab" id="statsBtn">전체 통계</button>
+    </div>
+  </header>
+  <main id="main"></main>
+</div>
+
+<script>
+const STORE_KEY = 'monthliv-state';
+let DB = null;
+let UI = {
+  view:'branch', branchId:null, branchTab:'rooms',
+  roomEditMode:{}, residentEditMode:{}, roomSnapshots:{}, residentSnapshots:{}, draftResident:{}, parkingListOpen:{},
+  branchEditMode:{}, branchSnapshots:{}, addingBranch:false, historyOpen:{}, sectionCollapsed:{},
+  tlYear:null, tlMonth:null, addingRoom:false
+};
+
+function uid(p){ return p + '_' + Math.random().toString(36).slice(2,9); }
+function todayISO(){ const d=new Date(); return d.toISOString().slice(0,10); }
+function addOneMonth(dateStr){
+  const d = dateStr ? new Date(dateStr) : new Date();
+  d.setMonth(d.getMonth()+1);
+  return d.toISOString().slice(0,10);
+}
+function nextMonWedFri(fromDateStr){
+  const d = fromDateStr ? new Date(fromDateStr) : new Date();
+  d.setDate(d.getDate()+1);
+  while(![1,3,5].includes(d.getDay())) d.setDate(d.getDate()+1);
+  return d.toISOString().slice(0,10);
+}
+function formatWon(n){ n = Number(n)||0; return n.toLocaleString('ko-KR') + '원'; }
+
+const STATUS_LIST = ['이용중','사전판매중','판매중','퇴실예정','공실','판매보류'];
+const STATUS_LIST_MANUAL = STATUS_LIST.filter(s => s !== '이용중' && s !== '사전판매중');
+const STATUS_LIST_STATS = STATUS_LIST.filter(s => s !== '사전판매중');
+function statsStatus(room){
+  const s = effectiveRoomStatus(room);
+  return s === '사전판매중' ? '판매중' : s;
+}
+const RESIDENT_STATUS_LIST = ['입실중','입실예정','퇴실예정'];
+const CONTRACT_TYPE_LIST = ['신규','연장'];
+const DEFAULT_CHANNEL_LIST = ['독립생활','삼삼엠투','리브애니','기타'];
+const ROOM_TYPE_LIST = ['블레스','그레이스','트리니티','기타'];
+const OCCUPANCY_LIST = ['1인실','2인실'];
+function occupancyCapacity(room){ return (room.occupancy === '1인실') ? 1 : 2; }
+
+function seedState(){
+  const branchSeongsu = uid('b'), branchJamsil = uid('b'), branchDoksan = uid('b');
+  const rooms = []; const residents = [];
+  function addRoom(branchId, number, type, occupancy, status, cleaning, retouch, note, price){
+    const r = { id: uid('r'), branchId, number, type, occupancy, saleStatus: status,
+      needsCleaning: cleaning, needsRetouch: retouch, maintenanceDate:'', preSelling:false, note: note || '', price: price||0 };
+    rooms.push(r); return r;
+  }
+  function addResident(roomId, name, channel, resStatus, contractType, moveIn, moveOut, phone, memo, carNumber){
+    residents.push({ id: uid('p'), roomId, name, channel, resStatus, contractType, moveIn, moveOut, originalMoveIn: moveIn, scheduledToLeave:false, phone: phone||'', memo: memo||'', carNumber: carNumber||'', firstSaveDone:true, slotIndex:0 });
+  }
+
+  const r1 = addRoom(branchSeongsu, '304', '그레이스', '2인실', '공실', false, false, '204호 정독립 이동 예정', 450000);
+  addResident(r1.id, '천수진', '삼삼엠투', '퇴실예정', '연장', '2026-08-01', '2026-08-31', '010-6884-8880', '실거주자 박영민(010-1234-5678)');
+  const r2 = addRoom(branchSeongsu, '305', '블레스', '1인실', '공실', false, false, '', 480000);
+  addResident(r2.id, '정희영', '독립생활', '입실중', '연장', '2026-05-20', '2026-08-20', '', '');
+  const r3 = addRoom(branchSeongsu, '308', '블레스', '2인실', '공실', true, false, '', 480000);
+  addResident(r3.id, '박재현', '삼삼엠투', '입실중', '신규', '2026-07-10', '2026-08-10', '', '');
+  const r4 = addRoom(branchSeongsu, '309', '트리니티', '2인실', '공실', true, false, '', 550000);
+  addResident(r4.id, '천수진', '리브애니', '퇴실예정', '연장', '2026-01-26', '2026-08-03', '', '결제시 페이백 등록 필요');
+  addRoom(branchSeongsu, '410', '그레이스', '1인실', '판매보류', false, true, '변기 보수 필요', 450000);
+
+  const r6 = addRoom(branchJamsil, '201', '블레스', '2인실', '공실', false, false, '', 470000);
+  addResident(r6.id, '강은선', '독립생활', '입실중', '신규', '2026-07-03', '2026-08-03', '', '', '12가3456');
+  addRoom(branchJamsil, '208', '블레스', '1인실', '판매중', false, true, '매트리스커버 없음', 470000);
+
+  const r8 = addRoom(branchDoksan, '401', '그레이스', '2인실', '공실', false, true, '', 430000);
+  addResident(r8.id, '지수빈', '독립생활', '입실중', '신규', '2026-06-01', '2026-09-01', '', '', '34나5678');
+  addRoom(branchDoksan, '404', '블레스', '1인실', '공실', true, false, '', 430000);
+
+  return {
+    branches: [
+      { id: branchSeongsu, name: '먼슬리브 성수', parkingNote: '', parkingCapacity: 0, memo: '' },
+      { id: branchJamsil, name: '먼슬리브 잠실', parkingNote: '건물 뒤 2대 가능 (297구4624, 272모3214)', parkingCapacity: 2, memo: '' },
+      { id: branchDoksan, name: '먼슬리브 가산독산', parkingNote: '건물 앞 1대만 가능 (4번 자리)', parkingCapacity: 1, memo: '' }
+    ],
+    rooms, residents, residentHistory: [], channelList: [...DEFAULT_CHANNEL_LIST]
+  };
+}
+
+/* ====================================================================
+   Firebase 설정 — 아래 firebaseConfig 값을 본인의 Firebase 프로젝트 값으로
+   바꿔주세요. (Firebase 콘솔 > 프로젝트 설정 > 일반 > 내 앱 > SDK 설정에서 확인)
+   ==================================================================== */
+const firebaseConfig = {
+  apiKey: "AIzaSyAxL4_JHykniOmJP3FwBfVuipsB7pmf1zc",
+  authDomain: "monthliv-482bd.firebaseapp.com",
+  projectId: "monthliv-482bd",
+  storageBucket: "monthliv-482bd.firebasestorage.app",
+  messagingSenderId: "701138043436",
+  appId: "1:701138043436:web:bb800f3764c6d5a3a2c789"
+};
+firebase.initializeApp(firebaseConfig);
+const firestoreDB = firebase.firestore();
+const FIRESTORE_DOC = firestoreDB.collection('monthliv').doc('state');
+
+async function loadState(){
+  try{
+    const snap = await FIRESTORE_DOC.get();
+    if(snap.exists && snap.data() && snap.data().json){
+      return JSON.parse(snap.data().json);
+    }
+  }catch(e){ console.error('불러오기 실패:', e); }
+  return seedState();
+}
+let saveTimer = null;
+async function saveState(){
+  const note = document.getElementById('savedNote');
+  if(note) note.textContent = '저장 중…';
+  try{
+    await FIRESTORE_DOC.set({ json: JSON.stringify(DB), updatedAt: new Date().toISOString() });
+    if(note) note.textContent = '자동 저장됨 · 이 대시보드를 사용하는 모든 사람에게 공유됩니다';
+  }catch(e){
+    if(note) note.textContent = '저장 실패 — 네트워크 또는 Firebase 설정을 확인해주세요';
+    console.error(e);
+  }
+}
+function scheduleSave(){ clearTimeout(saveTimer); saveTimer = setTimeout(saveState, 250); }
+
+function statusMeta(s){
+  const m = {
+    '공실':        { fg:'var(--st-vacant)',   bg:'var(--st-vacant-bg)' },
+    '판매중':      { fg:'var(--st-forsale)',  bg:'var(--st-forsale-bg)' },
+    '이용중':      { fg:'var(--st-occupied)', bg:'var(--st-occupied-bg)' },
+    '사전판매중':  { fg:'var(--st-presell)',  bg:'var(--st-presell-bg)' },
+    '퇴실예정':    { fg:'var(--st-leaving)',  bg:'var(--st-leaving-bg)' },
+    '판매보류':    { fg:'var(--st-hold)',     bg:'var(--st-hold-bg)' },
+  };
+  return m[s] || m['공실'];
+}
+const CHANNEL_PALETTE = ['#D6673E','#B5459A','#5B4FCF','#2F8F5B','#C98A2C','#2F6FED','#B5335C','#5C8A3A','#0F7173','#A8481E'];
+function channelColor(c){
+  const fixed = { '독립생활':'var(--ch-indep)', '삼삼엠투':'var(--ch-33m2)', '리브애니':'var(--ch-liveany)' };
+  if(fixed[c]) return fixed[c];
+  // "기타"나 새로 추가한 채널(엔코스테이 등)도 흐릿한 회색 대신 눈에 띄는 고유 색을 자동으로 배정합니다.
+  let hash = 0;
+  const s = String(c||'');
+  for(let i=0;i<s.length;i++){ hash = (hash*31 + s.charCodeAt(i)) >>> 0; }
+  return CHANNEL_PALETTE[hash % CHANNEL_PALETTE.length];
+}
+
+/* ---------------- root render ---------------- */
+function render(){
+  renderTopNav();
+  const main = document.getElementById('main');
+  main.innerHTML = '';
+  if(UI.addingBranch){ main.appendChild(renderAddBranchForm()); }
+  if(UI.view === 'stats'){ main.appendChild(renderStatsView()); return; }
+  main.appendChild(renderBranchView());
+}
+
+function renderTopNav(){
+  const sel = document.getElementById('branchSelect');
+  sel.innerHTML = '';
+  DB.branches.forEach(br=>{
+    const o = document.createElement('option');
+    o.value = br.id; o.textContent = br.name;
+    o.selected = UI.branchId===br.id;
+    sel.appendChild(o);
+  });
+  sel.onchange = ()=>{ UI.view='branch'; UI.branchId = sel.value; UI.addingRoom=false; render(); };
+
+  const addBranchBtn = document.getElementById('addBranchBtn');
+  addBranchBtn.textContent = UI.addingBranch ? '지점 추가 취소' : '+ 지점 추가';
+  addBranchBtn.onclick = ()=>{ UI.addingBranch = !UI.addingBranch; render(); };
+
+  const statsBtn = document.getElementById('statsBtn');
+  statsBtn.className = 'btn statstab' + (UI.view==='stats' ? ' active' : '');
+  statsBtn.onclick = ()=>{ UI.view = 'stats'; render(); };
+}
+
+function currentBranch(){
+  if(!UI.branchId || !DB.branches.find(b=>b.id===UI.branchId)){
+    UI.branchId = DB.branches[0] ? DB.branches[0].id : null;
+  }
+  return DB.branches.find(b=>b.id===UI.branchId);
+}
+
+/* ---------------- branch view ---------------- */
+function scrollToRoomCard(room){
+  UI.branchTab = 'rooms';
+  const status = effectiveRoomStatus(room);
+  const key = room.branchId + '::' + status;
+  UI.sectionCollapsed[key] = false;
+  render();
+  setTimeout(()=>{
+    const el = document.getElementById('room-card-' + room.id);
+    if(!el) return;
+    el.scrollIntoView({ behavior:'smooth', block:'center' });
+    el.classList.add('flash-highlight');
+    setTimeout(()=> el.classList.remove('flash-highlight'), 2200);
+  }, 60);
+}
+
+function renderOverdueBanner(branch){
+  const rooms = DB.rooms.filter(r=>r.branchId===branch.id);
+  const overdueRooms = rooms.filter(r=>roomHasOverdueResident(r))
+    .sort((a,b)=> a.number.localeCompare(b.number,'ko',{numeric:true}));
+  if(overdueRooms.length===0) return null;
+
+  const box = document.createElement('div');
+  box.className = 'overdue-banner';
+
+  const icon = document.createElement('span');
+  icon.className = 'overdue-banner-icon';
+  icon.textContent = '📢';
+  box.appendChild(icon);
+
+  const body = document.createElement('div');
+  body.className = 'overdue-banner-body';
+  const title = document.createElement('div');
+  title.className = 'overdue-banner-title';
+  title.textContent = `연체 중인 입실자가 있는 호실이 ${overdueRooms.length}개 있어요`;
+  body.appendChild(title);
+
+  const roomsWrap = document.createElement('div');
+  roomsWrap.className = 'overdue-banner-rooms';
+  overdueRooms.forEach(room=>{
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'overdue-room-chip';
+    chip.textContent = room.number + '호';
+    chip.title = '해당 호실로 이동';
+    chip.onclick = ()=> scrollToRoomCard(room);
+    roomsWrap.appendChild(chip);
+  });
+  body.appendChild(roomsWrap);
+  box.appendChild(body);
+
+  return box;
+}
+
+function renderBranchView(){
+  const wrap = document.createElement('div');
+  const branch = currentBranch();
+  if(!branch){
+    wrap.innerHTML = '<div class="empty-hint">지점이 없습니다. 상단의 "+ 지점 추가"로 시작하세요.</div>';
+    return wrap;
+  }
+  wrap.appendChild(renderBranchInfoBar(branch));
+
+  const overdueBanner = renderOverdueBanner(branch);
+  if(overdueBanner) wrap.appendChild(overdueBanner);
+
+  const subnav = document.createElement('div');
+  subnav.className = 'subnav';
+  [['rooms','호실 현황'],['timeline','타임라인']].forEach(([key,label])=>{
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.className = UI.branchTab===key ? 'active' : '';
+    b.onclick = ()=>{ UI.branchTab = key; render(); };
+    subnav.appendChild(b);
+  });
+  wrap.appendChild(subnav);
+
+  if(UI.branchTab === 'timeline') wrap.appendChild(renderTimelineSection(branch));
+  else wrap.appendChild(renderRoomsSection(branch));
+  return wrap;
+}
+
+function renderBranchInfoBar(branch){
+  const wrap = document.createElement('div');
+  const editOn = !!UI.branchEditMode[branch.id];
+
+  const pencil = document.createElement('button');
+  pencil.className = 'iconbtn branch-edit-pencil' + (editOn ? ' active' : '');
+  pencil.innerHTML = editOn ? '&#10003;' : '&#9998;';
+  pencil.title = editOn ? '수정 완료' : '지점 정보 수정';
+  pencil.onclick = ()=>{
+    if(!editOn){ UI.branchSnapshots[branch.id] = Object.assign({}, branch); }
+    else { delete UI.branchSnapshots[branch.id]; }
+    UI.branchEditMode[branch.id] = !editOn; render();
+  };
+
+  const bar = document.createElement('div');
+  bar.className = 'branch-bar';
+  bar.appendChild(pencil);
+
+  // ---- 지점명 ----
+  const col1 = document.createElement('div'); col1.className = 'col';
+  col1.appendChild(el('h3', null, '지점명'));
+  if(editOn){
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text'; nameInput.value = branch.name;
+    nameInput.addEventListener('input', ()=>{
+      branch.name = nameInput.value; scheduleSave();
+      const opt = document.querySelector(`#branchSelect option[value="${branch.id}"]`); if(opt) opt.textContent = nameInput.value;
+    });
+    col1.appendChild(nameInput);
+  } else {
+    col1.appendChild(el('div', 'branch-view-text title', branch.name));
+  }
+  bar.appendChild(col1);
+
+  // ---- 주차 ----
+  const col2 = document.createElement('div'); col2.className = 'col';
+  col2.appendChild(el('h3', null, '주차 정보'));
+  if(editOn){
+    const capSel = document.createElement('select');
+    for(let i=0;i<=10;i++){ const o=document.createElement('option'); o.value=i; o.textContent=`${i}대`; o.selected=(branch.parkingCapacity||0)===i; capSel.appendChild(o); }
+    capSel.addEventListener('change', ()=>{ branch.parkingCapacity = Number(capSel.value); scheduleSave(); render(); });
+    col2.appendChild(labeled('주차 가능 대수', capSel));
+  }
+  const activeList = branchActiveCarResidents(branch.id);
+  const summary = document.createElement('div');
+  const cap = branch.parkingCapacity || 0;
+  if(!editOn && cap===0){
+    summary.className = 'parking-summary parking-unavailable';
+    summary.textContent = '⚠ 주차 불가';
+  } else {
+    summary.className = 'parking-summary';
+    summary.style.marginTop = editOn ? '8px' : '0';
+    summary.innerHTML = `전체 ${cap}대 / 이용중 <span class="parking-active-toggle">${activeList.length}대</span>`;
+    summary.querySelector('.parking-active-toggle').onclick = ()=>{ UI.parkingListOpen[branch.id] = !UI.parkingListOpen[branch.id]; render(); };
+  }
+  col2.appendChild(summary);
+  if(UI.parkingListOpen[branch.id] && !(!editOn && cap===0)){
+    const list = document.createElement('div');
+    list.className = 'parking-list';
+    if(activeList.length===0){
+      list.appendChild(el('div','parking-list-empty','현재 차량이 등록된 이용중 입실자가 없습니다.'));
+    } else {
+      activeList.forEach(item=>{
+        const row = document.createElement('div');
+        row.className = 'parking-list-row';
+        row.innerHTML = `<span class="rm">${esc(item.roomNumber)}호</span><span class="nm">${esc(item.name)}</span><span class="car">${esc(item.carNumber)}</span>`;
+        list.appendChild(row);
+      });
+    }
+    col2.appendChild(list);
+  }
+  if(editOn){
+    const parkingNote = document.createElement('textarea');
+    parkingNote.placeholder = '예: 건물 뒤 2대 가능';
+    parkingNote.value = branch.parkingNote;
+    parkingNote.style.marginTop = '8px';
+    parkingNote.addEventListener('input', ()=>{ branch.parkingNote = parkingNote.value; scheduleSave(); });
+    col2.appendChild(parkingNote);
+    col2.appendChild(renderMemoStyleControls(branch, 'parkingNoteColor', 'parkingNoteBold'));
+  } else if(branch.parkingNote){
+    const pnDiv = el('div', 'branch-view-text small', branch.parkingNote, 'margin-top:6px;');
+    pnDiv.style.color = MEMO_COLORS[branch.parkingNoteColor] || MEMO_COLORS.black;
+    if(branch.parkingNoteBold) pnDiv.style.fontWeight = '700';
+    col2.appendChild(pnDiv);
+  }
+  bar.appendChild(col2);
+
+  // ---- 특이사항 ----
+  const col3 = document.createElement('div'); col3.className = 'col';
+  col3.appendChild(el('h3', null, '특이사항 메모'));
+  if(editOn){
+    const memoArea = document.createElement('textarea');
+    memoArea.placeholder = '지점 전체 공지/특이사항';
+    memoArea.value = branch.memo;
+    memoArea.addEventListener('input', ()=>{ branch.memo = memoArea.value; scheduleSave(); });
+    col3.appendChild(memoArea);
+    col3.appendChild(renderMemoStyleControls(branch, 'memoColor', 'memoBold'));
+  } else {
+    const memoDiv = el('div', 'branch-view-text', branch.memo || '-');
+    if(branch.memo){
+      memoDiv.style.color = MEMO_COLORS[branch.memoColor] || MEMO_COLORS.black;
+      if(branch.memoBold) memoDiv.style.fontWeight = '700';
+    }
+    col3.appendChild(memoDiv);
+  }
+  bar.appendChild(col3);
+
+  wrap.appendChild(bar);
+
+  if(editOn){
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;gap:8px;margin-top:10px;';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn small';
+    cancelBtn.textContent = '취소';
+    cancelBtn.onclick = ()=>{
+      const snap = UI.branchSnapshots[branch.id];
+      if(snap) Object.assign(branch, snap);
+      delete UI.branchSnapshots[branch.id];
+      UI.branchEditMode[branch.id] = false;
+      scheduleSave(); render();
+    };
+    const delBtn = document.createElement('button');
+    delBtn.className = 'btn danger small';
+    delBtn.textContent = '지점 삭제';
+    delBtn.onclick = ()=>{
+      showConfirm(`"${branch.name}" 지점과 소속 호실/입실자 정보를 모두 삭제할까요?`, ()=>{
+        DB.rooms = DB.rooms.filter(r=>{
+          if(r.branchId===branch.id){ DB.residents = DB.residents.filter(p=>p.roomId!==r.id); return false; }
+          return true;
+        });
+        DB.branches = DB.branches.filter(b=>b.id!==branch.id);
+        UI.branchId = null;
+        scheduleSave(); render();
+      });
+    };
+    btnRow.appendChild(cancelBtn); btnRow.appendChild(delBtn);
+    wrap.appendChild(btnRow);
+  }
+
+  return wrap;
+}
+
+/* ---------------- rooms section ---------------- */
+function roomNumberTaken(branchId, number, excludeRoomId){
+  const norm = String(number).replace(/[\u200B-\u200D\uFEFF]/g,'').trim().toLowerCase();
+  return DB.rooms.some(r => r.branchId===branchId && r.id!==excludeRoomId && String(r.number).replace(/[\u200B-\u200D\uFEFF]/g,'').trim().toLowerCase()===norm);
+}
+
+function renderRoomsSection(branch){
+  const wrap = document.createElement('div');
+
+  const toolbar = document.createElement('div');
+  toolbar.className = 'room-toolbar';
+  toolbar.innerHTML = `
+    <div class="legend">
+      ${STATUS_LIST.map(s=>{
+        const m = statusMeta(s);
+        return `<span class="badge" style="background:${m.bg};color:${m.fg}"><span class="dot" style="background:${m.fg}"></span>${s}</span>`;
+      }).join('')}
+    </div>
+  `;
+  const addBtn = document.createElement('button');
+  addBtn.className = 'btn primary';
+  addBtn.textContent = UI.addingRoom ? '호실 추가 취소' : '+ 호실 추가';
+  addBtn.onclick = ()=>{ UI.addingRoom = !UI.addingRoom; render(); };
+  toolbar.appendChild(addBtn);
+  wrap.appendChild(toolbar);
+
+  if(UI.addingRoom){
+    wrap.appendChild(renderAddRoomForm(branch));
+  }
+
+  const rooms = DB.rooms.filter(r=>r.branchId===branch.id);
+  if(rooms.length===0 && !UI.addingRoom){
+    wrap.appendChild(el('div','empty-hint','등록된 호실이 없습니다. "+ 호실 추가"로 첫 호실을 등록하세요.'));
+    return wrap;
+  }
+
+  STATUS_LIST.forEach(status=>{
+    const meta = statusMeta(status);
+    const inStatus = rooms.filter(r=>effectiveRoomStatus(r)===status)
+      .sort((a,b)=> a.number.localeCompare(b.number,'ko',{numeric:true}));
+
+    // "이용중" 배지 숫자에는 사전판매중 / 입실예정 / 연체 상태의 방도 모두 포함합니다.
+    let displayCount = inStatus.length;
+    if(status === '이용중'){
+      const relatedIds = new Set();
+      rooms.forEach(r=>{
+        const es = effectiveRoomStatus(r);
+        if(es === '이용중' || es === '사전판매중' || roomHasUpcomingResident(r) || roomHasOverdueResident(r)){
+          relatedIds.add(r.id);
+        }
+      });
+      displayCount = relatedIds.size;
+    }
+
+    const key = branch.id + '::' + status;
+    const collapsed = !!UI.sectionCollapsed[key];
+
+    const section = document.createElement('div');
+    section.className = 'status-section';
+    const head = document.createElement('div');
+    head.className = 'sec-head' + (collapsed ? ' collapsed' : '');
+    head.style.borderColor = meta.fg;
+    head.innerHTML = `
+      <span class="dot" style="background:${meta.fg}"></span>
+      <span class="name" style="color:${meta.fg}">${status}</span>
+      <span class="count-badge" style="background:${meta.bg};color:${meta.fg};">${displayCount}개</span>
+      <span class="sec-toggle-caret">${collapsed ? '▸' : '▾'}</span>
+    `;
+    head.onclick = ()=>{ UI.sectionCollapsed[key] = !collapsed; render(); };
+    section.appendChild(head);
+
+    if(!collapsed){
+      if(inStatus.length===0){
+        section.appendChild(el('div','sec-empty', `${status} 상태의 호실이 없습니다.`));
+      } else {
+        const grid = document.createElement('div');
+        grid.className = 'grid-rooms';
+        inStatus.forEach(room => grid.appendChild(renderRoomCard(room, status)));
+        section.appendChild(grid);
+      }
+    }
+    wrap.appendChild(section);
+  });
+
+  return wrap;
+}
+
+function renderAddBranchForm(){
+  const form = document.createElement('div');
+  form.className = 'add-branch-form';
+  form.innerHTML = `
+    <div class="fld"><label class="field-label">지점명 *</label><input type="text" id="nbName" placeholder="예: 먼슬리브 신규지점"></div>
+    <div class="fld"><label class="field-label">주차 가능 대수 *</label>
+      <select id="nbCap">${Array.from({length:11},(_,i)=>`<option value="${i}">${i}대</option>`).join('')}</select></div>
+    <button class="btn primary" id="nbSubmit">추가</button>
+    <button class="btn" id="nbCancel">취소</button>
+  `;
+  setTimeout(()=>{
+    document.getElementById('nbName').focus();
+    document.getElementById('nbCancel').onclick = ()=>{ UI.addingBranch=false; render(); };
+    document.getElementById('nbSubmit').onclick = ()=>{
+      const nameEl = document.getElementById('nbName');
+      const name = nameEl.value.trim();
+      if(!name){ showAlert('지점명을 입력해주세요.'); nameEl.focus(); return; }
+      const cap = Number(document.getElementById('nbCap').value) || 0;
+      const nb = { id: uid('b'), name, parkingNote:'', parkingCapacity: cap, memo:'' };
+      DB.branches.push(nb);
+      UI.addingBranch = false;
+      UI.view='branch'; UI.branchId = nb.id;
+      scheduleSave(); render();
+    };
+  },0);
+  return form;
+}
+
+function renderAddRoomForm(branch){
+  const form = document.createElement('div');
+  form.className = 'add-room-form';
+  form.innerHTML = `
+    <div class="fld"><label class="field-label">호실 번호 *</label><input type="text" id="nrNumber" placeholder="예: 305"></div>
+    <div class="fld"><label class="field-label">호실 타입</label>
+      <select id="nrType">${ROOM_TYPE_LIST.map(t=>`<option>${t}</option>`).join('')}</select></div>
+    <div class="fld"><label class="field-label">인실 구분 *</label>
+      <select id="nrOccupancy">${OCCUPANCY_LIST.map(t=>`<option>${t}</option>`).join('')}</select></div>
+    <div class="fld"><label class="field-label">초기 상태</label>
+      <select id="nrStatus">${STATUS_LIST_MANUAL.map(s=>`<option>${s}</option>`).join('')}</select></div>
+    <div class="fld"><label class="field-label">정상 입실료(월)</label><input type="number" id="nrPrice" placeholder="예: 450000" min="0" step="10000"></div>
+    <button class="btn primary" id="nrSubmit">추가</button>
+    <button class="btn" id="nrCancel">취소</button>
+  `;
+  setTimeout(()=>{
+    document.getElementById('nrNumber').focus();
+    document.getElementById('nrCancel').onclick = ()=>{ UI.addingRoom=false; render(); };
+    document.getElementById('nrSubmit').onclick = ()=>{
+      const numberEl = document.getElementById('nrNumber');
+      const number = numberEl.value.trim();
+      if(!number){ showAlert('호실 번호를 입력해주세요.'); numberEl.focus(); return; }
+      if(roomNumberTaken(branch.id, number, null)){
+        showAlert(`이 지점에는 이미 "${number}" 호실이 있습니다. 호실은 지점당 1개씩만 등록할 수 있어요.`);
+        numberEl.focus(); return;
+      }
+      const room = {
+        id: uid('r'), branchId: branch.id, number,
+        type: document.getElementById('nrType').value,
+        occupancy: document.getElementById('nrOccupancy').value,
+        saleStatus: document.getElementById('nrStatus').value,
+        needsCleaning:false, needsRetouch:false, maintenanceDate:'', preSelling:false, note:'',
+        price: Number(document.getElementById('nrPrice').value) || 0
+      };
+      DB.rooms.push(room);
+      UI.addingRoom = false;
+      scheduleSave(); render();
+    };
+  },0);
+  return form;
+}
+
+function addResidentToRoom(room){
+  const cap = occupancyCapacity(room);
+  const confirmedCount = DB.residents.filter(p=>p.roomId===room.id).length;
+  const hasDraft = !!UI.draftResident[room.id];
+  if(confirmedCount + (hasDraft?1:0) >= cap){
+    showAlert(`이 호실(${room.occupancy || '2인실'})은 최대 ${cap}인까지만 입실 가능합니다.`);
+    return;
+  }
+  const p = { id: uid('p'), roomId: room.id, name:'', channel:'독립생활', resStatus:'', contractType:'신규',
+    moveIn: todayISO(), moveOut:'', originalMoveIn:'', scheduledToLeave:false, phone:'', memo:'', carNumber:'', firstSaveDone:false, slotIndex: confirmedCount };
+  p.resStatus = computeResStatus(p);
+  // 최초 입력 중에는 DB에 반영하지 않고 화면(초안) 상태로만 유지합니다.
+  // "완료"를 눌러야 실제로 저장되고, 취소/새로고침 시 남지 않습니다.
+  UI.draftResident[room.id] = p;
+  render();
+}
+
+/* ---------------- room card: view mode ---------------- */
+function computeResStatus(p){
+  // 입실 시작일 기준 자동 계산 (화면에는 노출하지 않고 내부 데이터로만 사용)
+  if(!p.moveIn) return p.resStatus || '입실중';
+  const today = todayISO();
+  if(p.moveIn > today) return '입실예정';
+  if(p.moveIn === today) return '입실중';
+  return '퇴실';
+}
+function isCurrentlyResiding(p){
+  // 입실일이 이미 지났고(오늘 포함) 아직 퇴실 처리가 되지 않았다면 "이용중"으로 간주합니다.
+  // 퇴실예정일이 지났더라도 실제 퇴실 처리(히스토리 이동) 전까지는 계속 이용중으로 봅니다.
+  if(!p.moveIn) return false;
+  return p.moveIn <= todayISO();
+}
+function isOverdue(p){
+  return !!(p.moveOut && p.moveOut < todayISO());
+}
+function isUpcoming(p){
+  return !!(p.moveIn && p.moveIn > todayISO());
+}
+function roomHasUpcomingResident(room){
+  return DB.residents.some(p => p.roomId===room.id && isUpcoming(p));
+}
+function roomHasOverdueResident(room){
+  return DB.residents.some(p => p.roomId===room.id && isOverdue(p));
+}
+function moveResidentToHistory(p, moveOutOverride){
+  DB.residentHistory.push({
+    id: uid('h'), roomId: p.roomId,
+    name: p.name || '(이름 미입력)', phone: p.phone || '',
+    moveIn: p.originalMoveIn || p.moveIn || '', moveOut: moveOutOverride || p.moveOut || todayISO()
+  });
+  DB.residents = DB.residents.filter(x=>x.id!==p.id);
+  delete UI.residentEditMode[p.id];
+  delete UI.residentSnapshots[p.id];
+  // 마지막 재실 입실자가 퇴실한 뒤에도 저장된 상태값이 "이용중"처럼 더 이상 유효하지 않게
+  // 남아있으면(과거 데이터 등) 공실로 정리합니다. 그 외에는 관리자가 이미 설정해둔 판매
+  // 상태(예: 판매중)를 그대로 유지하며, 자동으로 바꾸지 않습니다.
+  const room = DB.rooms.find(r=>r.id===p.roomId);
+  if(room && !roomHasActiveResident(room) && !STATUS_LIST_MANUAL.includes(room.saleStatus)){
+    room.saleStatus = '공실';
+  }
+}
+function restoreFromHistory(h){
+  const room = DB.rooms.find(r=>r.id===h.roomId);
+  if(!room){ showAlert('해당 호실을 찾을 수 없습니다. (삭제된 호실일 수 있어요)'); return; }
+  const cap = occupancyCapacity(room);
+  const currentCount = DB.residents.filter(p=>p.roomId===room.id).length;
+  if(currentCount >= cap){
+    showAlert(`이 호실은 이미 정원(${cap}인)이 가득 차 있어 복원할 수 없습니다. 먼저 자리를 비워주세요.`);
+    return;
+  }
+  showConfirm(`"${h.name}" 님의 정보를 이 호실의 입실자로 복원할까요?`, ()=>{
+    const usedSlots = new Set(DB.residents.filter(p=>p.roomId===room.id).map(p=>p.slotIndex||0));
+    let freeSlot = 0;
+    while(usedSlots.has(freeSlot)) freeSlot++;
+    const p = {
+      id: uid('p'), roomId: room.id, name: h.name, phone: h.phone,
+      channel: '독립생활', resStatus:'', contractType:'신규',
+      moveIn: h.moveIn, moveOut: h.moveOut, originalMoveIn: h.moveIn, scheduledToLeave:false,
+      carNumber:'', memo:'', firstSaveDone:true, slotIndex: freeSlot
+    };
+    p.resStatus = computeResStatus(p);
+    DB.residents.push(p);
+    DB.residentHistory = DB.residentHistory.filter(x=>x.id!==h.id);
+    UI.historyOpen[room.id] = false;
+    scheduleSave(); render();
+  });
+}
+function processScheduledLeaves(){
+  const today = todayISO();
+  const toLeave = DB.residents.filter(p => p.scheduledToLeave && p.moveOut && p.moveOut < today);
+  if(toLeave.length===0) return;
+  toLeave.forEach(p => moveResidentToHistory(p));
+  scheduleSave();
+}
+function roomHasActiveResident(room){
+  return DB.residents.some(p => p.roomId===room.id && isCurrentlyResiding(p));
+}
+function branchActiveCarResidents(branchId){
+  const roomIds = new Set(DB.rooms.filter(r=>r.branchId===branchId).map(r=>r.id));
+  return DB.residents
+    .filter(p => roomIds.has(p.roomId) && p.carNumber && p.carNumber.trim() && isCurrentlyResiding(p))
+    .map(p => {
+      const room = DB.rooms.find(r=>r.id===p.roomId);
+      return { roomNumber: room ? room.number : '-', name: p.name || '(이름 미입력)', carNumber: p.carNumber };
+    });
+}
+function branchActiveCarCount(branchId, excludeResidentId){
+  const roomIds = new Set(DB.rooms.filter(r=>r.branchId===branchId).map(r=>r.id));
+  return DB.residents.filter(p =>
+    p.id !== excludeResidentId && roomIds.has(p.roomId) && p.carNumber && p.carNumber.trim() && isCurrentlyResiding(p)
+  ).length;
+}
+function effectiveRoomStatus(room){
+  // "이용중"/"사전판매중"은 오늘 날짜 기준 실제 거주 중인 입실자가 있는지로 자동 판정하며 수동 설정 불가.
+  // 재실 중에 관리자가 판매 상태를 "판매중"으로 지정해두면 "사전판매중"으로 표시됩니다.
+  if(roomHasActiveResident(room)){
+    return room.saleStatus === '판매중' ? '사전판매중' : '이용중';
+  }
+  return room.saleStatus;
+}
+
+function renderRoomCard(room, sectionStatus){
+  const card = document.createElement('div');
+  const effStatus = effectiveRoomStatus(room);
+  const meta = statusMeta(effStatus);
+  card.className = 'room-card';
+  card.id = 'room-card-' + room.id;
+  card.style.borderLeftColor = meta.fg;
+
+  const residents = DB.residents.filter(p=>p.roomId===room.id);
+  const draft = UI.draftResident[room.id] || null;
+  const cap = occupancyCapacity(room);
+  const atCapacity = (residents.length + (draft?1:0)) >= cap;
+  const roomEditOn = !!UI.roomEditMode[room.id];
+
+  const maintDateSuffix = room.maintenanceDate ? ` · ${room.maintenanceDate.slice(5)}` : '';
+  const headerRight = `
+    <span class="badge" style="background:${meta.bg};color:${meta.fg}">${effStatus}</span>
+    ${room.needsCleaning ? `<span class="badge" style="background:#FBEFD8;color:#8A5F14;">청소필요${maintDateSuffix}</span>` : ''}
+    ${room.needsRetouch ? `<span class="badge" style="background:#E3E8FD;color:#2E3F9E;">리터치필요${maintDateSuffix}</span>` : ''}
+  `;
+
+  const header = document.createElement('div');
+  header.className = 'rc-header';
+  header.innerHTML = `
+    <div class="rc-header-top">
+      <div class="rc-title"><span class="roomno">${esc(room.number)}</span><span class="roomtype">${esc(room.type)}</span></div>
+    </div>
+    <div class="rc-header-badges">${headerRight}</div>
+  `;
+  const historyOpen = !!UI.historyOpen[room.id];
+  const historyBtn = document.createElement('button');
+  historyBtn.className = 'history-btn' + (historyOpen ? ' active' : '');
+  historyBtn.textContent = '히스토리';
+  historyBtn.title = '퇴실한 입실자 이력 보기';
+  historyBtn.onclick = ()=>{ UI.historyOpen[room.id] = !historyOpen; render(); };
+  header.querySelector('.rc-title').appendChild(historyBtn);
+  const pencil = document.createElement('button');
+  pencil.className = 'iconbtn' + (roomEditOn ? ' active' : '');
+  pencil.innerHTML = roomEditOn ? '&#10003;' : '&#9998;';
+  pencil.title = roomEditOn ? '수정 완료' : '방 정보 수정';
+  pencil.onclick = ()=>{
+    if(!roomEditOn){ UI.roomSnapshots[room.id] = Object.assign({}, room); }
+    else { delete UI.roomSnapshots[room.id]; }
+    UI.roomEditMode[room.id] = !roomEditOn; render();
+  };
+  header.querySelector('.rc-header-top').appendChild(pencil);
+  card.appendChild(header);
+
+  if(historyOpen){
+    const hist = DB.residentHistory.filter(h=>h.roomId===room.id).sort((a,b)=> (b.moveOut||'').localeCompare(a.moveOut||''));
+    const histBox = document.createElement('div');
+    histBox.className = 'history-panel';
+    if(hist.length===0){
+      histBox.appendChild(el('div','history-empty','이 호실에는 아직 퇴실 이력이 없습니다.'));
+    } else {
+      hist.forEach(h=>{
+        const entry = document.createElement('div');
+        entry.className = 'history-entry';
+        const topRow = document.createElement('div');
+        topRow.className = 'history-top';
+        topRow.innerHTML = `<span class="nm">${esc(h.name)}</span><span class="ph">${esc(h.phone||'-')}</span>`;
+        const restoreBtn = document.createElement('button');
+        restoreBtn.className = 'btn small';
+        restoreBtn.textContent = '복원';
+        restoreBtn.title = '이 입실자 정보를 다시 입실자로 복원';
+        restoreBtn.onclick = ()=> restoreFromHistory(h);
+        const delHistBtn = document.createElement('button');
+        delHistBtn.className = 'iconbtn del';
+        delHistBtn.innerHTML = '&times;';
+        delHistBtn.title = '이 히스토리 항목 삭제';
+        delHistBtn.onclick = ()=>{
+          showConfirm(`"${h.name}" 님의 히스토리 기록을 완전히 삭제할까요? 이 작업은 되돌릴 수 없습니다.`, ()=>{
+            DB.residentHistory = DB.residentHistory.filter(x=>x.id!==h.id);
+            scheduleSave(); render();
+          });
+        };
+        topRow.appendChild(restoreBtn);
+        topRow.appendChild(delHistBtn);
+        entry.appendChild(topRow);
+        const periodRow = document.createElement('div');
+        periodRow.className = 'history-period';
+        periodRow.textContent = `${h.moveIn || '-'} ~ ${h.moveOut || '-'}`;
+        entry.appendChild(periodRow);
+        histBox.appendChild(entry);
+      });
+    }
+    card.appendChild(histBox);
+  }
+
+  if(!roomEditOn && room.note){
+    const chip = document.createElement('div');
+    chip.className = 'rc-note-chip';
+    chip.textContent = room.note;
+    chip.title = room.note;
+    chip.style.color = MEMO_COLORS[room.noteColor] || MEMO_COLORS.black;
+    if(room.noteBold) chip.style.fontWeight = '700';
+    card.appendChild(chip);
+  }
+
+  card.appendChild(document.createElement('hr')).className = 'rc-divider';
+
+  const body = document.createElement('div');
+  body.className = 'rc-body';
+
+  if(roomEditOn){
+    body.appendChild(renderRoomEditForm(room));
+    body.appendChild(document.createElement('hr')).className = 'rc-divider';
+    body.lastChild.style.margin = '4px 0 12px';
+  }
+
+  if(residents.length===0 && !draft){
+    const emptyRow = document.createElement('div');
+    emptyRow.className = 'empty-residents';
+    emptyRow.innerHTML = `<span class="msg">이용 중인 입실자가 없습니다.</span>`;
+    const addBtn = document.createElement('button');
+    addBtn.className = 'btn small primary pill';
+    addBtn.textContent = '+ 입실자 추가';
+    addBtn.onclick = ()=> addResidentToRoom(room);
+    emptyRow.appendChild(addBtn);
+    body.appendChild(emptyRow);
+  } else {
+    [...residents].sort((a,b)=> (a.slotIndex||0) - (b.slotIndex||0)).forEach((p, idx)=>{
+      const isSecondary = (p.slotIndex!=null ? p.slotIndex : idx) > 0;
+      if(UI.residentEditMode[p.id]) body.appendChild(renderResidentEditCard(p, isSecondary, false, room));
+      else body.appendChild(renderResidentView(p, room, isSecondary));
+    });
+    if(draft){
+      const isSecondary = (draft.slotIndex||0) > 0;
+      body.appendChild(renderResidentEditCard(draft, isSecondary, true, room));
+    }
+  }
+
+  card.appendChild(body);
+  return card;
+}
+
+function renderResidentView(p, room, isSecondary){
+  const block = document.createElement('div');
+  block.className = 'resident-block';
+
+  if(!isSecondary && (p.channel !== '독립생활' || isOverdue(p))){
+    const flagsLine = document.createElement('div');
+    flagsLine.className = 'resident-flags';
+    flagsLine.innerHTML = `
+      ${isOverdue(p) ? '<span class="badge overdue-badge">⚠ 연체</span>' : ''}
+      ${p.channel !== '독립생활' ? `<span class="badge" style="background:#F1EFE8;color:${channelColor(p.channel)}">${esc(p.channel)}</span>` : ''}
+    `;
+    block.appendChild(flagsLine);
+  }
+
+  const nameLine = document.createElement('div');
+  nameLine.className = 'resident-name-row';
+  const nm = document.createElement('span');
+  nm.className = 'nm';
+  nm.textContent = p.name || '(이름 미입력)';
+  const acts = document.createElement('div');
+  acts.className = 'acts';
+  if(!isSecondary && p.firstSaveDone){
+    const leaveBtn = document.createElement('button');
+    leaveBtn.className = 'btn small danger';
+    leaveBtn.textContent = '퇴실';
+    leaveBtn.title = '지금(오늘 날짜)로 즉시 퇴실 처리 (정보는 히스토리로 이동하고 자리가 비워집니다)';
+    leaveBtn.onclick = ()=>{
+      const today = todayISO();
+      showConfirm(`${p.name || '이 입실자'}를 오늘(${today}) 날짜로 퇴실 처리할까요?\n정보는 히스토리로 이동되고, 이 자리에 새 입실자를 등록할 수 있게 됩니다.`, ()=>{
+        moveResidentToHistory(p, today);
+        scheduleSave(); render();
+      });
+    };
+    acts.appendChild(leaveBtn);
+  }
+  const editBtn = document.createElement('button');
+  editBtn.className = 'iconbtn';
+  editBtn.innerHTML = '&#9998;';
+  editBtn.title = '입실자 정보 수정';
+  editBtn.onclick = ()=>{
+    UI.residentSnapshots[p.id] = Object.assign({}, p);
+    UI.residentEditMode[p.id] = true; render();
+  };
+  const delBtn = document.createElement('button');
+  delBtn.className = 'iconbtn del';
+  delBtn.innerHTML = '&times;';
+  delBtn.title = '입실자 삭제';
+  delBtn.onclick = ()=>{
+    showConfirm(`${p.name || '이 입실자'} 정보를 삭제할까요? 이 입실자의 모든 정보가 삭제됩니다.`, ()=>{
+      DB.residents = DB.residents.filter(x=>x.id!==p.id); scheduleSave(); render();
+    });
+  };
+  acts.appendChild(editBtn); acts.appendChild(delBtn);
+  nameLine.appendChild(nm); nameLine.appendChild(acts);
+  block.appendChild(nameLine);
+
+  if(!isSecondary){
+    const period = document.createElement('div');
+    period.className = 'resident-period';
+    period.textContent = `${p.moveIn || '-'} ~ ${p.moveOut || '미정'}`;
+    block.appendChild(period);
+
+    if(p.carNumber && p.carNumber.trim()){
+      const carLine = document.createElement('div');
+      carLine.className = 'resident-car';
+      carLine.textContent = `차량 ${p.carNumber}`;
+      block.appendChild(carLine);
+    }
+
+    if(p.memo){
+      const memo = document.createElement('div');
+      memo.className = 'resident-memo';
+      memo.textContent = p.memo;
+      memo.title = p.memo;
+      memo.style.color = MEMO_COLORS[p.memoColor] || MEMO_COLORS.black;
+      if(p.memoBold) memo.style.fontWeight = '700';
+      block.appendChild(memo);
+    }
+  }
+  return block;
+}
+
+/* ---------------- room info: edit mode (방 정보만) ---------------- */
+function renderRoomEditForm(room){
+  const wrap = document.createElement('div');
+
+  const roomLabel = document.createElement('div');
+  roomLabel.className = 'edit-section-label';
+  roomLabel.innerHTML = `<span>방 정보</span>`;
+  const btnGroup = document.createElement('div');
+  btnGroup.style.cssText = 'display:flex;gap:6px;';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'btn small';
+  cancelBtn.textContent = '취소';
+  cancelBtn.onclick = ()=>{
+    const snap = UI.roomSnapshots[room.id];
+    if(snap) Object.assign(room, snap);
+    delete UI.roomSnapshots[room.id];
+    UI.roomEditMode[room.id] = false;
+    scheduleSave(); render();
+  };
+  const delRoomBtn = document.createElement('button');
+  delRoomBtn.className = 'btn danger small';
+  delRoomBtn.textContent = '호실 삭제';
+  delRoomBtn.onclick = ()=>{
+    showConfirm(`${room.number}호를 삭제할까요? 입실자 정보도 함께 삭제됩니다.`, ()=>{
+      DB.residents = DB.residents.filter(p=>p.roomId!==room.id);
+      DB.rooms = DB.rooms.filter(r=>r.id!==room.id);
+      scheduleSave(); render();
+    });
+  };
+  btnGroup.appendChild(cancelBtn); btnGroup.appendChild(delRoomBtn);
+  roomLabel.appendChild(btnGroup);
+  wrap.appendChild(roomLabel);
+
+  const grid = document.createElement('div');
+  grid.className = 'edit-grid';
+  grid.innerHTML = `
+    <div><label class="field-label">호실 번호</label><input type="text" data-f="number" value="${esc(room.number)}"></div>
+    <div><label class="field-label">호실 타입</label>
+      <select data-f="type">${ROOM_TYPE_LIST.map(t=>`<option ${t===room.type?'selected':''}>${t}</option>`).join('')}</select></div>
+    <div><label class="field-label">인실 구분</label>
+      <select data-f="occupancy">${OCCUPANCY_LIST.map(t=>`<option ${t===(room.occupancy||'2인실')?'selected':''}>${t}</option>`).join('')}</select></div>
+    <div>
+      <label class="field-label">판매 상태</label>
+      <select data-f="saleStatus">${STATUS_LIST_MANUAL.map(s=>`<option ${s===room.saleStatus?'selected':''}>${s}</option>`).join('')}</select>
+    </div>
+    <div><label class="field-label">정상 입실료(월)</label><input type="number" data-f="price" min="0" step="10000" value="${room.price||0}"></div>
+  `;
+  grid.querySelector('[data-f="type"]').addEventListener('change', (e)=>{ room.type = e.target.value; scheduleSave(); render(); });
+  grid.querySelector('[data-f="occupancy"]').addEventListener('change', (e)=>{
+    const newCap = e.target.value === '1인실' ? 1 : 2;
+    const currentCount = DB.residents.filter(p=>p.roomId===room.id).length;
+    if(currentCount > newCap){
+      showAlert(`현재 입실자가 ${currentCount}명 등록되어 있어 1인실로 바꿀 수 없습니다. 먼저 입실자를 정리해주세요.`);
+      e.target.value = room.occupancy || '2인실';
+      return;
+    }
+    room.occupancy = e.target.value; scheduleSave(); render();
+  });
+  const saleStatusSel = grid.querySelector('[data-f="saleStatus"]');
+  if(saleStatusSel) saleStatusSel.addEventListener('change', (e)=>{ room.saleStatus = e.target.value; scheduleSave(); render(); });
+  grid.querySelector('[data-f="price"]').addEventListener('change', (e)=>{ room.price = Number(e.target.value)||0; scheduleSave(); render(); });
+  const numberInput = grid.querySelector('[data-f="number"]');
+  numberInput.addEventListener('change', ()=>{
+    const val = numberInput.value.trim();
+    if(!val){ showAlert('호실 번호는 비워둘 수 없습니다.'); numberInput.value = room.number; return; }
+    if(roomNumberTaken(room.branchId, val, room.id)){
+      showAlert(`이 지점에는 이미 "${val}" 호실이 있습니다.`);
+      numberInput.value = room.number; return;
+    }
+    room.number = val; scheduleSave(); render();
+  });
+  wrap.appendChild(grid);
+
+  const chipRow = document.createElement('div');
+  chipRow.style.marginBottom = '10px';
+  chipRow.innerHTML = `<label class="field-label">청소 / 리터치</label>`;
+  const chips = document.createElement('div');
+  chips.className = 'maint-chips';
+  const cleanChip = document.createElement('span');
+  cleanChip.className = 'flagchip clean' + (room.needsCleaning ? ' on' : '');
+  cleanChip.textContent = '청소필요';
+  cleanChip.onclick = ()=>{
+    room.needsCleaning = !room.needsCleaning;
+    if(room.needsCleaning){
+      room.needsRetouch=false;
+      if(!room.maintenanceDate) room.maintenanceDate = nextMonWedFri(todayISO());
+    } else {
+      room.maintenanceDate='';
+    }
+    scheduleSave(); render();
+  };
+  const retouchChip = document.createElement('span');
+  retouchChip.className = 'flagchip retouch' + (room.needsRetouch ? ' on' : '');
+  retouchChip.textContent = '리터치필요';
+  retouchChip.onclick = ()=>{
+    room.needsRetouch = !room.needsRetouch;
+    if(room.needsRetouch){
+      room.needsCleaning=false;
+      if(!room.maintenanceDate) room.maintenanceDate = nextMonWedFri(todayISO());
+    } else {
+      room.maintenanceDate='';
+    }
+    scheduleSave(); render();
+  };
+  chips.appendChild(cleanChip); chips.appendChild(retouchChip);
+  chipRow.appendChild(chips);
+  wrap.appendChild(chipRow);
+
+  if(room.needsCleaning || room.needsRetouch){
+    const dateWrap = document.createElement('div');
+    dateWrap.style.marginBottom = '10px';
+    const dateInput = document.createElement('input');
+    dateInput.type = 'date';
+    dateInput.value = room.maintenanceDate || '';
+    dateInput.addEventListener('change', ()=>{ room.maintenanceDate = dateInput.value; scheduleSave(); render(); });
+    dateWrap.appendChild(labeled(room.needsCleaning ? '청소 예정일' : '리터치 예정일', dateInput));
+    wrap.appendChild(dateWrap);
+  }
+
+  const noteWrap = document.createElement('div');
+  noteWrap.style.marginBottom = '4px';
+  noteWrap.innerHTML = `<label class="field-label">호실 특이사항</label>`;
+  const noteArea = document.createElement('textarea');
+  noteArea.value = room.note;
+  noteArea.placeholder = '예: 204호 정독립 이동 예정';
+  noteArea.addEventListener('input', ()=>{ room.note = noteArea.value; scheduleSave(); });
+  noteWrap.appendChild(noteArea);
+  noteWrap.appendChild(renderMemoStyleControls(room, 'noteColor', 'noteBold'));
+  wrap.appendChild(noteWrap);
+
+  return wrap;
+}
+
+function wouldExceedParking(p, candidateMoveIn, candidateMoveOut){
+  if(!p.carNumber || !p.carNumber.trim()) return null;
+  const room = DB.rooms.find(r=>r.id===p.roomId);
+  const branch = room ? DB.branches.find(b=>b.id===room.branchId) : null;
+  if(!branch) return null;
+  if(!isCurrentlyResiding({ moveIn: candidateMoveIn, moveOut: candidateMoveOut })) return null;
+  const cap = branch.parkingCapacity || 0;
+  const others = branchActiveCarCount(branch.id, p.id);
+  const projected = others + 1;
+  if(projected > cap) return { branch, cap, others, projected };
+  return null;
+}
+
+function renderResidentEditCard(p, isSecondary, isDraft, room){
+  const card = document.createElement('div');
+  card.className = 'resident-edit-card';
+  const maybeSave = ()=>{ if(!isDraft) scheduleSave(); };
+
+  const top = document.createElement('div');
+  top.className = 'redit-top';
+  top.innerHTML = `<span class="redit-title">${isSecondary ? '2번째 입실자' : '입실자 정보'}</span>`;
+  const acts = document.createElement('div');
+  acts.style.cssText = 'display:flex;gap:5px;';
+  const doneBtn = document.createElement('button');
+  doneBtn.className = 'iconbtn active'; doneBtn.innerHTML = '&#10003;'; doneBtn.title = '수정 완료';
+  doneBtn.onclick = ()=>{
+    const missing = residentMissingFields(p, isSecondary);
+    if(missing.length){
+      showAlert(`필수 항목이 비어 있습니다: ${missing.join(', ')}\n입력을 완료한 뒤 다시 시도해주세요.`);
+      return;
+    }
+    const violation = wouldExceedParking(p, p.moveIn, p.moveOut);
+    if(violation){
+      showAlert(`"${violation.branch.name}" 지점의 주차 가능 대수(${violation.cap}대)를 초과합니다.\n(현재 이용중 ${violation.others}대 + 이 입실자 1대 = ${violation.projected}대)\n\n차량번호를 비우거나 지점의 주차 가능 대수를 먼저 늘려주세요.`);
+      return;
+    }
+    p.firstSaveDone = true;
+    if(isDraft){
+      p.originalMoveIn = p.moveIn;
+      DB.residents.push(p);
+      delete UI.draftResident[p.roomId];
+    } else {
+      delete UI.residentSnapshots[p.id];
+      UI.residentEditMode[p.id] = false;
+    }
+    scheduleSave(); render();
+  };
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'iconbtn'; cancelBtn.innerHTML = '&#8634;'; cancelBtn.title = '취소';
+  cancelBtn.onclick = ()=>{
+    if(isDraft){
+      // 아직 저장된 적 없는 초안이므로 그냥 버립니다 (DB에는 존재하지 않음)
+      delete UI.draftResident[p.roomId];
+      render();
+      return;
+    }
+    const snap = UI.residentSnapshots[p.id];
+    if(snap) Object.assign(p, snap);
+    delete UI.residentSnapshots[p.id];
+    UI.residentEditMode[p.id] = false;
+    scheduleSave(); render();
+  };
+  const delBtn = document.createElement('button');
+  delBtn.className = 'iconbtn del'; delBtn.innerHTML = '&times;'; delBtn.title = '입실자 삭제';
+  delBtn.onclick = ()=>{
+    if(isDraft){
+      delete UI.draftResident[p.roomId];
+      render();
+      return;
+    }
+    showConfirm(`${p.name || '이 입실자'} 정보를 삭제할까요?`, ()=>{
+      delete UI.residentSnapshots[p.id];
+      DB.residents = DB.residents.filter(x=>x.id!==p.id); scheduleSave(); render();
+    });
+  };
+  acts.appendChild(cancelBtn); acts.appendChild(doneBtn); acts.appendChild(delBtn);
+  top.appendChild(acts);
+  card.appendChild(top);
+
+  const nameInput = document.createElement('input');
+  nameInput.type = 'text'; nameInput.placeholder = '홍길동'; nameInput.value = p.name;
+  if(!p.name || !p.name.trim()) nameInput.classList.add('invalid');
+  nameInput.addEventListener('input', ()=>{ p.name = nameInput.value; maybeSave(); nameInput.classList.toggle('invalid', !nameInput.value.trim()); });
+  card.appendChild(fullRow(labeledReq('이름', nameInput)));
+
+  const phoneInput = document.createElement('input');
+  phoneInput.type = 'tel'; phoneInput.placeholder = '010-0000-0000'; phoneInput.value = p.phone;
+  if(!p.phone || !p.phone.trim()) phoneInput.classList.add('invalid');
+  phoneInput.addEventListener('input', ()=>{ p.phone = phoneInput.value; maybeSave(); phoneInput.classList.toggle('invalid', !phoneInput.value.trim()); });
+  card.appendChild(fullRow(labeledReq('연락처', phoneInput)));
+
+  if(isSecondary){
+    setTimeout(()=>{ if(!p.name) nameInput.focus(); }, 0);
+    return card;
+  }
+
+  const chSel = document.createElement('select');
+  DB.channelList.forEach(c=>{ const o=document.createElement('option'); o.textContent=c; o.selected=c===p.channel; chSel.appendChild(o); });
+  chSel.addEventListener('change', ()=>{ p.channel = chSel.value; maybeSave(); render(); });
+  card.appendChild(fullRow(labeled('유입채널', chSel)));
+
+  const branchForCar = room ? DB.branches.find(b=>b.id===room.branchId) : null;
+  const parkingAvailable = !branchForCar || (branchForCar.parkingCapacity||0) > 0;
+  if(parkingAvailable){
+    const carInput = document.createElement('input');
+    carInput.type = 'text'; carInput.placeholder = '12가3456'; carInput.value = p.carNumber || '';
+    carInput.addEventListener('change', ()=>{
+      const newVal = carInput.value.trim();
+      const branch = branchForCar;
+      if(newVal && branch && isCurrentlyResiding(p)){
+        const cap = branch.parkingCapacity || 0;
+        const others = branchActiveCarCount(branch.id, p.id);
+        const projected = others + 1;
+        if(projected > cap){
+          showAlert(`"${branch.name}" 지점의 주차 가능 대수(${cap}대)를 초과합니다.\n(현재 이용중 ${others}대 + 이 입실자 1대 = ${projected}대)\n\n차량번호를 비우거나, 지점 정보에서 주차 가능 대수를 먼저 늘려주세요.`);
+          carInput.value = p.carNumber || '';
+          return;
+        }
+      }
+      p.carNumber = carInput.value;
+      maybeSave();
+    });
+    card.appendChild(fullRow(labeled('차량 번호 (선택)', carInput)));
+  }
+
+  const inDateRow = document.createElement('div');
+  inDateRow.className = 'redit-inline-row';
+  const inDate = document.createElement('input'); inDate.type='date'; inDate.value = p.moveIn || '';
+  if(!p.moveIn) inDate.classList.add('invalid');
+  inDate.addEventListener('change', ()=>{
+    const violation = wouldExceedParking(p, inDate.value, p.moveOut);
+    if(violation){
+      showAlert(`"${violation.branch.name}" 지점의 주차 가능 대수(${violation.cap}대)를 초과합니다.\n(현재 이용중 ${violation.others}대 + 이 입실자 1대 = ${violation.projected}대)\n\n입실일을 다시 확인하거나 차량번호를 비운 뒤 저장해주세요.`);
+      inDate.value = p.moveIn || '';
+      return;
+    }
+    p.moveIn = inDate.value; p.resStatus = computeResStatus(p); maybeSave(); render();
+  });
+  inDateRow.appendChild(labeledReq('입실일', inDate));
+  if(p.firstSaveDone){
+    const extendBtn = document.createElement('button');
+    extendBtn.className = 'btn small';
+    extendBtn.textContent = '연장';
+    extendBtn.title = '퇴실예정일 기준 1개월 연장';
+    extendBtn.onclick = ()=>{
+      const newMoveOut = addOneMonth(p.moveOut || p.moveIn || todayISO());
+      const violation = wouldExceedParking(p, p.moveIn, newMoveOut);
+      if(violation){
+        showAlert(`"${violation.branch.name}" 지점의 주차 가능 대수(${violation.cap}대)를 초과합니다.\n(현재 이용중 ${violation.others}대 + 이 입실자 1대 = ${violation.projected}대)\n\n차량번호를 비우거나 지점의 주차 가능 대수를 먼저 늘려주세요.`);
+        return;
+      }
+      p.moveOut = newMoveOut;
+      p.contractType = '연장';
+      maybeSave(); render();
+    };
+    const extendWrap = document.createElement('div');
+    extendWrap.style.cssText = 'display:flex;align-items:flex-end;padding-bottom:1px;';
+    extendWrap.appendChild(extendBtn);
+    inDateRow.appendChild(extendWrap);
+  }
+  card.appendChild(inDateRow);
+
+  const outDate = document.createElement('input'); outDate.type='date'; outDate.value = p.moveOut || '';
+  if(!p.moveOut) outDate.classList.add('invalid');
+  outDate.addEventListener('change', ()=>{
+    const violation = wouldExceedParking(p, p.moveIn, outDate.value);
+    if(violation){
+      showAlert(`"${violation.branch.name}" 지점의 주차 가능 대수(${violation.cap}대)를 초과합니다.\n(현재 이용중 ${violation.others}대 + 이 입실자 1대 = ${violation.projected}대)\n\n퇴실예정일을 다시 확인하거나 차량번호를 비운 뒤 저장해주세요.`);
+      outDate.value = p.moveOut || '';
+      return;
+    }
+    p.moveOut = outDate.value; maybeSave(); render();
+  });
+
+  const outDateRow = document.createElement('div');
+  outDateRow.className = 'redit-inline-row';
+  outDateRow.appendChild(labeledReq('퇴실(예정)일', outDate));
+  if(p.firstSaveDone){
+    const btnCol = document.createElement('div');
+    btnCol.style.cssText = 'display:flex;gap:6px;align-items:flex-end;padding-bottom:1px;';
+    const scheduledBtn = document.createElement('button');
+    scheduledBtn.className = 'btn small' + (p.scheduledToLeave ? ' primary' : '');
+    scheduledBtn.textContent = '퇴실예정';
+    scheduledBtn.title = '체크해두면 퇴실예정일이 지났을 때 자동으로 퇴실 처리됩니다';
+    scheduledBtn.onclick = ()=>{ p.scheduledToLeave = !p.scheduledToLeave; maybeSave(); render(); };
+    const leaveBtn = document.createElement('button');
+    leaveBtn.className = 'btn small danger';
+    leaveBtn.textContent = '퇴실';
+    leaveBtn.title = '지금(오늘 날짜)로 즉시 퇴실 처리 (정보는 히스토리로 이동하고 자리가 비워집니다)';
+    leaveBtn.onclick = ()=>{
+      const today = todayISO();
+      showConfirm(`${p.name || '이 입실자'}를 오늘(${today}) 날짜로 퇴실 처리할까요?\n정보는 히스토리로 이동되고, 이 자리에 새 입실자를 등록할 수 있게 됩니다.`, ()=>{
+        moveResidentToHistory(p, today);
+        scheduleSave(); render();
+      });
+    };
+    btnCol.appendChild(scheduledBtn); btnCol.appendChild(leaveBtn);
+    outDateRow.appendChild(btnCol);
+  }
+  card.appendChild(outDateRow);
+
+  const memo = document.createElement('textarea');
+  memo.placeholder = '입실자 메모 (실거주자 정보, 결제방식 등)';
+  memo.value = p.memo;
+  memo.style.marginTop = '4px';
+  memo.addEventListener('input', ()=>{ p.memo = memo.value; maybeSave(); });
+  card.appendChild(memo);
+  card.appendChild(renderMemoStyleControls(p, 'memoColor', 'memoBold'));
+
+  if(room && !isDraft){
+    const cap = occupancyCapacity(room);
+    const currentTotal = DB.residents.filter(x=>x.roomId===room.id).length + (UI.draftResident[room.id] ? 1 : 0);
+    if(currentTotal < cap){
+      const addRow = document.createElement('div');
+      addRow.style.cssText = 'margin-top:10px; padding-top:10px; border-top:1px dashed var(--line);';
+      const addBtn = document.createElement('button');
+      addBtn.className = 'btn small primary';
+      addBtn.textContent = '+ 2번째 입실자 추가';
+      addBtn.onclick = ()=> addResidentToRoom(room);
+      addRow.appendChild(addBtn);
+      card.appendChild(addRow);
+    }
+  }
+
+  setTimeout(()=>{ if(!p.name) nameInput.focus(); }, 0);
+  return card;
+}
+
+const MEMO_COLORS = { black:'#1E2A32', red:'#C0473F', blue:'#2F6FED' };
+function renderMemoStyleControls(obj, colorField, boldField){
+  const row = document.createElement('div');
+  row.className = 'memo-style-row';
+  Object.keys(MEMO_COLORS).forEach(key=>{
+    const sw = document.createElement('button');
+    sw.type = 'button';
+    sw.className = 'color-swatch' + ((obj[colorField]||'black')===key ? ' active' : '');
+    sw.style.background = MEMO_COLORS[key];
+    sw.title = key==='black' ? '검정' : (key==='red' ? '빨강' : '파랑');
+    sw.onclick = ()=>{ obj[colorField] = key; scheduleSave(); render(); };
+    row.appendChild(sw);
+  });
+  const boldBtn = document.createElement('button');
+  boldBtn.type = 'button';
+  boldBtn.className = 'bold-toggle-btn' + (obj[boldField] ? ' active' : '');
+  boldBtn.textContent = 'B';
+  boldBtn.title = '굵게';
+  boldBtn.onclick = ()=>{ obj[boldField] = !obj[boldField]; scheduleSave(); render(); };
+  row.appendChild(boldBtn);
+  return row;
+}
+
+function labeled(text, elm){
+  const wrap = document.createElement('div');
+  const lbl = document.createElement('label');
+  lbl.className = 'field-label'; lbl.textContent = text;
+  wrap.appendChild(lbl); wrap.appendChild(elm);
+  return wrap;
+}
+function labeledReq(text, elm){
+  const wrap = document.createElement('div');
+  const lbl = document.createElement('label');
+  lbl.className = 'field-label'; lbl.innerHTML = `${text} <span class="req">*</span>`;
+  wrap.appendChild(lbl); wrap.appendChild(elm);
+  return wrap;
+}
+function fullRow(elm){
+  const wrap = document.createElement('div');
+  wrap.style.marginBottom = '8px';
+  wrap.appendChild(elm);
+  return wrap;
+}
+function residentMissingFields(p, isSecondary){
+  const missing = [];
+  if(!p.name || !p.name.trim()) missing.push('이름');
+  if(!p.phone || !p.phone.trim()) missing.push('연락처');
+  if(!isSecondary){
+    if(!p.moveIn) missing.push('입실일');
+    if(!p.moveOut) missing.push('퇴실(예정)일');
+  }
+  return missing;
+}
+function el(tag, cls, text, style){
+  const e = document.createElement(tag);
+  if(cls) e.className = cls;
+  if(text!=null) e.textContent = text;
+  if(style) e.style.cssText = style;
+  return e;
+}
+
+/* ---------------- timeline section ---------------- */
+function renderTimelineSection(branch){
+  const wrap = document.createElement('div');
+  const now = new Date();
+  if(UI.tlYear==null){ UI.tlYear = now.getFullYear(); UI.tlMonth = now.getMonth(); }
+
+  const toolbar = document.createElement('div');
+  toolbar.className = 'tl-toolbar';
+  toolbar.innerHTML = `
+    <div class="tl-month-nav">
+      <button class="btn small" id="tlPrev">◀</button>
+      <div class="m-label">${UI.tlYear}년 ${UI.tlMonth+1}월</div>
+      <button class="btn small" id="tlNext">▶</button>
+    </div>
+    <div class="sub" style="font-size:11.5px;color:var(--ink-soft);">막대 = 입실기간 · 라벨만 있는 행은 현재 입실자 없음</div>
+  `;
+  wrap.appendChild(toolbar);
+
+  const monthStart = new Date(UI.tlYear, UI.tlMonth, 1);
+  const daysInMonth = new Date(UI.tlYear, UI.tlMonth+1, 0).getDate();
+
+  const tlWrap = document.createElement('div');
+  tlWrap.className = 'tl-wrap';
+  const gridWrap = document.createElement('div');
+  gridWrap.className = 'tl-grid';
+  gridWrap.style.gridTemplateColumns = '1fr';
+
+  const headRow = document.createElement('div');
+  headRow.className = 'tl-headrow';
+  const headLabel = document.createElement('div');
+  headLabel.className = 'tl-label'; headLabel.style.fontWeight = '700'; headLabel.textContent = '호실 · 입실자';
+  headRow.appendChild(headLabel);
+  const headDays = document.createElement('div');
+  headDays.className = 'tl-days';
+  headDays.style.gridTemplateColumns = `repeat(${daysInMonth}, minmax(24px,1fr))`;
+  for(let d=1; d<=daysInMonth; d++){
+    const dow = new Date(UI.tlYear, UI.tlMonth, d).getDay();
+    const cell = document.createElement('div');
+    cell.className = 'tl-daycell' + ((dow===0||dow===6) ? ' weekend' : '');
+    cell.textContent = d;
+    headDays.appendChild(cell);
+  }
+  headRow.appendChild(headDays);
+  gridWrap.appendChild(headRow);
+
+  const rooms = DB.rooms.filter(r=>r.branchId===branch.id)
+    .sort((a,b)=> a.number.localeCompare(b.number,'ko',{numeric:true}));
+
+  if(rooms.length===0){
+    const none = document.createElement('div');
+    none.className = 'empty-hint'; none.style.margin = '16px';
+    none.textContent = '등록된 호실이 없습니다. "호실 현황" 탭에서 먼저 호실을 추가하세요.';
+    gridWrap.appendChild(none);
+  }
+
+  rooms.forEach(room=>{
+    const residents = DB.residents.filter(p=>p.roomId===room.id);
+    const rowsData = residents.length ? residents : [null];
+    rowsData.forEach(p=>{
+      const row = document.createElement('div');
+      row.className = 'tl-row';
+      const lbl = document.createElement('div');
+      lbl.className = 'tl-label';
+      lbl.innerHTML = p
+        ? `<span class="rm">${esc(room.number)}</span><span class="nm">${esc(p.name || '이름 미입력')} · ${p.channel}</span>`
+        : `<span class="rm">${esc(room.number)}</span><span class="nm" style="color:var(--st-vacant)">${room.saleStatus}</span>`;
+      row.appendChild(lbl);
+
+      const days = document.createElement('div');
+      days.className = 'tl-days';
+      days.style.gridTemplateColumns = `repeat(${daysInMonth}, minmax(24px,1fr))`;
+      for(let d=1; d<=daysInMonth; d++){
+        const dow = new Date(UI.tlYear, UI.tlMonth, d).getDay();
+        const cell = document.createElement('div');
+        cell.className = 'tl-daycell' + ((dow===0||dow===6) ? ' weekend' : '');
+        days.appendChild(cell);
+      }
+      if(p && p.moveIn){
+        const bar = buildBar(p, monthStart, daysInMonth);
+        if(bar) days.appendChild(bar);
+      }
+      row.appendChild(days);
+      gridWrap.appendChild(row);
+    });
+  });
+
+  tlWrap.appendChild(gridWrap);
+  wrap.appendChild(tlWrap);
+
+  setTimeout(()=>{
+    const prevBtn = document.getElementById('tlPrev');
+    const nextBtn = document.getElementById('tlNext');
+    if(prevBtn) prevBtn.onclick = ()=>{ UI.tlMonth--; if(UI.tlMonth<0){ UI.tlMonth=11; UI.tlYear--; } render(); };
+    if(nextBtn) nextBtn.onclick = ()=>{ UI.tlMonth++; if(UI.tlMonth>11){ UI.tlMonth=0; UI.tlYear++; } render(); };
+  },0);
+
+  return wrap;
+}
+
+function buildBar(p, monthStart, daysInMonth){
+  const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth(), daysInMonth);
+  const inD = new Date(p.moveIn);
+  const outD = p.moveOut ? new Date(p.moveOut) : new Date(monthStart.getFullYear(), monthStart.getMonth()+2, 0);
+  if(outD < monthStart || inD > monthEnd) return null;
+  const clampIn = inD < monthStart ? monthStart : inD;
+  const clampOut = outD > monthEnd ? monthEnd : outD;
+  const startDay = clampIn.getDate();
+  const endDay = clampOut.getDate();
+  const leftPct = ((startDay-1)/daysInMonth)*100;
+  const widthPct = Math.max(((endDay-startDay+1)/daysInMonth)*100, (1/daysInMonth)*100);
+  const bar = document.createElement('div');
+  bar.className = 'tl-bar';
+  bar.style.left = leftPct + '%';
+  bar.style.width = widthPct + '%';
+  bar.style.background = channelColor(p.channel);
+  const nameText = esc(p.name || p.resStatus);
+  const memoText = p.memo ? ` <span class="tl-bar-memo">${esc(p.memo)}</span>` : '';
+  bar.innerHTML = `<span class="tl-bar-name">${nameText}</span>${memoText}`;
+  bar.title = `${p.name || '이름 미입력'} · ${p.channel} · ${p.moveIn} ~ ${p.moveOut || '미정'}${p.memo ? ' · ' + p.memo : ''}`;
+  return bar;
+}
+
+/* ---------------- bulk upload (excel) ---------------- */
+function renderBulkUploadPanel(){
+  const box = document.createElement('div');
+  box.className = 'stat-section';
+  box.innerHTML = `
+    <h3>지점 · 호실 · 입실자 엑셀 일괄 업로드</h3>
+    <div style="font-size:12px;color:var(--ink-soft);margin-bottom:12px;">
+      양식을 다운로드해 "지점", "호실", "입실자" 시트를 채운 뒤 업로드하세요. 이미 있는 지점명/호실번호는 정보가 갱신되고, 입실자는 매번 새로 추가됩니다.
+    </div>
+  `;
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex; gap:10px; align-items:center;';
+  const downloadBtn = document.createElement('button');
+  downloadBtn.className = 'btn';
+  downloadBtn.textContent = '⬇ 양식 다운로드';
+  downloadBtn.onclick = downloadBulkTemplate;
+  const uploadBtn = document.createElement('button');
+  uploadBtn.className = 'btn primary';
+  uploadBtn.textContent = '⬆ 엑셀 업로드';
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = '.xlsx,.xls';
+  fileInput.style.display = 'none';
+  uploadBtn.onclick = ()=> fileInput.click();
+  fileInput.addEventListener('change', ()=>{
+    if(fileInput.files && fileInput.files[0]){
+      handleBulkUploadFile(fileInput.files[0]);
+      fileInput.value = '';
+    }
+  });
+  btnRow.appendChild(downloadBtn); btnRow.appendChild(uploadBtn); btnRow.appendChild(fileInput);
+  if(lastImportSnapshot){
+    const undoBtn = document.createElement('button');
+    undoBtn.className = 'btn danger';
+    undoBtn.textContent = '↩ 업로드 되돌리기';
+    undoBtn.title = '가장 최근 엑셀 업로드 이전 상태로 되돌립니다';
+    undoBtn.onclick = undoLastImport;
+    btnRow.appendChild(undoBtn);
+  }
+  box.appendChild(btnRow);
+  return box;
+}
+
+function downloadBulkTemplate(){
+  if(typeof XLSX === 'undefined'){ showAlert('엑셀 라이브러리를 불러오지 못했습니다. 네트워크 연결을 확인해주세요.'); return; }
+  const wb = XLSX.utils.book_new();
+
+  const guideRows = [
+    ['MONTHLIV 일괄 업로드 양식 안내'],
+    [''],
+    ['1. "지점", "호실", "입실자" 시트를 채워주세요. 예시 행은 지우고 실제 데이터로 바꿔주세요.'],
+    ['2. "지점명"은 지점/호실/입실자 시트에서 정확히 동일해야 서로 연결됩니다.'],
+    ['3. "호실번호"는 호실/입실자 시트에서 정확히 동일해야 서로 연결됩니다.'],
+    ['4. 옵션값'],
+    ['   - 타입: 블레스 / 그레이스 / 트리니티 / 기타'],
+    ['   - 인실구분: 1인실 / 2인실'],
+    ['   - 판매상태: 공실 / 판매중 / 퇴실예정 / 판매보류  (이용중은 재실 입실자 유무로 자동 판정되어 직접 입력할 수 없습니다)'],
+    ['   - 청소필요 / 리터치필요: O 또는 X (둘 다 O면 청소필요가 우선 적용됩니다)'],
+    ['   - 유입채널: 독립생활 / 삼삼엠투 / 리브애니 / 기타'],
+    ['   - 순번: 1(주 입실자) 또는 2(2인실의 두 번째 입실자, 2인실에서만 가능하며 이름/연락처만 반영됩니다)'],
+    ['5. 날짜는 YYYY-MM-DD 형식으로 입력하세요. (예: 2026-08-01) 주 입실자는 입실일/퇴실예정일이 필수입니다.'],
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(guideRows), '안내');
+
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([
+    { 지점명:'먼슬리브 예시지점', 주차가능대수:2, 주차메모:'건물 뒤 2대 가능', 특이사항메모:'' }
+  ]), '지점');
+
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([
+    { 지점명:'먼슬리브 예시지점', 호실번호:'101', 타입:'블레스', 인실구분:'2인실', 판매상태:'공실', 정상입실료:450000, 청소필요:'X', 리터치필요:'X', 호실특이사항:'' }
+  ]), '호실');
+
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([
+    { 지점명:'먼슬리브 예시지점', 호실번호:'101', 순번:1, 이름:'홍길동', 연락처:'010-1234-5678', 유입채널:'독립생활', 입실일:'2026-08-01', 퇴실예정일:'2026-09-01', 차량번호:'', 메모:'' }
+  ]), '입실자');
+
+  XLSX.writeFile(wb, 'monthliv_bulk_upload_template.xlsx');
+}
+
+function toISODateStr(v){
+  if(v == null || v==='') return '';
+  if(v instanceof Date){
+    const y = v.getUTCFullYear(), m = String(v.getUTCMonth()+1).padStart(2,'0'), d = String(v.getUTCDate()).padStart(2,'0');
+    return `${y}-${m}-${d}`;
+  }
+  if(typeof v === 'number'){
+    // 엑셀 날짜 직렬번호(문자열이 아닌 순수 숫자로 남은 경우) 보정
+    const parsed = XLSX.SSF && XLSX.SSF.parse_date_code ? XLSX.SSF.parse_date_code(v) : null;
+    if(parsed){
+      const y = parsed.y, m = String(parsed.m).padStart(2,'0'), d = String(parsed.d).padStart(2,'0');
+      return `${y}-${m}-${d}`;
+    }
+  }
+  return String(v).trim();
+}
+
+function sheetRows(wb, name){
+  const sheet = wb.Sheets[name];
+  if(!sheet) return [];
+  return XLSX.utils.sheet_to_json(sheet, { defval:'' });
+}
+
+let lastImportSnapshot = null;
+function handleBulkUploadFile(file){
+  const reader = new FileReader();
+  reader.onload = (e)=>{
+    try{
+      const wb = XLSX.read(new Uint8Array(e.target.result), { type:'array', cellDates:true });
+      lastImportSnapshot = JSON.parse(JSON.stringify({
+        branches: DB.branches, rooms: DB.rooms, residents: DB.residents, residentHistory: DB.residentHistory
+      }));
+      const result = importFromWorkbook(wb);
+      scheduleSave(); render();
+      showAlert(buildImportSummary(result) + '\n\n잘못 업로드했다면 이 화면의 "업로드 되돌리기" 버튼으로 방금 업로드 이전 상태로 되돌릴 수 있어요.');
+    }catch(err){
+      console.error(err);
+      showAlert('업로드 처리 중 오류가 발생했습니다: ' + err.message);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+function undoLastImport(){
+  if(!lastImportSnapshot) return;
+  showConfirm('가장 최근 엑셀 업로드를 취소하고, 업로드 이전 상태로 되돌릴까요?', ()=>{
+    DB.branches = lastImportSnapshot.branches;
+    DB.rooms = lastImportSnapshot.rooms;
+    DB.residents = lastImportSnapshot.residents;
+    DB.residentHistory = lastImportSnapshot.residentHistory;
+    lastImportSnapshot = null;
+    scheduleSave(); render();
+  });
+}
+
+function importFromWorkbook(wb){
+  const result = { branchesCreated:0, branchesUpdated:0, roomsCreated:0, roomsUpdated:0, residentsAdded:0, warnings:[] };
+  // 눈에 보이지 않는 zero-width space 등의 문자 때문에 이름이 서로 달라 보이는 문제를 막기 위해 정리합니다.
+  const cleanKey = (s)=> String(s||'').replace(/[\u200B-\u200D\uFEFF]/g,'').trim();
+  const findBranch = (name)=> DB.branches.find(b=> cleanKey(b.name).toLowerCase() === cleanKey(name).toLowerCase());
+
+  sheetRows(wb, '지점').forEach(row=>{
+    const name = cleanKey(row['지점명']);
+    if(!name) return;
+    const cap = Math.max(0, Math.min(10, parseInt(row['주차가능대수'],10) || 0));
+    let branch = findBranch(name);
+    if(branch){
+      branch.parkingCapacity = cap;
+      if(String(row['주차메모']||'').trim()) branch.parkingNote = String(row['주차메모']);
+      if(String(row['특이사항메모']||'').trim()) branch.memo = String(row['특이사항메모']);
+      result.branchesUpdated++;
+    } else {
+      DB.branches.push({ id: uid('b'), name, parkingNote: String(row['주차메모']||''), parkingCapacity: cap, memo: String(row['특이사항메모']||'') });
+      result.branchesCreated++;
+    }
+  });
+
+  sheetRows(wb, '호실').forEach((row, idx)=>{
+    const branchName = cleanKey(row['지점명']);
+    const number = cleanKey(row['호실번호']);
+    if(!branchName || !number){ result.warnings.push(`[호실 ${idx+2}행] 지점명 또는 호실번호 누락 - 건너뜀`); return; }
+    const branch = findBranch(branchName);
+    if(!branch){ result.warnings.push(`[호실 ${idx+2}행] "${branchName}" 지점을 찾을 수 없어 건너뜀`); return; }
+    const type = ROOM_TYPE_LIST.includes(row['타입']) ? row['타입'] : '기타';
+    const occupancy = OCCUPANCY_LIST.includes(row['인실구분']) ? row['인실구분'] : '2인실';
+    const rawStatus = String(row['판매상태']||'').trim();
+    const saleStatus = STATUS_LIST_MANUAL.includes(rawStatus) ? rawStatus : '공실';
+    const price = Number(row['정상입실료']) || 0;
+    const needsCleaning = String(row['청소필요']||'').trim().toUpperCase()==='O';
+    const needsRetouch = needsCleaning ? false : String(row['리터치필요']||'').trim().toUpperCase()==='O';
+    const note = String(row['호실특이사항']||'');
+    let room = DB.rooms.find(r=> r.branchId===branch.id && cleanKey(r.number).toLowerCase()===number.toLowerCase());
+    if(room){
+      Object.assign(room, { type, occupancy, saleStatus, price, needsCleaning, needsRetouch, note });
+      result.roomsUpdated++;
+    } else {
+      DB.rooms.push({ id: uid('r'), branchId: branch.id, number, type, occupancy, saleStatus, needsCleaning, needsRetouch, note, price });
+      result.roomsCreated++;
+    }
+  });
+
+  sheetRows(wb, '입실자').forEach((row, idx)=>{
+    const branchName = cleanKey(row['지점명']);
+    const number = cleanKey(row['호실번호']);
+    const name = cleanKey(row['이름']);
+    const phone = cleanKey(row['연락처']);
+    if(!branchName || !number || !name || !phone){ result.warnings.push(`[입실자 ${idx+2}행] 지점명/호실번호/이름/연락처 중 누락 - 건너뜀`); return; }
+    const branch = findBranch(branchName);
+    if(!branch){ result.warnings.push(`[입실자 ${idx+2}행] "${branchName}" 지점을 찾을 수 없어 건너뜀`); return; }
+    const room = DB.rooms.find(r=> r.branchId===branch.id && cleanKey(r.number).toLowerCase()===number.toLowerCase());
+    if(!room){ result.warnings.push(`[입실자 ${idx+2}행] "${branchName} ${number}호"를 찾을 수 없어 건너뜀`); return; }
+    const cap = occupancyCapacity(room);
+    const slotIndex = String(row['순번']).trim()==='2' ? 1 : 0;
+    if(slotIndex >= cap){ result.warnings.push(`[입실자 ${idx+2}행] ${branchName} ${number}호는 ${cap}인실이라 순번 ${slotIndex+1}을 추가할 수 없어 건너뜀`); return; }
+    if(DB.residents.some(p=>p.roomId===room.id && (p.slotIndex||0)===slotIndex)){
+      result.warnings.push(`[입실자 ${idx+2}행] ${branchName} ${number}호 순번 ${slotIndex+1}은 이미 등록되어 있어 건너뜀`); return;
+    }
+    const moveIn = toISODateStr(row['입실일']);
+    const moveOut = toISODateStr(row['퇴실예정일']);
+    if(slotIndex===0 && (!moveIn || !moveOut)){ result.warnings.push(`[입실자 ${idx+2}행] 주 입실자는 입실일/퇴실예정일이 필수입니다 - 건너뜀`); return; }
+    const channel = DB.channelList.includes(row['유입채널']) ? row['유입채널'] : '독립생활';
+    let carNumber = slotIndex===0 ? String(row['차량번호']||'').trim() : '';
+    if(carNumber && isCurrentlyResiding({ moveIn, moveOut })){
+      const cap = branch.parkingCapacity || 0;
+      const others = branchActiveCarCount(branch.id, null);
+      if(others + 1 > cap){
+        result.warnings.push(`[입실자 ${idx+2}행] ${branchName} 지점 주차 가능 대수(${cap}대) 초과로 차량번호는 비워두고 등록했습니다.`);
+        carNumber = '';
+      }
+    }
+    const p = {
+      id: uid('p'), roomId: room.id, name, phone,
+      channel: slotIndex===0 ? channel : '독립생활',
+      contractType: '신규',
+      moveIn: slotIndex===0 ? moveIn : '',
+      moveOut: slotIndex===0 ? moveOut : '',
+      originalMoveIn: slotIndex===0 ? moveIn : '',
+      scheduledToLeave: false,
+      carNumber,
+      memo: slotIndex===0 ? String(row['메모']||'') : '',
+      firstSaveDone: true, slotIndex
+    };
+    p.resStatus = computeResStatus(p);
+    DB.residents.push(p);
+    result.residentsAdded++;
+  });
+
+  return result;
+}
+
+function buildImportSummary(r){
+  let msg = `업로드 완료\n\n지점: 신규 ${r.branchesCreated}건 · 갱신 ${r.branchesUpdated}건\n호실: 신규 ${r.roomsCreated}건 · 갱신 ${r.roomsUpdated}건\n입실자: 신규 ${r.residentsAdded}건`;
+  if(r.warnings.length){
+    msg += `\n\n건너뛴 항목 (${r.warnings.length}건):\n` + r.warnings.slice(0,15).join('\n');
+    if(r.warnings.length>15) msg += `\n...외 ${r.warnings.length-15}건`;
+  }
+  return msg;
+}
+
+/* ---------------- channel list management ---------------- */
+function renderChannelManagePanel(){
+  const box = document.createElement('div');
+  box.className = 'stat-section';
+  box.innerHTML = `<h3>유입채널 관리</h3>`;
+
+  const list = document.createElement('div');
+  list.className = 'channel-list';
+  DB.channelList.forEach(ch=>{
+    const chip = document.createElement('span');
+    chip.className = 'channel-chip';
+    const inUse = DB.residents.some(p=>p.channel===ch);
+    chip.innerHTML = `<span>${esc(ch)}</span>`;
+    const delBtn = document.createElement('button');
+    delBtn.className = 'iconbtn del';
+    delBtn.innerHTML = '&times;';
+    delBtn.title = '이 채널 삭제';
+    delBtn.onclick = ()=>{
+      const msg = inUse
+        ? `"${ch}" 채널을 목록에서 삭제할까요?\n이미 이 채널로 등록된 입실자들의 값은 그대로 남고, 새로 선택하는 목록에서만 사라집니다.`
+        : `"${ch}" 채널을 목록에서 삭제할까요?`;
+      showConfirm(msg, ()=>{
+        DB.channelList = DB.channelList.filter(x=>x!==ch);
+        scheduleSave(); render();
+      });
+    };
+    chip.appendChild(delBtn);
+    list.appendChild(chip);
+  });
+  box.appendChild(list);
+
+  const addRow = document.createElement('div');
+  addRow.className = 'channel-add-row';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = '새 채널 이름 (예: 네이버부동산)';
+  const addBtn = document.createElement('button');
+  addBtn.className = 'btn small primary';
+  addBtn.textContent = '+ 채널 추가';
+  const doAdd = ()=>{
+    const name = input.value.trim();
+    if(!name){ return; }
+    if(DB.channelList.some(c=>c.toLowerCase()===name.toLowerCase())){
+      showAlert('이미 있는 채널명입니다.');
+      return;
+    }
+    DB.channelList.push(name);
+    scheduleSave(); render();
+  };
+  addBtn.onclick = doAdd;
+  input.addEventListener('keydown', (e)=>{ if(e.key==='Enter') doAdd(); });
+  addRow.appendChild(input); addRow.appendChild(addBtn);
+  box.appendChild(addRow);
+
+  return box;
+}
+
+/* ---------------- stats view ---------------- */
+function renderStatsView(){
+  const wrap = document.createElement('div');
+  wrap.style.paddingTop = '18px';
+
+  wrap.appendChild(renderOverdueStatsCard());
+  wrap.appendChild(renderCleaningCards());
+
+  const branchSection = document.createElement('div');
+  branchSection.className = 'stat-section';
+  branchSection.innerHTML = `<h3>지점별 현황</h3>`;
+  const table = document.createElement('table');
+  table.className = 'branch-table';
+  table.innerHTML = `<thead><tr><th>지점</th><th>호실수</th><th>이용중</th><th>판매중</th><th>입실율</th><th>판매보류</th><th>예약</th></tr></thead>`;
+  const today = todayISO();
+  const tbody = document.createElement('tbody');
+  DB.branches.forEach(b=>{
+    const rms = DB.rooms.filter(r=>r.branchId===b.id);
+    const roomIds = new Set(rms.map(r=>r.id));
+    const total = rms.length;
+    let occupied=0, forSale=0, hold=0, activeCount=0;
+    rms.forEach(r=>{
+      const s = effectiveRoomStatus(r);
+      if(s==='이용중' || s==='사전판매중') occupied++;
+      else if(s==='판매중') forSale++;
+      else if(s==='판매보류') hold++;
+      if(roomHasActiveResident(r)) activeCount++;
+    });
+    const reserved = DB.residents.filter(p => roomIds.has(p.roomId) && p.moveIn && p.moveIn > today).length;
+    const occRate = total ? Math.round((activeCount/total)*100) : 0;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td><a href="#" data-goto="${b.id}" style="color:var(--accent-ink);font-weight:700;text-decoration:none;">${esc(b.name)}</a></td>
+      <td>${total}</td><td>${occupied}</td><td>${forSale}</td><td>${occRate}%</td><td>${hold}</td><td>${reserved}</td>`;
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  branchSection.appendChild(table);
+  wrap.appendChild(branchSection);
+
+  wrap.appendChild(renderBulkUploadPanel());
+  wrap.appendChild(renderChannelManagePanel());
+
+  wrap.querySelectorAll('[data-goto]').forEach(a=>{
+    a.addEventListener('click', (e)=>{ e.preventDefault(); UI.view='branch'; UI.branchId = a.dataset.goto; UI.branchTab='rooms'; render(); });
+  });
+
+  return wrap;
+}
+
+function renderOverdueStatsCard(){
+  const items = [];
+  DB.rooms.forEach(room=>{
+    const branch = DB.branches.find(b=>b.id===room.branchId);
+    DB.residents.filter(p=>p.roomId===room.id && isOverdue(p)).forEach(p=>{
+      items.push({ room, branch, resident:p });
+    });
+  });
+  items.sort((a,b)=>{
+    const bn = (a.branch?a.branch.name:'').localeCompare(b.branch?b.branch.name:'');
+    if(bn !== 0) return bn;
+    return a.room.number.localeCompare(b.room.number,'ko',{numeric:true});
+  });
+
+  const card = document.createElement('div');
+  card.className = 'stat-section cleaning-card overdue-stats-card';
+  card.innerHTML = `<h3>연체 중인 호실 <span class="cnt-badge overdue-cnt-badge">${items.length}</span></h3>`;
+
+  if(items.length===0){
+    card.appendChild(el('div','cleaning-empty','전체 지점에 연체 중인 호실이 없습니다.'));
+  } else {
+    const today = todayISO();
+    items.forEach(item=>{
+      const row = document.createElement('div');
+      row.className = 'cleaning-row';
+      const days = Math.max(1, Math.round((new Date(today) - new Date(item.resident.moveOut)) / 86400000));
+      row.innerHTML = `
+        <span class="br">${esc(item.branch ? item.branch.name : '-')}</span>
+        <span class="rm">${esc(item.room.number)}호</span>
+        <span class="kind"><span class="badge overdue-badge">${days}일 연체</span></span>
+      `;
+      row.style.cursor = 'pointer';
+      row.title = '해당 호실로 이동';
+      row.onclick = ()=>{
+        if(!item.branch) return;
+        UI.view = 'branch';
+        UI.branchId = item.branch.id;
+        scrollToRoomCard(item.room);
+      };
+      card.appendChild(row);
+    });
+  }
+  return card;
+}
+
+function renderCleaningCards(){
+  const wrap = document.createElement('div');
+  wrap.className = 'cleaning-cards-grid';
+
+  const today = todayISO();
+  const maintRooms = DB.rooms
+    .filter(r=> r.needsCleaning || r.needsRetouch)
+    .map(r=> ({ room:r, branch: DB.branches.find(b=>b.id===r.branchId) }));
+  const todayList = maintRooms.filter(x=> !x.room.maintenanceDate || x.room.maintenanceDate<=today)
+    .sort((a,b)=> (a.branch?.name||'').localeCompare(b.branch?.name||''));
+  const futureList = maintRooms.filter(x=> x.room.maintenanceDate && x.room.maintenanceDate>today)
+    .sort((a,b)=> a.room.maintenanceDate.localeCompare(b.room.maintenanceDate));
+
+  wrap.appendChild(renderCleaningCard('오늘 청소방', todayList, false));
+  wrap.appendChild(renderCleaningCard('청소 예정방', futureList, true));
+  return wrap;
+}
+
+function renderCleaningCard(title, list, showDate){
+  const card = document.createElement('div');
+  card.className = 'stat-section cleaning-card';
+  card.innerHTML = `<h3>${title} <span class="cnt-badge">${list.length}</span></h3>`;
+  if(list.length===0){
+    card.appendChild(el('div','cleaning-empty','해당하는 호실이 없습니다.'));
+  } else {
+    list.forEach(x=>{
+      const row = document.createElement('div');
+      row.className = 'cleaning-row';
+      const isClean = x.room.needsCleaning;
+      const kindBadge = isClean
+        ? `<span class="badge" style="background:#FBEFD8;color:#8A5F14;">청소필요</span>`
+        : `<span class="badge" style="background:#E3E8FD;color:#2E3F9E;">리터치필요</span>`;
+      const dateTxt = showDate && x.room.maintenanceDate ? `<span class="mdate">${x.room.maintenanceDate}</span>` : '';
+      row.innerHTML = `
+        <span class="br">${esc(x.branch ? x.branch.name : '-')}</span>
+        <span class="rm">${esc(x.room.number)}호</span>
+        <span class="kind">${kindBadge}${dateTxt}</span>
+      `;
+      row.style.cursor = 'pointer';
+      row.title = '해당 지점으로 이동';
+      row.onclick = ()=>{
+        if(!x.branch) return;
+        UI.view='branch'; UI.branchId = x.branch.id; UI.branchTab='rooms'; render();
+      };
+      card.appendChild(row);
+    });
+  }
+  return card;
+}
+
+/* ---------------- custom alert/confirm (샌드박스 iframe에서 window.alert/confirm이
+   막히는 경우를 대비해 네이티브 다이얼로그 대신 사용) ---------------- */
+function showAlert(message){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  const box = document.createElement('div');
+  box.className = 'modal-box';
+  const msg = document.createElement('div');
+  msg.className = 'modal-msg';
+  msg.textContent = message;
+  const btnRow = document.createElement('div');
+  btnRow.className = 'modal-btn-row';
+  const okBtn = document.createElement('button');
+  okBtn.className = 'btn primary';
+  okBtn.textContent = '확인';
+  const close = ()=>{ overlay.remove(); };
+  okBtn.onclick = close;
+  overlay.addEventListener('click', (e)=>{ if(e.target===overlay) close(); });
+  btnRow.appendChild(okBtn);
+  box.appendChild(msg); box.appendChild(btnRow);
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+  setTimeout(()=> okBtn.focus(), 0);
+}
+function showConfirm(message, onConfirm){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  const box = document.createElement('div');
+  box.className = 'modal-box';
+  const msg = document.createElement('div');
+  msg.className = 'modal-msg';
+  msg.textContent = message;
+  const btnRow = document.createElement('div');
+  btnRow.className = 'modal-btn-row';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'btn';
+  cancelBtn.textContent = '취소';
+  const okBtn = document.createElement('button');
+  okBtn.className = 'btn danger';
+  okBtn.textContent = '확인';
+  const close = ()=>{ overlay.remove(); };
+  cancelBtn.onclick = close;
+  okBtn.onclick = ()=>{ close(); onConfirm(); };
+  overlay.addEventListener('click', (e)=>{ if(e.target===overlay) close(); });
+  btnRow.appendChild(cancelBtn); btnRow.appendChild(okBtn);
+  box.appendChild(msg); box.appendChild(btnRow);
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+  setTimeout(()=> okBtn.focus(), 0);
+}
+
+function esc(s){
+  return (s==null?'':String(s)).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+(async function init(){
+  DB = await loadState();
+  DB.residentHistory = DB.residentHistory || [];
+  DB.channelList = (DB.channelList && DB.channelList.length) ? DB.channelList : [...DEFAULT_CHANNEL_LIST];
+  // 과거 버전에서 "완료" 없이 새로고침 등으로 남겨졌을 수 있는 미확정 입실자(이름 미입력 등) 정리
+  const beforeCount = DB.residents.length;
+  DB.residents = DB.residents.filter(p => p.firstSaveDone !== false);
+  if(DB.residents.length !== beforeCount) scheduleSave();
+  DB.residents.forEach(p => {
+    if(p.originalMoveIn == null) p.originalMoveIn = p.moveIn || '';
+    if(p.scheduledToLeave == null) p.scheduledToLeave = false;
+    p.resStatus = computeResStatus(p);
+  });
+  processScheduledLeaves();
+  let statusFixed = false;
+  DB.rooms.forEach(room=>{
+    if(!roomHasActiveResident(room) && !STATUS_LIST_MANUAL.includes(room.saleStatus)){
+      room.saleStatus = '공실';
+      statusFixed = true;
+    }
+  });
+  if(statusFixed) scheduleSave();
+  UI.branchId = DB.branches[0] ? DB.branches[0].id : null;
+  render();
+  document.getElementById('savedNote').textContent = '자동 저장됨 · 이 데이터는 이 대시보드를 사용하는 모든 사람에게 공유됩니다';
+})();
+</script>
+</body>
+</html>
