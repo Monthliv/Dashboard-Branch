@@ -522,6 +522,13 @@ const firestoreDB = firebase.firestore();
 const FIRESTORE_DOC = firestoreDB.collection('monthliv').doc('state');
 const USERS_COL = firestoreDB.collection('users');
 const CHANGELOG_COL = firestoreDB.collection('changeLog');
+const EMAIL_INDEX_COL = firestoreDB.collection('emailIndex');
+function normalizeEmailKey(email){ return String(email||'').trim().toLowerCase(); }
+function indexEmail(email){
+  const key = normalizeEmailKey(email);
+  if(!key) return Promise.resolve();
+  return EMAIL_INDEX_COL.doc(key).set({ indexedAt: new Date().toISOString() }, { merge:true }).catch(e=> console.error('이메일 색인 실패:', e));
+}
 
 let CURRENT_USER = null;   // { uid, email }
 let USER_ROLE = null;      // 'pending' | 'viewer' | 'editor' | 'superadmin'
@@ -2552,6 +2559,7 @@ function esc(s){
 
 async function initApp(user){
   CURRENT_USER = { uid: user.uid, email: user.email };
+  indexEmail(user.email); // 기존 계정(이 색인 기능 도입 이전 가입)도 로그인 시 자동으로 채워 넣습니다.
 
   let roleDoc;
   try{
@@ -2654,7 +2662,7 @@ document.getElementById('requestAccountLink').addEventListener('click', (e)=>{
 });
 document.getElementById('pendingLogoutBtn').addEventListener('click', ()=> firebase.auth().signOut());
 
-function showRequestAccountModal(){
+function showRequestAccountModal(prefillEmail){
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   const box = document.createElement('div');
@@ -2665,7 +2673,7 @@ function showRequestAccountModal(){
       가입 즉시 사용은 불가하며, 관리자 승인 후 로그인할 수 있습니다.
     </div>
     <label class="field-label">이메일</label>
-    <input type="email" id="reqEmail" style="width:100%;margin-bottom:10px;">
+    <input type="email" id="reqEmail" style="width:100%;margin-bottom:10px;" value="${esc(prefillEmail||'')}">
     <label class="field-label">비밀번호 (6자 이상)</label>
     <input type="password" id="reqPw" style="width:100%;margin-bottom:10px;">
     <label class="field-label">비밀번호 확인</label>
@@ -2692,6 +2700,7 @@ function showRequestAccountModal(){
     suppressAuthHandling = true;
     firebase.auth().createUserWithEmailAndPassword(email, pw)
       .then(cred=> USERS_COL.doc(cred.user.uid).set({ email, role:'pending', createdAt: new Date().toISOString() })
+        .then(()=> indexEmail(email))
         .then(()=> firebase.auth().signOut()))
       .then(()=>{
         suppressAuthHandling = false;
@@ -2719,12 +2728,28 @@ document.getElementById('forgotPwLink').addEventListener('click', (e)=>{
   const errBox = document.getElementById('loginError');
   const email = document.getElementById('loginEmail').value.trim();
   if(!email){ errBox.style.color = 'var(--st-hold)'; errBox.textContent = '먼저 이메일을 입력한 뒤 눌러주세요.'; return; }
-  firebase.auth().sendPasswordResetEmail(email).then(()=>{
-    errBox.style.color = 'var(--st-occupied)';
-    errBox.textContent = `${email} 주소로 비밀번호 재설정 메일을 보냈어요. 메일함(스팸함 포함)을 확인해주세요.`;
+  errBox.style.color = 'var(--ink-soft)';
+  errBox.textContent = '계정 확인 중…';
+  // Firebase의 "이메일 열거 보호"가 켜져 있으면 sendPasswordResetEmail이 존재하지 않는
+  // 이메일에도 에러 없이 성공 처리되어(메일은 실제로 발송되지 않음) 혼란을 줍니다.
+  // 그래서 자체 emailIndex 컬렉션으로 가입 여부를 먼저 확인합니다.
+  EMAIL_INDEX_COL.doc(normalizeEmailKey(email)).get().then(snap=>{
+    if(!snap.exists){
+      errBox.style.color = 'var(--st-hold)';
+      errBox.textContent = `등록되지 않은 이메일입니다. 먼저 "계정 요청"으로 사용 신청을 해주세요.`;
+      showRequestAccountModal(email);
+      return;
+    }
+    return firebase.auth().sendPasswordResetEmail(email).then(()=>{
+      errBox.style.color = 'var(--st-occupied)';
+      errBox.textContent = `${email} 주소로 비밀번호 재설정 메일을 보냈어요. 메일함(스팸함 포함)을 확인해주세요.`;
+    }).catch(err=>{
+      errBox.style.color = 'var(--st-hold)';
+      errBox.textContent = '오류: ' + err.message;
+    });
   }).catch(err=>{
     errBox.style.color = 'var(--st-hold)';
-    errBox.textContent = err.code === 'auth/user-not-found' ? '등록되지 않은 이메일입니다.' : ('오류: ' + err.message);
+    errBox.textContent = '계정 확인 중 오류가 발생했습니다: ' + err.message;
   });
 });
 document.getElementById('logoutBtn').addEventListener('click', ()=>{
