@@ -2225,10 +2225,19 @@ function renderUserManagePanel(){
         row.appendChild(badge);
       }
 
+      if(u.name || u.phone){
+        const info = document.createElement('span');
+        info.style.cssText = 'font-size:11.5px;color:var(--ink-soft);';
+        const roleLabel = { viewer:'조회 전용', editor:'수정 가능', superadmin:'슈퍼어드민' }[u.requestedRole];
+        info.textContent = [u.name, u.phone, isPending && roleLabel ? `희망: ${roleLabel}` : null].filter(Boolean).join(' · ');
+        row.appendChild(info);
+      }
+
       const roleSel = document.createElement('select');
+      const defaultRole = isPending ? (u.requestedRole || 'viewer') : u.role;
       [['viewer','조회 전용'], ['editor','수정 가능'], ['superadmin','슈퍼어드민']].forEach(([val,label])=>{
         const o = document.createElement('option');
-        o.value = val; o.textContent = label; o.selected = u.role === val;
+        o.value = val; o.textContent = label; o.selected = defaultRole === val;
         roleSel.appendChild(o);
       });
       row.appendChild(roleSel);
@@ -2678,7 +2687,16 @@ function showRequestAccountModal(prefillEmail){
     <label class="field-label">비밀번호 (6자 이상)</label>
     <input type="password" id="reqPw" style="width:100%;margin-bottom:10px;">
     <label class="field-label">비밀번호 확인</label>
-    <input type="password" id="reqPw2" style="width:100%;">
+    <input type="password" id="reqPw2" style="width:100%;margin-bottom:10px;">
+    <label class="field-label">이름</label>
+    <input type="text" id="reqName" style="width:100%;margin-bottom:10px;">
+    <label class="field-label">연락처</label>
+    <input type="tel" id="reqPhone" placeholder="010-0000-0000" style="width:100%;margin-bottom:10px;">
+    <label class="field-label">희망 권한</label>
+    <select id="reqRole" style="width:100%;">
+      <option value="viewer">조회 전용</option>
+      <option value="editor">수정 가능</option>
+    </select>
     <div class="login-error" id="reqError"></div>
   `;
   const btnRow = document.createElement('div');
@@ -2693,14 +2711,17 @@ function showRequestAccountModal(prefillEmail){
     const email = document.getElementById('reqEmail').value.trim();
     const pw = document.getElementById('reqPw').value;
     const pw2 = document.getElementById('reqPw2').value;
+    const name = document.getElementById('reqName').value.trim();
+    const phone = document.getElementById('reqPhone').value.trim();
+    const requestedRole = document.getElementById('reqRole').value;
     const err = document.getElementById('reqError');
     err.style.color = 'var(--st-hold)';
-    if(!email || !pw || !pw2){ err.textContent = '모든 항목을 입력해주세요.'; return; }
+    if(!email || !pw || !pw2 || !name || !phone){ err.textContent = '모든 항목을 입력해주세요.'; return; }
     if(pw.length < 6){ err.textContent = '비밀번호는 6자 이상이어야 합니다.'; return; }
     if(pw !== pw2){ err.textContent = '비밀번호가 서로 일치하지 않습니다.'; return; }
     suppressAuthHandling = true;
     firebase.auth().createUserWithEmailAndPassword(email, pw)
-      .then(cred=> USERS_COL.doc(cred.user.uid).set({ email, role:'pending', createdAt: new Date().toISOString() })
+      .then(cred=> USERS_COL.doc(cred.user.uid).set({ email, role:'pending', requestedRole, name, phone, createdAt: new Date().toISOString() })
         .then(()=> indexEmail(email))
         .then(()=> firebase.auth().signOut()))
       .then(()=>{
