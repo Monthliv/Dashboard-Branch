@@ -314,6 +314,15 @@
   .channel-chip .iconbtn{ width:20px; height:20px; border-radius:50%; }
   .channel-add-row{ display:flex; gap:8px; align-items:center; }
   .channel-add-row input{ flex:1; max-width:280px; }
+  .user-row{ display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px dashed var(--line); flex-wrap:wrap; }
+  .user-row:last-child{ border-bottom:none; }
+  .user-row .user-email{ font-weight:600; font-size:12.5px; min-width:160px; }
+  .user-row select{ font-size:12px; }
+  .log-row{ display:flex; align-items:center; gap:10px; padding:6px 0; border-bottom:1px dashed var(--line); font-size:12px; }
+  .log-row:last-child{ border-bottom:none; }
+  .log-row .log-time{ font-family:'JetBrains Mono',monospace; color:var(--ink-soft); flex:none; white-space:nowrap; }
+  .log-row .log-email{ color:var(--accent-ink); font-weight:600; flex:none; white-space:nowrap; }
+  .log-row .log-summary{ color:var(--ink); }
   .memo-style-row{ display:flex; align-items:center; gap:6px; margin-top:6px; }
   .memo-style-row .color-swatch{
     width:20px; height:20px; border-radius:50%; border:2px solid transparent; cursor:pointer; padding:0;
@@ -347,9 +356,9 @@
   .login-sub{ font-size:12.5px; color:var(--ink-soft); margin:0 0 20px; }
   .login-box input{ width:100%; margin-top:4px; }
   .login-error{ color:var(--st-hold); font-size:12px; margin-top:10px; min-height:16px; }
-  .login-forgot{ text-align:center; margin-top:12px; font-size:12px; }
-  .login-forgot a{ color:var(--accent-ink); text-decoration:none; }
-  .login-forgot a:hover{ text-decoration:underline; }
+  .login-links{ display:flex; flex-direction:column; align-items:center; gap:6px; margin-top:12px; font-size:12px; }
+  .login-links a{ color:var(--accent-ink); text-decoration:none; }
+  .login-links a:hover{ text-decoration:underline; }
 
   .modal-overlay{
     position:fixed; inset:0; background:rgba(30,42,50,.45); z-index:1000;
@@ -377,8 +386,22 @@
     <label class="field-label" style="margin-top:10px;">비밀번호</label>
     <input type="password" id="loginPassword" placeholder="비밀번호" autocomplete="current-password">
     <button class="btn primary" id="loginBtn" style="width:100%; margin-top:16px; justify-content:center;">로그인</button>
-    <div class="login-forgot"><a href="#" id="forgotPwLink">비밀번호를 잊으셨나요?</a></div>
+    <div class="login-links">
+      <a href="#" id="forgotPwLink">비밀번호를 잊으셨나요?</a>
+      <a href="#" id="requestAccountLink">계정이 없으신가요? 계정 요청</a>
+    </div>
     <div class="login-error" id="loginError"></div>
+  </div>
+</div>
+<div id="pendingScreen" class="login-screen" style="display:none;">
+  <div class="login-box">
+    <h1 class="login-title">MONTHLIV <span class="tag">OPS CONSOLE</span></h1>
+    <p class="login-sub" style="margin-bottom:4px;">⏳ 승인 대기 중입니다</p>
+    <p style="font-size:12.5px;color:var(--ink-soft);line-height:1.6;">
+      계정 요청이 접수되었습니다. 관리자가 승인하면 이용할 수 있어요.<br>
+      승인 완료 후 다시 로그인해주세요.
+    </p>
+    <button class="btn" id="pendingLogoutBtn" style="width:100%; margin-top:14px; justify-content:center;">로그아웃</button>
   </div>
 </div>
 <div id="app" style="display:none;">
@@ -497,6 +520,26 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const firestoreDB = firebase.firestore();
 const FIRESTORE_DOC = firestoreDB.collection('monthliv').doc('state');
+const USERS_COL = firestoreDB.collection('users');
+const CHANGELOG_COL = firestoreDB.collection('changeLog');
+
+let CURRENT_USER = null;   // { uid, email }
+let USER_ROLE = null;      // 'pending' | 'viewer' | 'editor' | 'superadmin'
+function canEdit(){ return USER_ROLE === 'editor' || USER_ROLE === 'superadmin'; }
+function isSuperAdmin(){ return USER_ROLE === 'superadmin'; }
+
+let pendingChangeSummary = '';
+function logChange(summary){ pendingChangeSummary = summary; }
+async function writeChangeLog(summary){
+  try{
+    await CHANGELOG_COL.add({
+      uid: CURRENT_USER ? CURRENT_USER.uid : '',
+      email: CURRENT_USER ? CURRENT_USER.email : '',
+      summary: summary || '정보 수정',
+      timestamp: new Date().toISOString()
+    });
+  }catch(e){ console.error('변경 로그 기록 실패:', e); }
+}
 
 async function loadState(){
   try{
@@ -514,6 +557,9 @@ async function saveState(){
   try{
     await FIRESTORE_DOC.set({ json: JSON.stringify(DB), updatedAt: new Date().toISOString() });
     if(note) note.textContent = '자동 저장됨 · 이 대시보드를 사용하는 모든 사람에게 공유됩니다';
+    const summary = pendingChangeSummary || '정보 수정';
+    pendingChangeSummary = '';
+    writeChangeLog(summary);
   }catch(e){
     if(note) note.textContent = '저장 실패 — 네트워크 또는 Firebase 설정을 확인해주세요';
     console.error(e);
@@ -565,6 +611,7 @@ function renderTopNav(){
   sel.onchange = ()=>{ UI.view='branch'; UI.branchId = sel.value; UI.addingRoom=false; render(); };
 
   const addBranchBtn = document.getElementById('addBranchBtn');
+  addBranchBtn.style.display = canEdit() ? '' : 'none';
   addBranchBtn.textContent = UI.addingBranch ? '지점 추가 취소' : '+ 지점 추가';
   addBranchBtn.onclick = ()=>{ UI.addingBranch = !UI.addingBranch; render(); };
 
@@ -678,7 +725,7 @@ function renderBranchInfoBar(branch){
 
   const bar = document.createElement('div');
   bar.className = 'branch-bar';
-  bar.appendChild(pencil);
+  if(canEdit()) bar.appendChild(pencil);
 
   // ---- 지점명 ----
   const col1 = document.createElement('div'); col1.className = 'col';
@@ -795,6 +842,7 @@ function renderBranchInfoBar(branch){
         });
         DB.branches = DB.branches.filter(b=>b.id!==branch.id);
         UI.branchId = null;
+        logChange(`"${branch.name}" 지점 삭제`);
         scheduleSave(); render();
       });
     };
@@ -828,10 +876,10 @@ function renderRoomsSection(branch){
   addBtn.className = 'btn primary';
   addBtn.textContent = UI.addingRoom ? '호실 추가 취소' : '+ 호실 추가';
   addBtn.onclick = ()=>{ UI.addingRoom = !UI.addingRoom; render(); };
-  toolbar.appendChild(addBtn);
+  if(canEdit()) toolbar.appendChild(addBtn);
   wrap.appendChild(toolbar);
 
-  if(UI.addingRoom){
+  if(UI.addingRoom && canEdit()){
     wrap.appendChild(renderAddRoomForm(branch));
   }
 
@@ -912,6 +960,7 @@ function renderAddBranchForm(){
       const cap = Number(document.getElementById('nbCap').value) || 0;
       const nb = { id: uid('b'), name, parkingNote:'', parkingCapacity: cap, memo:'' };
       DB.branches.push(nb);
+      logChange(`"${name}" 지점 신규 등록`);
       UI.addingBranch = false;
       UI.view='branch'; UI.branchId = nb.id;
       scheduleSave(); render();
@@ -956,6 +1005,7 @@ function renderAddRoomForm(branch){
       };
       DB.rooms.push(room);
       UI.addingRoom = false;
+      logChange(`${branch.name} ${room.number}호 신규 등록`);
       scheduleSave(); render();
     };
   },0);
@@ -1007,6 +1057,7 @@ function roomHasOverdueResident(room){
   return DB.residents.some(p => p.roomId===room.id && isOverdue(p));
 }
 function moveResidentToHistory(p, moveOutOverride){
+  logChange(`${p.name || '입실자'} 퇴실 처리`);
   DB.residentHistory.push({
     id: uid('h'), roomId: p.roomId,
     name: p.name || '(이름 미입력)', phone: p.phone || '',
@@ -1128,7 +1179,7 @@ function renderRoomCard(room, sectionStatus){
     else { delete UI.roomSnapshots[room.id]; }
     UI.roomEditMode[room.id] = !roomEditOn; render();
   };
-  header.querySelector('.rc-header-top').appendChild(pencil);
+  if(canEdit()) header.querySelector('.rc-header-top').appendChild(pencil);
   card.appendChild(header);
 
   if(historyOpen){
@@ -1144,23 +1195,26 @@ function renderRoomCard(room, sectionStatus){
         const topRow = document.createElement('div');
         topRow.className = 'history-top';
         topRow.innerHTML = `<span class="nm">${esc(h.name)}</span><span class="ph">${esc(h.phone||'-')}</span>`;
-        const restoreBtn = document.createElement('button');
-        restoreBtn.className = 'btn small';
-        restoreBtn.textContent = '복원';
-        restoreBtn.title = '이 입실자 정보를 다시 입실자로 복원';
-        restoreBtn.onclick = ()=> restoreFromHistory(h);
-        const delHistBtn = document.createElement('button');
-        delHistBtn.className = 'iconbtn del';
-        delHistBtn.innerHTML = '&times;';
-        delHistBtn.title = '이 히스토리 항목 삭제';
-        delHistBtn.onclick = ()=>{
-          showConfirm(`"${h.name}" 님의 히스토리 기록을 완전히 삭제할까요? 이 작업은 되돌릴 수 없습니다.`, ()=>{
-            DB.residentHistory = DB.residentHistory.filter(x=>x.id!==h.id);
-            scheduleSave(); render();
-          });
-        };
-        topRow.appendChild(restoreBtn);
-        topRow.appendChild(delHistBtn);
+        if(canEdit()){
+          const restoreBtn = document.createElement('button');
+          restoreBtn.className = 'btn small';
+          restoreBtn.textContent = '복원';
+          restoreBtn.title = '이 입실자 정보를 다시 입실자로 복원';
+          restoreBtn.onclick = ()=> restoreFromHistory(h);
+          const delHistBtn = document.createElement('button');
+          delHistBtn.className = 'iconbtn del';
+          delHistBtn.innerHTML = '&times;';
+          delHistBtn.title = '이 히스토리 항목 삭제';
+          delHistBtn.onclick = ()=>{
+            showConfirm(`"${h.name}" 님의 히스토리 기록을 완전히 삭제할까요? 이 작업은 되돌릴 수 없습니다.`, ()=>{
+              DB.residentHistory = DB.residentHistory.filter(x=>x.id!==h.id);
+              logChange(`"${h.name}" 히스토리 기록 삭제`);
+              scheduleSave(); render();
+            });
+          };
+          topRow.appendChild(restoreBtn);
+          topRow.appendChild(delHistBtn);
+        }
         entry.appendChild(topRow);
         const periodRow = document.createElement('div');
         periodRow.className = 'history-period';
@@ -1197,11 +1251,13 @@ function renderRoomCard(room, sectionStatus){
     const emptyRow = document.createElement('div');
     emptyRow.className = 'empty-residents';
     emptyRow.innerHTML = `<span class="msg">이용 중인 입실자가 없습니다.</span>`;
-    const addBtn = document.createElement('button');
-    addBtn.className = 'btn small primary pill';
-    addBtn.textContent = '+ 입실자 추가';
-    addBtn.onclick = ()=> addResidentToRoom(room);
-    emptyRow.appendChild(addBtn);
+    if(canEdit()){
+      const addBtn = document.createElement('button');
+      addBtn.className = 'btn small primary pill';
+      addBtn.textContent = '+ 입실자 추가';
+      addBtn.onclick = ()=> addResidentToRoom(room);
+      emptyRow.appendChild(addBtn);
+    }
     body.appendChild(emptyRow);
   } else {
     [...residents].sort((a,b)=> (a.slotIndex||0) - (b.slotIndex||0)).forEach((p, idx)=>{
@@ -1240,7 +1296,7 @@ function renderResidentView(p, room, isSecondary){
   nm.textContent = p.name || '(이름 미입력)';
   const acts = document.createElement('div');
   acts.className = 'acts';
-  if(!isSecondary && p.firstSaveDone){
+  if(!isSecondary && p.firstSaveDone && canEdit()){
     const leaveBtn = document.createElement('button');
     leaveBtn.className = 'btn small danger';
     leaveBtn.textContent = '퇴실';
@@ -1254,24 +1310,26 @@ function renderResidentView(p, room, isSecondary){
     };
     acts.appendChild(leaveBtn);
   }
-  const editBtn = document.createElement('button');
-  editBtn.className = 'iconbtn';
-  editBtn.innerHTML = '&#9998;';
-  editBtn.title = '입실자 정보 수정';
-  editBtn.onclick = ()=>{
-    UI.residentSnapshots[p.id] = Object.assign({}, p);
-    UI.residentEditMode[p.id] = true; render();
-  };
-  const delBtn = document.createElement('button');
-  delBtn.className = 'iconbtn del';
-  delBtn.innerHTML = '&times;';
-  delBtn.title = '입실자 삭제';
-  delBtn.onclick = ()=>{
-    showConfirm(`${p.name || '이 입실자'} 정보를 삭제할까요? 이 입실자의 모든 정보가 삭제됩니다.`, ()=>{
-      DB.residents = DB.residents.filter(x=>x.id!==p.id); scheduleSave(); render();
-    });
-  };
-  acts.appendChild(editBtn); acts.appendChild(delBtn);
+  if(canEdit()){
+    const editBtn = document.createElement('button');
+    editBtn.className = 'iconbtn';
+    editBtn.innerHTML = '&#9998;';
+    editBtn.title = '입실자 정보 수정';
+    editBtn.onclick = ()=>{
+      UI.residentSnapshots[p.id] = Object.assign({}, p);
+      UI.residentEditMode[p.id] = true; render();
+    };
+    const delBtn = document.createElement('button');
+    delBtn.className = 'iconbtn del';
+    delBtn.innerHTML = '&times;';
+    delBtn.title = '입실자 삭제';
+    delBtn.onclick = ()=>{
+      showConfirm(`${p.name || '이 입실자'} 정보를 삭제할까요? 이 입실자의 모든 정보가 삭제됩니다.`, ()=>{
+        DB.residents = DB.residents.filter(x=>x.id!==p.id); scheduleSave(); render();
+      });
+    };
+    acts.appendChild(editBtn); acts.appendChild(delBtn);
+  }
   nameLine.appendChild(nm); nameLine.appendChild(acts);
   block.appendChild(nameLine);
 
@@ -1327,6 +1385,7 @@ function renderRoomEditForm(room){
     showConfirm(`${room.number}호를 삭제할까요? 입실자 정보도 함께 삭제됩니다.`, ()=>{
       DB.residents = DB.residents.filter(p=>p.roomId!==room.id);
       DB.rooms = DB.rooms.filter(r=>r.id!==room.id);
+      logChange(`${room.number}호 삭제`);
       scheduleSave(); render();
     });
   };
@@ -1360,7 +1419,7 @@ function renderRoomEditForm(room){
     room.occupancy = e.target.value; scheduleSave(); render();
   });
   const saleStatusSel = grid.querySelector('[data-f="saleStatus"]');
-  if(saleStatusSel) saleStatusSel.addEventListener('change', (e)=>{ room.saleStatus = e.target.value; scheduleSave(); render(); });
+  if(saleStatusSel) saleStatusSel.addEventListener('change', (e)=>{ logChange(`${room.number}호 판매상태 변경: ${room.saleStatus} → ${e.target.value}`); room.saleStatus = e.target.value; scheduleSave(); render(); });
   grid.querySelector('[data-f="price"]').addEventListener('change', (e)=>{ room.price = Number(e.target.value)||0; scheduleSave(); render(); });
   const numberInput = grid.querySelector('[data-f="number"]');
   numberInput.addEventListener('change', ()=>{
@@ -2101,6 +2160,111 @@ function buildImportSummary(r){
 }
 
 /* ---------------- channel list management ---------------- */
+/* ---------------- user management (superadmin only) ---------------- */
+function renderUserManagePanel(){
+  const box = document.createElement('div');
+  box.className = 'stat-section';
+  box.innerHTML = `<h3>사용자 관리</h3>`;
+  const body = document.createElement('div');
+  body.textContent = '불러오는 중…';
+  body.style.cssText = 'font-size:12px;color:var(--ink-soft);';
+  box.appendChild(body);
+
+  USERS_COL.get().then(snap=>{
+    body.innerHTML = '';
+    const users = [];
+    snap.forEach(doc=> users.push({ id: doc.id, ...doc.data() }));
+    const order = { pending:0, viewer:1, editor:2, superadmin:3 };
+    users.sort((a,b)=> (order[a.role] ?? 9) - (order[b.role] ?? 9) || (a.email||'').localeCompare(b.email||''));
+    if(users.length===0){ body.textContent = '등록된 사용자가 없습니다.'; return; }
+
+    users.forEach(u=>{
+      const isPending = u.role === 'pending';
+      const row = document.createElement('div');
+      row.className = 'user-row';
+
+      const emailSpan = document.createElement('span');
+      emailSpan.className = 'user-email';
+      emailSpan.textContent = u.email || u.id;
+      row.appendChild(emailSpan);
+
+      if(isPending){
+        const badge = document.createElement('span');
+        badge.className = 'badge';
+        badge.style.background = 'var(--st-leaving-bg)'; badge.style.color = 'var(--st-leaving)';
+        badge.textContent = '승인 대기';
+        row.appendChild(badge);
+      }
+
+      const roleSel = document.createElement('select');
+      [['viewer','조회 전용'], ['editor','수정 가능'], ['superadmin','슈퍼어드민']].forEach(([val,label])=>{
+        const o = document.createElement('option');
+        o.value = val; o.textContent = label; o.selected = u.role === val;
+        roleSel.appendChild(o);
+      });
+      row.appendChild(roleSel);
+
+      const approveBtn = document.createElement('button');
+      approveBtn.className = 'btn small primary';
+      approveBtn.textContent = isPending ? '승인' : '역할 변경';
+      approveBtn.onclick = ()=>{
+        const newRole = roleSel.value;
+        USERS_COL.doc(u.id).set({ email: u.email, role: newRole, approvedBy: CURRENT_USER.email, approvedAt: new Date().toISOString() }, { merge:true })
+          .then(()=>{ writeChangeLog(`${u.email} 계정 권한을 "${newRole}"(으)로 설정`); render(); })
+          .catch(e=> showAlert('처리 실패: ' + e.message));
+      };
+      row.appendChild(approveBtn);
+
+      const delBtn = document.createElement('button');
+      delBtn.className = 'iconbtn del';
+      delBtn.innerHTML = '&times;';
+      delBtn.title = isPending ? '요청 거절' : '계정 접근 차단 (대기 상태로 전환)';
+      delBtn.onclick = ()=>{
+        showConfirm(isPending ? `${u.email} 계정 요청을 거절할까요?` : `${u.email} 계정의 접근을 차단할까요? (승인 대기 상태로 전환됩니다)`, ()=>{
+          USERS_COL.doc(u.id).set({ email: u.email, role:'pending' }, { merge:true })
+            .then(()=>{ writeChangeLog(`${u.email} 계정 접근 차단/거절`); render(); });
+        });
+      };
+      row.appendChild(delBtn);
+
+      body.appendChild(row);
+    });
+  }).catch(e=>{ body.textContent = '사용자 목록을 불러오지 못했습니다: ' + e.message; });
+
+  return box;
+}
+
+function renderChangeLogPanel(){
+  const box = document.createElement('div');
+  box.className = 'stat-section';
+  box.innerHTML = `<h3>변경 로그 (최근 50건)</h3>`;
+  const body = document.createElement('div');
+  body.textContent = '불러오는 중…';
+  body.style.cssText = 'font-size:12px;color:var(--ink-soft);';
+  box.appendChild(body);
+
+  CHANGELOG_COL.orderBy('timestamp','desc').limit(50).get().then(snap=>{
+    body.innerHTML = '';
+    if(snap.empty){ body.textContent = '기록된 변경 로그가 없습니다.'; return; }
+    snap.forEach(doc=>{
+      const d = doc.data();
+      const time = (d.timestamp || '').replace('T',' ').slice(0,16);
+      const row = document.createElement('div');
+      row.className = 'log-row';
+      row.innerHTML = `
+        <span class="log-time">${esc(time)}</span>
+        <span class="log-email">${esc(d.email || '-')}</span>
+        <span class="log-summary">${esc(d.summary || '')}</span>
+      `;
+      body.appendChild(row);
+    });
+  }).catch(e=>{
+    body.textContent = '로그를 불러오지 못했습니다: ' + e.message;
+  });
+
+  return box;
+}
+
 function renderChannelManagePanel(){
   const box = document.createElement('div');
   box.className = 'stat-section';
@@ -2196,8 +2360,14 @@ function renderStatsView(){
   branchSection.appendChild(table);
   wrap.appendChild(branchSection);
 
-  wrap.appendChild(renderBulkUploadPanel());
-  wrap.appendChild(renderChannelManagePanel());
+  if(canEdit()){
+    wrap.appendChild(renderBulkUploadPanel());
+    wrap.appendChild(renderChannelManagePanel());
+  }
+  if(isSuperAdmin()){
+    wrap.appendChild(renderUserManagePanel());
+    wrap.appendChild(renderChangeLogPanel());
+  }
 
   wrap.querySelectorAll('[data-goto]').forEach(a=>{
     a.addEventListener('click', (e)=>{ e.preventDefault(); UI.view='branch'; UI.branchId = a.dataset.goto; UI.branchTab='rooms'; render(); });
@@ -2357,10 +2527,39 @@ function esc(s){
 }
 
 async function initApp(user){
+  CURRENT_USER = { uid: user.uid, email: user.email };
+
+  let roleDoc;
+  try{
+    roleDoc = await USERS_COL.doc(user.uid).get();
+  }catch(e){
+    console.error('사용자 권한 조회 실패:', e);
+    showAlert('사용자 정보를 불러오지 못했습니다. 네트워크를 확인하거나 관리자에게 문의해주세요.');
+    firebase.auth().signOut();
+    return;
+  }
+
+  if(!roleDoc.exists){
+    // 이전 방식으로 만든 계정 등, users 문서가 없는 경우 안전하게 대기 상태로 생성
+    await USERS_COL.doc(user.uid).set({ email: user.email, role:'pending', createdAt: new Date().toISOString() });
+    USER_ROLE = 'pending';
+  } else {
+    USER_ROLE = roleDoc.data().role || 'pending';
+  }
+
+  if(USER_ROLE === 'pending'){
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('app').style.display = 'none';
+    document.getElementById('pendingScreen').style.display = 'flex';
+    return;
+  }
+
   document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('pendingScreen').style.display = 'none';
   document.getElementById('app').style.display = '';
+  const roleLabel = { viewer:'조회 전용', editor:'수정 가능', superadmin:'슈퍼어드민' }[USER_ROLE] || USER_ROLE;
   const loggedInAs = document.getElementById('loggedInAs');
-  if(loggedInAs) loggedInAs.textContent = user.email || '';
+  if(loggedInAs) loggedInAs.textContent = `${user.email} (${roleLabel})`;
 
   DB = await loadState();
   DB.residentHistory = DB.residentHistory || [];
@@ -2368,13 +2567,13 @@ async function initApp(user){
   // 과거 버전에서 "완료" 없이 새로고침 등으로 남겨졌을 수 있는 미확정 입실자(이름 미입력 등) 정리
   const beforeCount = DB.residents.length;
   DB.residents = DB.residents.filter(p => p.firstSaveDone !== false);
-  if(DB.residents.length !== beforeCount) scheduleSave();
+  if(canEdit() && DB.residents.length !== beforeCount) scheduleSave();
   DB.residents.forEach(p => {
     if(p.originalMoveIn == null) p.originalMoveIn = p.moveIn || '';
     if(p.scheduledToLeave == null) p.scheduledToLeave = false;
     p.resStatus = computeResStatus(p);
   });
-  processScheduledLeaves();
+  if(canEdit()) processScheduledLeaves();
   let statusFixed = false;
   DB.rooms.forEach(room=>{
     if(!roomHasActiveResident(room) && !STATUS_LIST_MANUAL.includes(room.saleStatus)){
@@ -2382,14 +2581,25 @@ async function initApp(user){
       statusFixed = true;
     }
   });
-  if(statusFixed) scheduleSave();
+  if(canEdit() && statusFixed) scheduleSave();
   UI.branchId = DB.branches[0] ? DB.branches[0].id : null;
   render();
   document.getElementById('savedNote').textContent = '자동 저장됨 · 이 대시보드를 사용하는 모든 사람에게 공유됩니다';
+
+  if(isSuperAdmin()) checkPendingRequests();
+}
+
+async function checkPendingRequests(){
+  try{
+    const snap = await USERS_COL.where('role','==','pending').get();
+    if(snap.empty) return;
+    showAlert(`승인 대기 중인 계정 요청이 ${snap.size}건 있습니다.\n"전체 통계" 화면의 "사용자 관리"에서 확인해주세요.`);
+  }catch(e){ console.error('승인 대기 확인 실패:', e); }
 }
 
 function showLoginScreen(){
   document.getElementById('app').style.display = 'none';
+  document.getElementById('pendingScreen').style.display = 'none';
   document.getElementById('loginScreen').style.display = 'flex';
 }
 
@@ -2414,6 +2624,68 @@ document.getElementById('loginBtn').addEventListener('click', ()=>{
 document.getElementById('loginPassword').addEventListener('keydown', (e)=>{
   if(e.key === 'Enter') document.getElementById('loginBtn').click();
 });
+document.getElementById('requestAccountLink').addEventListener('click', (e)=>{
+  e.preventDefault();
+  showRequestAccountModal();
+});
+document.getElementById('pendingLogoutBtn').addEventListener('click', ()=> firebase.auth().signOut());
+
+function showRequestAccountModal(){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  const box = document.createElement('div');
+  box.className = 'modal-box';
+  box.innerHTML = `
+    <div class="modal-msg" style="margin-bottom:12px;font-weight:700;">계정 요청</div>
+    <div style="font-size:12px;color:var(--ink-soft);margin-bottom:12px;">
+      가입 즉시 사용은 불가하며, 관리자 승인 후 로그인할 수 있습니다.
+    </div>
+    <label class="field-label">이메일</label>
+    <input type="email" id="reqEmail" style="width:100%;margin-bottom:10px;">
+    <label class="field-label">비밀번호 (6자 이상)</label>
+    <input type="password" id="reqPw" style="width:100%;margin-bottom:10px;">
+    <label class="field-label">비밀번호 확인</label>
+    <input type="password" id="reqPw2" style="width:100%;">
+    <div class="login-error" id="reqError"></div>
+  `;
+  const btnRow = document.createElement('div');
+  btnRow.className = 'modal-btn-row';
+  btnRow.style.marginTop = '14px';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'btn'; cancelBtn.textContent = '취소';
+  cancelBtn.onclick = ()=> overlay.remove();
+  const okBtn = document.createElement('button');
+  okBtn.className = 'btn primary'; okBtn.textContent = '계정 요청';
+  okBtn.onclick = ()=>{
+    const email = document.getElementById('reqEmail').value.trim();
+    const pw = document.getElementById('reqPw').value;
+    const pw2 = document.getElementById('reqPw2').value;
+    const err = document.getElementById('reqError');
+    err.style.color = 'var(--st-hold)';
+    if(!email || !pw || !pw2){ err.textContent = '모든 항목을 입력해주세요.'; return; }
+    if(pw.length < 6){ err.textContent = '비밀번호는 6자 이상이어야 합니다.'; return; }
+    if(pw !== pw2){ err.textContent = '비밀번호가 서로 일치하지 않습니다.'; return; }
+    firebase.auth().createUserWithEmailAndPassword(email, pw)
+      .then(cred=> USERS_COL.doc(cred.user.uid).set({ email, role:'pending', createdAt: new Date().toISOString() })
+        .then(()=> firebase.auth().signOut()))
+      .then(()=>{
+        overlay.remove();
+        showAlert('계정 요청이 접수되었습니다. 관리자 승인 후 로그인해주세요.');
+      })
+      .catch(e=>{
+        const map = {
+          'auth/email-already-in-use': '이미 등록된 이메일입니다.',
+          'auth/invalid-email': '이메일 형식이 올바르지 않습니다.',
+          'auth/weak-password': '비밀번호가 너무 약합니다.'
+        };
+        err.textContent = map[e.code] || ('오류: ' + e.message);
+      });
+  };
+  btnRow.appendChild(cancelBtn); btnRow.appendChild(okBtn);
+  box.appendChild(btnRow);
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+}
 document.getElementById('forgotPwLink').addEventListener('click', (e)=>{
   e.preventDefault();
   const errBox = document.getElementById('loginError');
