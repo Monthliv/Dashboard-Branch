@@ -734,6 +734,7 @@ function renderBranchInfoBar(branch){
     const nameInput = document.createElement('input');
     nameInput.type = 'text'; nameInput.value = branch.name;
     nameInput.addEventListener('input', ()=>{
+      logChange(`지점명 수정: "${branch.name}" → "${nameInput.value}"`);
       branch.name = nameInput.value; scheduleSave();
       const opt = document.querySelector(`#branchSelect option[value="${branch.id}"]`); if(opt) opt.textContent = nameInput.value;
     });
@@ -749,7 +750,10 @@ function renderBranchInfoBar(branch){
   if(editOn){
     const capSel = document.createElement('select');
     for(let i=0;i<=10;i++){ const o=document.createElement('option'); o.value=i; o.textContent=`${i}대`; o.selected=(branch.parkingCapacity||0)===i; capSel.appendChild(o); }
-    capSel.addEventListener('change', ()=>{ branch.parkingCapacity = Number(capSel.value); scheduleSave(); render(); });
+    capSel.addEventListener('change', ()=>{
+      logChange(`"${branch.name}" 주차 가능 대수 변경: ${branch.parkingCapacity||0}대 → ${capSel.value}대`);
+      branch.parkingCapacity = Number(capSel.value); scheduleSave(); render();
+    });
     col2.appendChild(labeled('주차 가능 대수', capSel));
   }
   const activeList = branchActiveCarResidents(branch.id);
@@ -785,7 +789,7 @@ function renderBranchInfoBar(branch){
     parkingNote.placeholder = '예: 건물 뒤 2대 가능';
     parkingNote.value = branch.parkingNote;
     parkingNote.style.marginTop = '8px';
-    parkingNote.addEventListener('input', ()=>{ branch.parkingNote = parkingNote.value; scheduleSave(); });
+    parkingNote.addEventListener('input', ()=>{ logChange(`"${branch.name}" 주차 메모 수정`); branch.parkingNote = parkingNote.value; scheduleSave(); });
     col2.appendChild(parkingNote);
     col2.appendChild(renderMemoStyleControls(branch, 'parkingNoteColor', 'parkingNoteBold'));
   } else if(branch.parkingNote){
@@ -803,7 +807,7 @@ function renderBranchInfoBar(branch){
     const memoArea = document.createElement('textarea');
     memoArea.placeholder = '지점 전체 공지/특이사항';
     memoArea.value = branch.memo;
-    memoArea.addEventListener('input', ()=>{ branch.memo = memoArea.value; scheduleSave(); });
+    memoArea.addEventListener('input', ()=>{ logChange(`"${branch.name}" 특이사항 메모 수정`); branch.memo = memoArea.value; scheduleSave(); });
     col3.appendChild(memoArea);
     col3.appendChild(renderMemoStyleControls(branch, 'memoColor', 'memoBold'));
   } else {
@@ -1097,6 +1101,7 @@ function restoreFromHistory(h){
     DB.residents.push(p);
     DB.residentHistory = DB.residentHistory.filter(x=>x.id!==h.id);
     UI.historyOpen[room.id] = false;
+    logChange(`"${h.name}" 님을 ${room.number}호 입실자로 복원`);
     scheduleSave(); render();
   });
 }
@@ -1407,7 +1412,10 @@ function renderRoomEditForm(room){
     </div>
     <div><label class="field-label">정상 입실료(월)</label><input type="number" data-f="price" min="0" step="10000" value="${room.price||0}"></div>
   `;
-  grid.querySelector('[data-f="type"]').addEventListener('change', (e)=>{ room.type = e.target.value; scheduleSave(); render(); });
+  grid.querySelector('[data-f="type"]').addEventListener('change', (e)=>{
+    logChange(`${room.number}호 타입 변경: ${room.type} → ${e.target.value}`);
+    room.type = e.target.value; scheduleSave(); render();
+  });
   grid.querySelector('[data-f="occupancy"]').addEventListener('change', (e)=>{
     const newCap = e.target.value === '1인실' ? 1 : 2;
     const currentCount = DB.residents.filter(p=>p.roomId===room.id).length;
@@ -1416,11 +1424,15 @@ function renderRoomEditForm(room){
       e.target.value = room.occupancy || '2인실';
       return;
     }
+    logChange(`${room.number}호 인실 구분 변경: ${room.occupancy||'2인실'} → ${e.target.value}`);
     room.occupancy = e.target.value; scheduleSave(); render();
   });
   const saleStatusSel = grid.querySelector('[data-f="saleStatus"]');
   if(saleStatusSel) saleStatusSel.addEventListener('change', (e)=>{ logChange(`${room.number}호 판매상태 변경: ${room.saleStatus} → ${e.target.value}`); room.saleStatus = e.target.value; scheduleSave(); render(); });
-  grid.querySelector('[data-f="price"]').addEventListener('change', (e)=>{ room.price = Number(e.target.value)||0; scheduleSave(); render(); });
+  grid.querySelector('[data-f="price"]').addEventListener('change', (e)=>{
+    logChange(`${room.number}호 입실료 변경: ${formatWon(room.price)} → ${formatWon(Number(e.target.value)||0)}`);
+    room.price = Number(e.target.value)||0; scheduleSave(); render();
+  });
   const numberInput = grid.querySelector('[data-f="number"]');
   numberInput.addEventListener('change', ()=>{
     const val = numberInput.value.trim();
@@ -1429,6 +1441,7 @@ function renderRoomEditForm(room){
       showAlert(`이 지점에는 이미 "${val}" 호실이 있습니다.`);
       numberInput.value = room.number; return;
     }
+    logChange(`호실번호 변경: ${room.number} → ${val}`);
     room.number = val; scheduleSave(); render();
   });
   wrap.appendChild(grid);
@@ -1449,6 +1462,7 @@ function renderRoomEditForm(room){
     } else {
       room.maintenanceDate='';
     }
+    logChange(`${room.number}호 청소필요 ${room.needsCleaning?'설정':'해제'}`);
     scheduleSave(); render();
   };
   const retouchChip = document.createElement('span');
@@ -1462,6 +1476,7 @@ function renderRoomEditForm(room){
     } else {
       room.maintenanceDate='';
     }
+    logChange(`${room.number}호 리터치필요 ${room.needsRetouch?'설정':'해제'}`);
     scheduleSave(); render();
   };
   chips.appendChild(cleanChip); chips.appendChild(retouchChip);
@@ -1474,7 +1489,10 @@ function renderRoomEditForm(room){
     const dateInput = document.createElement('input');
     dateInput.type = 'date';
     dateInput.value = room.maintenanceDate || '';
-    dateInput.addEventListener('change', ()=>{ room.maintenanceDate = dateInput.value; scheduleSave(); render(); });
+    dateInput.addEventListener('change', ()=>{
+      logChange(`${room.number}호 ${room.needsCleaning ? '청소' : '리터치'} 예정일 변경: ${dateInput.value || '미정'}`);
+      room.maintenanceDate = dateInput.value; scheduleSave(); render();
+    });
     dateWrap.appendChild(labeled(room.needsCleaning ? '청소 예정일' : '리터치 예정일', dateInput));
     wrap.appendChild(dateWrap);
   }
@@ -1485,7 +1503,7 @@ function renderRoomEditForm(room){
   const noteArea = document.createElement('textarea');
   noteArea.value = room.note;
   noteArea.placeholder = '예: 204호 정독립 이동 예정';
-  noteArea.addEventListener('input', ()=>{ room.note = noteArea.value; scheduleSave(); });
+  noteArea.addEventListener('input', ()=>{ logChange(`${room.number}호 특이사항 메모 수정`); room.note = noteArea.value; scheduleSave(); });
   noteWrap.appendChild(noteArea);
   noteWrap.appendChild(renderMemoStyleControls(room, 'noteColor', 'noteBold'));
   wrap.appendChild(noteWrap);
@@ -1534,9 +1552,11 @@ function renderResidentEditCard(p, isSecondary, isDraft, room){
       p.originalMoveIn = p.moveIn;
       DB.residents.push(p);
       delete UI.draftResident[p.roomId];
+      logChange(`${room ? room.number + '호 ' : ''}"${p.name}" 입실자 신규 등록`);
     } else {
       delete UI.residentSnapshots[p.id];
       UI.residentEditMode[p.id] = false;
+      logChange(`${room ? room.number + '호 ' : ''}"${p.name}" 입실자 정보 수정`);
     }
     scheduleSave(); render();
   };
@@ -2034,6 +2054,7 @@ function handleBulkUploadFile(file){
         branches: DB.branches, rooms: DB.rooms, residents: DB.residents, residentHistory: DB.residentHistory
       }));
       const result = importFromWorkbook(wb);
+      logChange(`엑셀 일괄 업로드: 지점 신규${result.branchesCreated}/갱신${result.branchesUpdated}, 호실 신규${result.roomsCreated}/갱신${result.roomsUpdated}, 입실자 추가${result.residentsAdded}`);
       scheduleSave(); render();
       showAlert(buildImportSummary(result) + '\n\n잘못 업로드했다면 이 화면의 "업로드 되돌리기" 버튼으로 방금 업로드 이전 상태로 되돌릴 수 있어요.');
     }catch(err){
@@ -2051,6 +2072,7 @@ function undoLastImport(){
     DB.residents = lastImportSnapshot.residents;
     DB.residentHistory = lastImportSnapshot.residentHistory;
     lastImportSnapshot = null;
+    logChange('엑셀 일괄 업로드 되돌리기');
     scheduleSave(); render();
   });
 }
@@ -2287,6 +2309,7 @@ function renderChannelManagePanel(){
         : `"${ch}" 채널을 목록에서 삭제할까요?`;
       showConfirm(msg, ()=>{
         DB.channelList = DB.channelList.filter(x=>x!==ch);
+        logChange(`"${ch}" 유입채널 삭제`);
         scheduleSave(); render();
       });
     };
@@ -2311,6 +2334,7 @@ function renderChannelManagePanel(){
       return;
     }
     DB.channelList.push(name);
+    logChange(`"${name}" 유입채널 추가`);
     scheduleSave(); render();
   };
   addBtn.onclick = doAdd;
