@@ -379,7 +379,7 @@
 <body>
 <div id="loginScreen" class="login-screen">
   <div class="login-box">
-    <h1 class="login-title">MONTHLIV <span class="tag">OPS CONSOLE</span></h1>
+    <h1 class="login-title">먼슬리브 계약/입실 관리</h1>
     <p class="login-sub">권한이 있는 계정으로 로그인해주세요.</p>
     <label class="field-label">이메일</label>
     <input type="email" id="loginEmail" placeholder="이메일 주소" autocomplete="username">
@@ -395,7 +395,7 @@
 </div>
 <div id="pendingScreen" class="login-screen" style="display:none;">
   <div class="login-box">
-    <h1 class="login-title">MONTHLIV <span class="tag">OPS CONSOLE</span></h1>
+    <h1 class="login-title">먼슬리브 계약/입실 관리</h1>
     <p class="login-sub" style="margin-bottom:4px;">⏳ 승인 대기 중입니다</p>
     <p style="font-size:12.5px;color:var(--ink-soft);line-height:1.6;">
       계정 요청이 접수되었습니다. 관리자가 승인하면 이용할 수 있어요.<br>
@@ -407,7 +407,7 @@
 <div id="app" style="display:none;">
   <header class="top">
     <div class="brand">
-      <h1>MONTHLIV 운영 대시보드 <span class="tag">OPS CONSOLE</span></h1>
+      <h1>먼슬리브 계약/입실 관리</h1>
       <div class="sub" id="savedNote">불러오는 중…</div>
     </div>
     <div class="nav-row">
@@ -2511,6 +2511,7 @@ function showAlert(message){
   box.className = 'modal-box';
   const msg = document.createElement('div');
   msg.className = 'modal-msg';
+  msg.style.color = 'var(--st-hold)';
   msg.textContent = message;
   const btnRow = document.createElement('div');
   btnRow.className = 'modal-btn-row';
