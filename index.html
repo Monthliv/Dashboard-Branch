@@ -271,7 +271,9 @@
   .tl-headrow, .tl-row{ display:grid; grid-template-columns:220px 1fr; border-bottom:1px solid var(--line); }
   .tl-headrow{ position:sticky; top:0; background:var(--panel); z-index:2; }
   .tl-row:last-child{ border-bottom:none; }
+  .tl-legend{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
   .tl-label{ padding:10px 12px; font-size:12px; border-right:1px solid var(--line); display:flex; flex-direction:column; justify-content:center; gap:2px; }
+  .tl-label .tl-status-dot{ width:6px; height:6px; border-radius:50%; display:inline-block; margin-right:3px; }
   .tl-label .rm{ font-family:'JetBrains Mono',monospace; font-weight:700; }
   .tl-label .nm{ color:var(--ink-soft); font-size:11px; }
   .tl-days{ position:relative; display:grid; }
@@ -333,6 +335,22 @@
   ::-webkit-scrollbar{ height:8px; width:8px; }
   ::-webkit-scrollbar-thumb{ background:#D8D2C2; border-radius:4px; }
 
+  .login-screen{
+    position:fixed; inset:0; background:var(--paper); z-index:2000;
+    display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  .login-box{
+    background:#fff; border:1px solid var(--line); border-radius:16px; padding:32px;
+    width:100%; max-width:360px; box-shadow:0 12px 40px rgba(0,0,0,.1);
+  }
+  .login-title{ font-size:19px; font-weight:800; margin:0 0 4px; }
+  .login-sub{ font-size:12.5px; color:var(--ink-soft); margin:0 0 20px; }
+  .login-box input{ width:100%; margin-top:4px; }
+  .login-error{ color:var(--st-hold); font-size:12px; margin-top:10px; min-height:16px; }
+  .login-forgot{ text-align:center; margin-top:12px; font-size:12px; }
+  .login-forgot a{ color:var(--accent-ink); text-decoration:none; }
+  .login-forgot a:hover{ text-decoration:underline; }
+
   .modal-overlay{
     position:fixed; inset:0; background:rgba(30,42,50,.45); z-index:1000;
     display:flex; align-items:center; justify-content:center; padding:20px;
@@ -347,9 +365,23 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 </head>
 <body>
-<div id="app">
+<div id="loginScreen" class="login-screen">
+  <div class="login-box">
+    <h1 class="login-title">MONTHLIV <span class="tag">OPS CONSOLE</span></h1>
+    <p class="login-sub">권한이 있는 계정으로 로그인해주세요.</p>
+    <label class="field-label">이메일</label>
+    <input type="email" id="loginEmail" placeholder="이메일 주소" autocomplete="username">
+    <label class="field-label" style="margin-top:10px;">비밀번호</label>
+    <input type="password" id="loginPassword" placeholder="비밀번호" autocomplete="current-password">
+    <button class="btn primary" id="loginBtn" style="width:100%; margin-top:16px; justify-content:center;">로그인</button>
+    <div class="login-forgot"><a href="#" id="forgotPwLink">비밀번호를 잊으셨나요?</a></div>
+    <div class="login-error" id="loginError"></div>
+  </div>
+</div>
+<div id="app" style="display:none;">
   <header class="top">
     <div class="brand">
       <h1>MONTHLIV 운영 대시보드 <span class="tag">OPS CONSOLE</span></h1>
@@ -360,7 +392,12 @@
         <select id="branchSelect"></select>
         <button class="btn small" id="addBranchBtn">+ 지점 추가</button>
       </div>
-      <button class="btn statstab" id="statsBtn">전체 통계</button>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <span class="sub" id="loggedInAs"></span>
+        <button class="btn statstab" id="statsBtn">전체 통계</button>
+        <button class="btn small" id="changePwBtn">비밀번호 변경</button>
+        <button class="btn small" id="logoutBtn">로그아웃</button>
+      </div>
     </div>
   </header>
   <main id="main"></main>
@@ -1704,6 +1741,15 @@ function renderTimelineSection(branch){
   `;
   wrap.appendChild(toolbar);
 
+  const tlLegend = document.createElement('div');
+  tlLegend.className = 'tl-legend';
+  const legendItems = [...STATUS_LIST, '연체중'];
+  tlLegend.innerHTML = legendItems.map(s=>{
+    const m = s==='연체중' ? { fg:'var(--st-hold)', bg:'var(--st-hold-bg)' } : statusMeta(s);
+    return `<span class="badge" style="background:${m.bg};color:${m.fg}"><span class="dot" style="background:${m.fg}"></span>${s}</span>`;
+  }).join('');
+  wrap.appendChild(tlLegend);
+
   const monthStart = new Date(UI.tlYear, UI.tlMonth, 1);
   const daysInMonth = new Date(UI.tlYear, UI.tlMonth+1, 0).getDate();
 
@@ -1744,14 +1790,23 @@ function renderTimelineSection(branch){
   rooms.forEach(room=>{
     const residents = DB.residents.filter(p=>p.roomId===room.id);
     const rowsData = residents.length ? residents : [null];
+    const effStatus = effectiveRoomStatus(room);
+    const roomOverdue = roomHasOverdueResident(room);
+    const rowStatusLabel = roomOverdue ? '연체중' : effStatus;
+    const rowMeta = roomOverdue ? { fg:'var(--st-hold)', bg:'var(--st-hold-bg)' } : statusMeta(effStatus);
     rowsData.forEach(p=>{
       const row = document.createElement('div');
       row.className = 'tl-row';
       const lbl = document.createElement('div');
       lbl.className = 'tl-label';
+      lbl.style.borderLeft = `4px solid ${rowMeta.fg}`;
+      lbl.style.background = rowMeta.bg;
+      const personOverdue = p && isOverdue(p);
       lbl.innerHTML = p
-        ? `<span class="rm">${esc(room.number)}</span><span class="nm">${esc(p.name || '이름 미입력')} · ${p.channel}</span>`
-        : `<span class="rm">${esc(room.number)}</span><span class="nm" style="color:var(--st-vacant)">${room.saleStatus}</span>`;
+        ? `<span class="rm">${esc(room.number)}</span>
+           <span class="nm"><span class="tl-status-dot" style="background:${rowMeta.fg}"></span>${esc(p.name || '이름 미입력')}${personOverdue ? ' ⚠' : ''} · ${p.channel}</span>`
+        : `<span class="rm">${esc(room.number)}</span>
+           <span class="nm" style="color:${rowMeta.fg};font-weight:700;"><span class="tl-status-dot" style="background:${rowMeta.fg}"></span>${esc(rowStatusLabel)}</span>`;
       row.appendChild(lbl);
 
       const days = document.createElement('div');
@@ -2301,7 +2356,12 @@ function esc(s){
   return (s==null?'':String(s)).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-(async function init(){
+async function initApp(user){
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('app').style.display = '';
+  const loggedInAs = document.getElementById('loggedInAs');
+  if(loggedInAs) loggedInAs.textContent = user.email || '';
+
   DB = await loadState();
   DB.residentHistory = DB.residentHistory || [];
   DB.channelList = (DB.channelList && DB.channelList.length) ? DB.channelList : [...DEFAULT_CHANNEL_LIST];
@@ -2325,8 +2385,107 @@ function esc(s){
   if(statusFixed) scheduleSave();
   UI.branchId = DB.branches[0] ? DB.branches[0].id : null;
   render();
-  document.getElementById('savedNote').textContent = '자동 저장됨 · 이 데이터는 이 대시보드를 사용하는 모든 사람에게 공유됩니다';
-})();
+  document.getElementById('savedNote').textContent = '자동 저장됨 · 이 대시보드를 사용하는 모든 사람에게 공유됩니다';
+}
+
+function showLoginScreen(){
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('loginScreen').style.display = 'flex';
+}
+
+document.getElementById('loginBtn').addEventListener('click', ()=>{
+  const email = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  const errBox = document.getElementById('loginError');
+  errBox.textContent = '';
+  if(!email || !password){ errBox.textContent = '이메일과 비밀번호를 입력해주세요.'; return; }
+  firebase.auth().signInWithEmailAndPassword(email, password)
+    .catch(err=>{
+      const map = {
+        'auth/invalid-email': '이메일 형식이 올바르지 않습니다.',
+        'auth/user-not-found': '등록되지 않은 계정입니다. 관리자에게 계정 생성을 요청해주세요.',
+        'auth/wrong-password': '비밀번호가 올바르지 않습니다.',
+        'auth/invalid-credential': '이메일 또는 비밀번호가 올바르지 않습니다.',
+        'auth/too-many-requests': '로그인 시도가 너무 많습니다. 잠시 후 다시 시도해주세요.'
+      };
+      errBox.textContent = map[err.code] || ('로그인 실패: ' + err.message);
+    });
+});
+document.getElementById('loginPassword').addEventListener('keydown', (e)=>{
+  if(e.key === 'Enter') document.getElementById('loginBtn').click();
+});
+document.getElementById('forgotPwLink').addEventListener('click', (e)=>{
+  e.preventDefault();
+  const errBox = document.getElementById('loginError');
+  const email = document.getElementById('loginEmail').value.trim();
+  if(!email){ errBox.style.color = 'var(--st-hold)'; errBox.textContent = '먼저 이메일을 입력한 뒤 눌러주세요.'; return; }
+  firebase.auth().sendPasswordResetEmail(email).then(()=>{
+    errBox.style.color = 'var(--st-occupied)';
+    errBox.textContent = `${email} 주소로 비밀번호 재설정 메일을 보냈어요. 메일함(스팸함 포함)을 확인해주세요.`;
+  }).catch(err=>{
+    errBox.style.color = 'var(--st-hold)';
+    errBox.textContent = err.code === 'auth/user-not-found' ? '등록되지 않은 이메일입니다.' : ('오류: ' + err.message);
+  });
+});
+document.getElementById('logoutBtn').addEventListener('click', ()=>{
+  showConfirm('로그아웃할까요?', ()=> firebase.auth().signOut());
+});
+document.getElementById('changePwBtn').addEventListener('click', showChangePasswordModal);
+
+function showChangePasswordModal(){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  const box = document.createElement('div');
+  box.className = 'modal-box';
+  box.innerHTML = `
+    <div class="modal-msg" style="margin-bottom:12px;font-weight:700;">비밀번호 변경</div>
+    <label class="field-label">현재 비밀번호</label>
+    <input type="password" id="curPw" style="width:100%;margin-bottom:10px;">
+    <label class="field-label">새 비밀번호 (6자 이상)</label>
+    <input type="password" id="newPw" style="width:100%;margin-bottom:10px;">
+    <label class="field-label">새 비밀번호 확인</label>
+    <input type="password" id="newPw2" style="width:100%;">
+    <div class="login-error" id="pwChangeError"></div>
+  `;
+  const btnRow = document.createElement('div');
+  btnRow.className = 'modal-btn-row';
+  btnRow.style.marginTop = '14px';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'btn'; cancelBtn.textContent = '취소';
+  cancelBtn.onclick = ()=> overlay.remove();
+  const okBtn = document.createElement('button');
+  okBtn.className = 'btn primary'; okBtn.textContent = '변경';
+  okBtn.onclick = ()=>{
+    const curPw = document.getElementById('curPw').value;
+    const newPw = document.getElementById('newPw').value;
+    const newPw2 = document.getElementById('newPw2').value;
+    const err = document.getElementById('pwChangeError');
+    err.style.color = 'var(--st-hold)';
+    if(!curPw || !newPw || !newPw2){ err.textContent = '모든 항목을 입력해주세요.'; return; }
+    if(newPw.length < 6){ err.textContent = '새 비밀번호는 6자 이상이어야 합니다.'; return; }
+    if(newPw !== newPw2){ err.textContent = '새 비밀번호가 서로 일치하지 않습니다.'; return; }
+    const user = firebase.auth().currentUser;
+    const cred = firebase.auth.EmailAuthProvider.credential(user.email, curPw);
+    user.reauthenticateWithCredential(cred)
+      .then(()=> user.updatePassword(newPw))
+      .then(()=>{
+        overlay.remove();
+        showAlert('비밀번호가 변경되었습니다. 다음 로그인부터 새 비밀번호를 사용해주세요.');
+      })
+      .catch(e=>{
+        err.textContent = e.code === 'auth/wrong-password' ? '현재 비밀번호가 올바르지 않습니다.' : ('오류: ' + e.message);
+      });
+  };
+  btnRow.appendChild(cancelBtn); btnRow.appendChild(okBtn);
+  box.appendChild(btnRow);
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+}
+
+firebase.auth().onAuthStateChanged(user=>{
+  if(user){ initApp(user); }
+  else { showLoginScreen(); }
+});
 </script>
 </body>
 </html>
