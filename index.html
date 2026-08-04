@@ -2665,14 +2665,18 @@ function showRequestAccountModal(){
     if(!email || !pw || !pw2){ err.textContent = '모든 항목을 입력해주세요.'; return; }
     if(pw.length < 6){ err.textContent = '비밀번호는 6자 이상이어야 합니다.'; return; }
     if(pw !== pw2){ err.textContent = '비밀번호가 서로 일치하지 않습니다.'; return; }
+    suppressAuthHandling = true;
     firebase.auth().createUserWithEmailAndPassword(email, pw)
       .then(cred=> USERS_COL.doc(cred.user.uid).set({ email, role:'pending', createdAt: new Date().toISOString() })
         .then(()=> firebase.auth().signOut()))
       .then(()=>{
+        suppressAuthHandling = false;
         overlay.remove();
+        showLoginScreen();
         showAlert('계정 요청이 접수되었습니다. 관리자 승인 후 로그인해주세요.');
       })
       .catch(e=>{
+        suppressAuthHandling = false;
         const map = {
           'auth/email-already-in-use': '이미 등록된 이메일입니다.',
           'auth/invalid-email': '이메일 형식이 올바르지 않습니다.',
@@ -2754,7 +2758,9 @@ function showChangePasswordModal(){
   document.body.appendChild(overlay);
 }
 
+let suppressAuthHandling = false;
 firebase.auth().onAuthStateChanged(user=>{
+  if(suppressAuthHandling) return;
   if(user){ initApp(user); }
   else { showLoginScreen(); }
 });
