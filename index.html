@@ -336,6 +336,8 @@
   .log-row .log-time{ font-family:'JetBrains Mono',monospace; color:var(--ink-soft); flex:none; white-space:nowrap; }
   .log-row .log-email{ color:var(--accent-ink); font-weight:600; flex:none; white-space:nowrap; }
   .log-row .log-summary{ color:var(--ink); }
+  .log-toolbar{ display:flex; align-items:end; gap:8px; margin-bottom:12px; flex-wrap:wrap; }
+  .log-pager{ display:flex; gap:6px; flex-wrap:wrap; margin-top:12px; }
   .memo-style-row{ display:flex; align-items:center; gap:6px; margin-top:6px; }
   .memo-style-row .color-swatch{
     width:20px; height:20px; border-radius:50%; border:2px solid transparent; cursor:pointer; padding:0;
@@ -2237,20 +2239,45 @@ function renderUserManagePanel(){
   return box;
 }
 
+const CHANGELOG_PAGE_SIZE = 10;
 function renderChangeLogPanel(){
   const box = document.createElement('div');
   box.className = 'stat-section';
-  box.innerHTML = `<h3>변경 로그 (최근 50건)</h3>`;
+  box.innerHTML = `<h3>변경 로그</h3>`;
+
+  const toolbar = document.createElement('div');
+  toolbar.className = 'log-toolbar';
+  const dateWrap = document.createElement('div');
+  const dateLabel = document.createElement('label');
+  dateLabel.className = 'field-label'; dateLabel.textContent = '날짜 조회 (하루 단위)';
+  const dateInput = document.createElement('input');
+  dateInput.type = 'date';
+  dateWrap.appendChild(dateLabel); dateWrap.appendChild(dateInput);
+  const searchBtn = document.createElement('button');
+  searchBtn.className = 'btn small primary'; searchBtn.textContent = '조회';
+  const resetBtn = document.createElement('button');
+  resetBtn.className = 'btn small'; resetBtn.textContent = '최근 50건 보기';
+  toolbar.appendChild(dateWrap); toolbar.appendChild(searchBtn); toolbar.appendChild(resetBtn);
+  box.appendChild(toolbar);
+
   const body = document.createElement('div');
-  body.textContent = '불러오는 중…';
   body.style.cssText = 'font-size:12px;color:var(--ink-soft);';
   box.appendChild(body);
+  const pager = document.createElement('div');
+  pager.className = 'log-pager';
+  box.appendChild(pager);
 
-  CHANGELOG_COL.orderBy('timestamp','desc').limit(50).get().then(snap=>{
+  let currentLogs = [];
+  let currentPage = 1;
+
+  function renderPage(){
     body.innerHTML = '';
-    if(snap.empty){ body.textContent = '기록된 변경 로그가 없습니다.'; return; }
-    snap.forEach(doc=>{
-      const d = doc.data();
+    pager.innerHTML = '';
+    if(currentLogs.length === 0){ body.textContent = '기록된 변경 로그가 없습니다.'; return; }
+    const totalPages = Math.ceil(currentLogs.length / CHANGELOG_PAGE_SIZE);
+    if(currentPage > totalPages) currentPage = totalPages;
+    const start = (currentPage - 1) * CHANGELOG_PAGE_SIZE;
+    currentLogs.slice(start, start + CHANGELOG_PAGE_SIZE).forEach(d=>{
       const time = (d.timestamp || '').replace('T',' ').slice(0,16);
       const row = document.createElement('div');
       row.className = 'log-row';
@@ -2261,10 +2288,47 @@ function renderChangeLogPanel(){
       `;
       body.appendChild(row);
     });
-  }).catch(e=>{
-    body.textContent = '로그를 불러오지 못했습니다: ' + e.message;
-  });
+    if(currentLogs.length > CHANGELOG_PAGE_SIZE){
+      for(let p=1; p<=totalPages; p++){
+        const pBtn = document.createElement('button');
+        pBtn.className = 'btn small' + (p===currentPage ? ' primary' : '');
+        pBtn.textContent = String(p);
+        pBtn.onclick = ()=>{ currentPage = p; renderPage(); };
+        pager.appendChild(pBtn);
+      }
+    }
+  }
 
+  function loadDefault(){
+    body.textContent = '불러오는 중…';
+    pager.innerHTML = '';
+    CHANGELOG_COL.orderBy('timestamp','desc').limit(50).get().then(snap=>{
+      currentLogs = []; snap.forEach(doc=> currentLogs.push(doc.data()));
+      currentPage = 1;
+      renderPage();
+    }).catch(e=>{ body.textContent = '로그를 불러오지 못했습니다: ' + e.message; });
+  }
+
+  function loadByDate(dateStr){
+    body.textContent = '불러오는 중…';
+    pager.innerHTML = '';
+    const dayStart = dateStr + 'T00:00:00.000Z';
+    const dayEnd = dateStr + 'T23:59:59.999Z';
+    CHANGELOG_COL.where('timestamp','>=',dayStart).where('timestamp','<=',dayEnd)
+      .orderBy('timestamp','desc').limit(500).get().then(snap=>{
+        currentLogs = []; snap.forEach(doc=> currentLogs.push(doc.data()));
+        currentPage = 1;
+        renderPage();
+      }).catch(e=>{ body.textContent = '로그를 불러오지 못했습니다: ' + e.message; });
+  }
+
+  searchBtn.onclick = ()=>{
+    if(!dateInput.value){ showAlert('조회할 날짜를 선택해주세요.'); return; }
+    loadByDate(dateInput.value);
+  };
+  resetBtn.onclick = ()=>{ dateInput.value = ''; loadDefault(); };
+
+  loadDefault();
   return box;
 }
 
