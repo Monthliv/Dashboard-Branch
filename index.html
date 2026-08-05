@@ -2559,7 +2559,7 @@ async function checkPendingRequests(){
   try{
     const snap = await USERS_COL.where('role','==','pending').get();
     if(snap.empty) return;
-    showAlert(`승인 대기 중인 계정 요청이 ${snap.size}건 있습니다.\n"전체 통계" 화면의 "사용자 관리"에서 확인해주세요.`);
+    showAlert(`승인 대기 중인 계정 요청이 ${snap.size}건 있습니다.\n"관리자 설정" 화면의 "사용자 관리"에서 확인해주세요.`);
   }catch(e){ console.error('승인 대기 확인 실패:', e); }
 }
 
