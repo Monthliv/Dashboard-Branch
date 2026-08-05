@@ -145,6 +145,15 @@
   .add-branch-form .fld{ display:flex; flex-direction:column; }
   .add-branch-form input, .add-branch-form select{ width:100%; }
 
+  .admin-add-form{
+    background:var(--panel); border:1.5px dashed var(--accent); border-radius:12px; padding:16px;
+    margin-bottom:16px; display:grid; grid-template-columns:repeat(auto-fit, minmax(140px,1fr)); gap:10px; align-items:end;
+  }
+  .admin-add-form .fld{ display:flex; flex-direction:column; }
+  .admin-add-form input, .admin-add-form select{ width:100%; }
+  .admin-add-form .btn-row{ display:flex; gap:8px; }
+  .branch-address{ font-size:13px; font-weight:400; color:var(--ink-soft); margin-left:10px; }
+
   .branch-view-text{ font-size:14px; font-weight:600; padding:2px 0; }
   .branch-view-text.title{ font-size:19px; font-weight:800; }
   .branch-view-text.small{ font-size:12.5px; font-weight:400; color:var(--ink-soft); white-space:pre-wrap; }
@@ -441,7 +450,7 @@ let DB = null;
 let UI = {
   view:'stats', branchId:null, branchTab:'rooms',
   roomEditMode:{}, residentEditMode:{}, roomSnapshots:{}, residentSnapshots:{}, draftResident:{}, parkingListOpen:{},
-  branchEditMode:{}, branchSnapshots:{}, historyOpen:{},
+  branchEditMode:{}, branchSnapshots:{}, historyOpen:{}, addingBranch:false, addingRoom:false,
   tlYear:null, tlMonth:null, roomStatusFilter:'이용중'
 };
 
@@ -506,9 +515,9 @@ function seedState(){
 
   return {
     branches: [
-      { id: branchSeongsu, name: '먼슬리브 성수', parkingNote: '', parkingCapacity: 0, memo: '' },
-      { id: branchJamsil, name: '먼슬리브 잠실', parkingNote: '건물 뒤 2대 가능 (297구4624, 272모3214)', parkingCapacity: 2, memo: '' },
-      { id: branchDoksan, name: '먼슬리브 가산독산', parkingNote: '건물 앞 1대만 가능 (4번 자리)', parkingCapacity: 1, memo: '' }
+      { id: branchSeongsu, name: '먼슬리브 성수', address: '', parkingNote: '', parkingCapacity: 0, memo: '' },
+      { id: branchJamsil, name: '먼슬리브 잠실', address: '', parkingNote: '건물 뒤 2대 가능 (297구4624, 272모3214)', parkingCapacity: 2, memo: '' },
+      { id: branchDoksan, name: '먼슬리브 가산독산', address: '', parkingNote: '건물 앞 1대만 가능 (4번 자리)', parkingCapacity: 1, memo: '' }
     ],
     rooms, residents, residentHistory: [], channelList: [...DEFAULT_CHANNEL_LIST]
   };
@@ -757,8 +766,24 @@ function renderBranchInfoBar(branch){
     });
     namewrap.appendChild(nameInput);
     col1.appendChild(namewrap);
+    const addressInput = document.createElement('input');
+    addressInput.type = 'text'; addressInput.placeholder = '주소 (예: 서울시 성동구 ...)'; addressInput.value = branch.address || '';
+    addressInput.style.marginTop = '6px';
+    addressInput.addEventListener('input', ()=>{
+      logChange(`"${branch.name}" 주소 수정`);
+      branch.address = addressInput.value; scheduleSave();
+    });
+    col1.appendChild(addressInput);
   } else {
-    col1.appendChild(el('div', 'branch-view-text title', branch.name));
+    const titleDiv = document.createElement('div'); titleDiv.className = 'branch-view-text title';
+    titleDiv.textContent = branch.name;
+    if(branch.address){
+      const addrSpan = document.createElement('span');
+      addrSpan.className = 'branch-address';
+      addrSpan.textContent = branch.address;
+      titleDiv.appendChild(addrSpan);
+    }
+    col1.appendChild(titleDiv);
   }
   bar.appendChild(col1);
 
@@ -1811,6 +1836,11 @@ function renderTimelineSection(branch){
            <span class="nm"><span class="tl-status-dot" style="background:${rowMeta.fg}"></span>${esc(p.name || '이름 미입력')}${personOverdue ? ' ⚠' : ''} · ${p.channel}</span>`
         : `<span class="rm">${esc(room.number)}</span>
            <span class="nm" style="color:${rowMeta.fg};font-weight:700;"><span class="tl-status-dot" style="background:${rowMeta.fg}"></span>${esc(rowStatusLabel)}</span>`;
+      if(p){
+        lbl.style.cursor = 'pointer';
+        lbl.title = `${p.name || '이름 미입력'} · ${p.channel} · ${p.moveIn} ~ ${p.moveOut || '미정'}${p.memo ? ' · ' + p.memo : ''} (클릭 시 호실로 이동)`;
+        lbl.onclick = ()=> scrollToRoomCard(room);
+      }
       row.appendChild(lbl);
 
       const days = document.createElement('div');
@@ -1876,7 +1906,9 @@ function buildBar(p, room, monthStart, daysInMonth){
   const nameText = esc(p.name || p.resStatus);
   const memoText = p.memo ? ` <span class="tl-bar-memo">${esc(p.memo)}</span>` : '';
   bar.innerHTML = `<span class="tl-bar-name">${nameText}</span>${memoText}`;
-  bar.title = `${p.name || '이름 미입력'} · ${meta.key} · ${p.channel} · ${p.moveIn} ~ ${p.moveOut || '미정'}${p.memo ? ' · ' + p.memo : ''}`;
+  bar.title = `${p.name || '이름 미입력'} · ${meta.key} · ${p.channel} · ${p.moveIn} ~ ${p.moveOut || '미정'}${p.memo ? ' · ' + p.memo : ''} (클릭 시 호실로 이동)`;
+  bar.style.cursor = 'pointer';
+  bar.onclick = ()=> scrollToRoomCard(room);
   return bar;
 }
 
@@ -2347,12 +2379,125 @@ function renderAdminView(){
     return wrap;
   }
 
+  wrap.appendChild(renderBranchRoomManagePanel());
   wrap.appendChild(renderBulkUploadPanel());
   wrap.appendChild(renderChannelManagePanel());
   wrap.appendChild(renderUserManagePanel());
   wrap.appendChild(renderChangeLogPanel());
 
   return wrap;
+}
+
+function renderBranchRoomManagePanel(){
+  const box = document.createElement('div');
+  box.className = 'stat-section';
+  box.innerHTML = `<h3>지점 · 호실 관리</h3>`;
+
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex; gap:8px; margin-bottom:12px;';
+  const addBranchBtn = document.createElement('button');
+  addBranchBtn.className = 'btn primary small';
+  addBranchBtn.textContent = UI.addingBranch ? '지점 추가 취소' : '+ 지점 추가';
+  addBranchBtn.onclick = ()=>{ UI.addingBranch = !UI.addingBranch; UI.addingRoom = false; render(); };
+  const addRoomBtn = document.createElement('button');
+  addRoomBtn.className = 'btn primary small';
+  addRoomBtn.textContent = UI.addingRoom ? '호실 추가 취소' : '+ 호실 추가';
+  addRoomBtn.onclick = ()=>{ UI.addingRoom = !UI.addingRoom; UI.addingBranch = false; render(); };
+  btnRow.appendChild(addBranchBtn); btnRow.appendChild(addRoomBtn);
+  box.appendChild(btnRow);
+
+  if(UI.addingBranch) box.appendChild(renderAdminAddBranchForm());
+  if(UI.addingRoom) box.appendChild(renderAdminAddRoomForm());
+  if(!UI.addingBranch && !UI.addingRoom){
+    box.appendChild(el('div','empty-hint','위 버튼으로 새 지점 또는 호실을 수동으로 추가할 수 있습니다.'));
+  }
+
+  return box;
+}
+
+function renderAdminAddBranchForm(){
+  const form = document.createElement('div');
+  form.className = 'admin-add-form';
+  form.innerHTML = `
+    <div class="fld"><label class="field-label">지점명 *</label><input type="text" id="nbName" placeholder="예: 먼슬리브 신규지점"></div>
+    <div class="fld"><label class="field-label">주소</label><input type="text" id="nbAddress" placeholder="예: 서울시 성동구 ..."></div>
+    <div class="fld"><label class="field-label">주차 가능 대수</label>
+      <select id="nbCap">${Array.from({length:11},(_,i)=>`<option value="${i}">${i}대</option>`).join('')}</select></div>
+    <div class="btn-row">
+      <button class="btn primary" id="nbSubmit">추가</button>
+      <button class="btn" id="nbCancel">취소</button>
+    </div>
+  `;
+  setTimeout(()=>{
+    document.getElementById('nbName').focus();
+    document.getElementById('nbCancel').onclick = ()=>{ UI.addingBranch=false; render(); };
+    document.getElementById('nbSubmit').onclick = ()=>{
+      const nameEl = document.getElementById('nbName');
+      const name = nameEl.value.trim();
+      if(!name){ showAlert('지점명을 입력해주세요.'); nameEl.focus(); return; }
+      const address = document.getElementById('nbAddress').value.trim();
+      const cap = Number(document.getElementById('nbCap').value) || 0;
+      const nb = { id: uid('b'), name, address, parkingNote:'', parkingCapacity: cap, memo:'' };
+      DB.branches.push(nb);
+      logChange(`"${name}" 지점 신규 등록`);
+      UI.addingBranch = false;
+      scheduleSave(); render();
+    };
+  },0);
+  return form;
+}
+
+function renderAdminAddRoomForm(){
+  const form = document.createElement('div');
+  form.className = 'admin-add-form';
+  if(DB.branches.length===0){
+    form.innerHTML = `<div class="fld">먼저 지점을 추가해주세요.</div>`;
+    return form;
+  }
+  form.innerHTML = `
+    <div class="fld"><label class="field-label">지점 *</label>
+      <select id="nrBranch">${DB.branches.map(b=>`<option value="${b.id}">${esc(b.name)}</option>`).join('')}</select></div>
+    <div class="fld"><label class="field-label">호실 번호 *</label><input type="text" id="nrNumber" placeholder="예: 305"></div>
+    <div class="fld"><label class="field-label">호실 타입</label>
+      <select id="nrType">${ROOM_TYPE_LIST.map(t=>`<option>${t}</option>`).join('')}</select></div>
+    <div class="fld"><label class="field-label">인실 구분 *</label>
+      <select id="nrOccupancy">${OCCUPANCY_LIST.map(t=>`<option>${t}</option>`).join('')}</select></div>
+    <div class="fld"><label class="field-label">초기 상태</label>
+      <select id="nrStatus">${STATUS_LIST_MANUAL.map(s=>`<option>${s}</option>`).join('')}</select></div>
+    <div class="fld"><label class="field-label">정상 입실료(월)</label><input type="number" id="nrPrice" placeholder="예: 450000" min="0" step="10000"></div>
+    <div class="btn-row">
+      <button class="btn primary" id="nrSubmit">추가</button>
+      <button class="btn" id="nrCancel">취소</button>
+    </div>
+  `;
+  setTimeout(()=>{
+    document.getElementById('nrNumber').focus();
+    document.getElementById('nrCancel').onclick = ()=>{ UI.addingRoom=false; render(); };
+    document.getElementById('nrSubmit').onclick = ()=>{
+      const branchId = document.getElementById('nrBranch').value;
+      const branch = DB.branches.find(b=>b.id===branchId);
+      const numberEl = document.getElementById('nrNumber');
+      const number = numberEl.value.trim();
+      if(!number){ showAlert('호실 번호를 입력해주세요.'); numberEl.focus(); return; }
+      if(roomNumberTaken(branchId, number, null)){
+        showAlert(`이 지점에는 이미 "${number}" 호실이 있습니다. 호실은 지점당 1개씩만 등록할 수 있어요.`);
+        numberEl.focus(); return;
+      }
+      const room = {
+        id: uid('r'), branchId, number,
+        type: document.getElementById('nrType').value,
+        occupancy: document.getElementById('nrOccupancy').value,
+        saleStatus: document.getElementById('nrStatus').value,
+        needsCleaning:false, needsRetouch:false, maintenanceDate:'', preSelling:false, note:'',
+        price: Number(document.getElementById('nrPrice').value) || 0
+      };
+      DB.rooms.push(room);
+      UI.addingRoom = false;
+      logChange(`${branch ? branch.name + ' ' : ''}${room.number}호 신규 등록`);
+      scheduleSave(); render();
+    };
+  },0);
+  return form;
 }
 
 function renderOverdueStatsCard(){
@@ -2564,6 +2709,7 @@ async function initApp(user){
   });
   if(canEdit() && statusFixed) scheduleSave();
   UI.branchId = DB.branches[0] ? DB.branches[0].id : null;
+  if(!isSuperAdmin()) UI.view = 'branch'; // 슈퍼어드민이 아니면 전체 통계 대신 지점 대시보드로 바로 진입
   render();
   document.getElementById('savedNote').textContent = '자동 저장됨 · 이 대시보드를 사용하는 모든 사람에게 공유됩니다';
 
