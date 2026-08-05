@@ -353,6 +353,8 @@
   table.branch-table{ width:100%; border-collapse:collapse; font-size:12.5px; }
   table.branch-table th, table.branch-table td{ padding:8px 10px; border-bottom:1px solid var(--line); text-align:left; }
   table.branch-table th{ color:var(--ink-soft); font-weight:700; font-size:11px; }
+  table.branch-table .branch-table-total{ background:var(--accent-soft); font-weight:800; }
+  table.branch-table .branch-table-total td{ border-bottom:2px solid var(--accent); color:var(--accent-ink); }
 
   ::-webkit-scrollbar{ height:8px; width:8px; }
   ::-webkit-scrollbar-thumb{ background:#D8D2C2; border-radius:4px; }
@@ -2340,6 +2342,7 @@ function renderStatsView(){
   table.innerHTML = `<thead><tr><th>지점</th><th>호실수</th><th>이용중</th><th>판매중</th><th>입실율</th><th>판매보류</th><th>예약</th></tr></thead>`;
   const today = todayISO();
   const tbody = document.createElement('tbody');
+  const totals = { total:0, occupied:0, forSale:0, hold:0, reserved:0, activeCount:0 };
   DB.branches.forEach(b=>{
     const rms = DB.rooms.filter(r=>r.branchId===b.id);
     const roomIds = new Set(rms.map(r=>r.id));
@@ -2354,11 +2357,19 @@ function renderStatsView(){
     });
     const reserved = DB.residents.filter(p => roomIds.has(p.roomId) && p.moveIn && p.moveIn > today).length;
     const occRate = total ? Math.round((activeCount/total)*100) : 0;
+    totals.total += total; totals.occupied += occupied; totals.forSale += forSale;
+    totals.hold += hold; totals.reserved += reserved; totals.activeCount += activeCount;
     const tr = document.createElement('tr');
     tr.innerHTML = `<td><a href="#" data-goto="${b.id}" style="color:var(--accent-ink);font-weight:700;text-decoration:none;">${esc(b.name)}</a></td>
       <td>${total}</td><td>${occupied}</td><td>${forSale}</td><td>${occRate}%</td><td>${hold}</td><td>${reserved}</td>`;
     tbody.appendChild(tr);
   });
+  const totalOccRate = totals.total ? Math.round((totals.activeCount/totals.total)*100) : 0;
+  const totalTr = document.createElement('tr');
+  totalTr.className = 'branch-table-total';
+  totalTr.innerHTML = `<td>전체</td>
+    <td>${totals.total}</td><td>${totals.occupied}</td><td>${totals.forSale}</td><td>${totalOccRate}%</td><td>${totals.hold}</td><td>${totals.reserved}</td>`;
+  tbody.insertBefore(totalTr, tbody.firstChild);
   table.appendChild(tbody);
   branchSection.appendChild(table);
   wrap.appendChild(branchSection);
