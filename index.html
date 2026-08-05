@@ -204,6 +204,7 @@
   .rc-title{ display:flex; align-items:baseline; gap:6px; min-width:0; flex:1; }
   .rc-title .roomno{ font-family:'JetBrains Mono',monospace; font-weight:700; font-size:15px; white-space:nowrap; }
   .rc-title .roomtype{ font-size:11.5px; color:var(--ink-soft); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .rc-title .room-price{ font-size:11.5px; color:var(--accent-ink); font-weight:700; white-space:nowrap; margin-left:auto; }
   .rc-header-badges{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
   .history-btn{
     font-size:10px; font-weight:700; padding:3px 8px; border-radius:20px; border:1px solid var(--line);
@@ -454,7 +455,7 @@ let DB = null;
 let UI = {
   view:'stats', branchId:null, branchTab:'rooms',
   roomEditMode:{}, residentEditMode:{}, roomSnapshots:{}, residentSnapshots:{}, draftResident:{}, parkingListOpen:{},
-  branchEditMode:{}, branchSnapshots:{}, historyOpen:{}, addingBranch:false, addingRoom:false,
+  branchEditMode:{}, branchSnapshots:{}, historyOpen:{}, addingBranch:false, addingRoom:false, managingRoom:false,
   tlYear:null, tlMonth:null, roomStatusFilter:'이용중'
 };
 
@@ -1119,7 +1120,7 @@ function renderRoomCard(room, sectionStatus){
   header.className = 'rc-header';
   header.innerHTML = `
     <div class="rc-header-top">
-      <div class="rc-title"><span class="roomno">${esc(room.number)}</span><span class="roomtype">${esc(room.type)}</span></div>
+      <div class="rc-title"><span class="roomno">${esc(room.number)}</span><span class="roomtype">${esc(room.type)}</span><span class="room-price">${formatWon(room.price)}</span></div>
     </div>
     <div class="rc-header-badges">${headerRight}</div>
   `;
@@ -1129,7 +1130,7 @@ function renderRoomCard(room, sectionStatus){
   historyBtn.textContent = '히스토리';
   historyBtn.title = '퇴실한 입실자 이력 보기';
   historyBtn.onclick = ()=>{ UI.historyOpen[room.id] = !historyOpen; render(); };
-  header.querySelector('.rc-title').appendChild(historyBtn);
+  header.querySelector('.rc-header-badges').prepend(historyBtn);
   const pencil = document.createElement('button');
   pencil.className = 'iconbtn' + (roomEditOn ? ' active' : '');
   pencil.innerHTML = roomEditOn ? '&#10003;' : '&#9998;';
@@ -1339,67 +1340,20 @@ function renderRoomEditForm(room){
     UI.roomEditMode[room.id] = false;
     scheduleSave(); render();
   };
-  const delRoomBtn = document.createElement('button');
-  delRoomBtn.className = 'btn danger small';
-  delRoomBtn.textContent = '호실 삭제';
-  delRoomBtn.onclick = ()=>{
-    showConfirm(`${room.number}호를 삭제할까요? 입실자 정보도 함께 삭제됩니다.`, ()=>{
-      DB.residents = DB.residents.filter(p=>p.roomId!==room.id);
-      DB.rooms = DB.rooms.filter(r=>r.id!==room.id);
-      logChange(`${room.number}호 삭제`);
-      scheduleSave(); render();
-    });
-  };
-  btnGroup.appendChild(cancelBtn); btnGroup.appendChild(delRoomBtn);
+  btnGroup.appendChild(cancelBtn);
   roomLabel.appendChild(btnGroup);
   wrap.appendChild(roomLabel);
 
   const grid = document.createElement('div');
   grid.className = 'edit-grid';
   grid.innerHTML = `
-    <div><label class="field-label">호실 번호</label><input type="text" data-f="number" value="${esc(room.number)}"></div>
-    <div><label class="field-label">호실 타입</label>
-      <select data-f="type">${ROOM_TYPE_LIST.map(t=>`<option ${t===room.type?'selected':''}>${t}</option>`).join('')}</select></div>
-    <div><label class="field-label">인실 구분</label>
-      <select data-f="occupancy">${OCCUPANCY_LIST.map(t=>`<option ${t===(room.occupancy||'2인실')?'selected':''}>${t}</option>`).join('')}</select></div>
     <div>
       <label class="field-label">판매 상태</label>
       <select data-f="saleStatus">${STATUS_LIST_MANUAL.map(s=>`<option ${s===room.saleStatus?'selected':''}>${s}</option>`).join('')}</select>
     </div>
-    <div><label class="field-label">정상 입실료(월)</label><input type="number" data-f="price" min="0" step="10000" value="${room.price||0}"></div>
   `;
-  grid.querySelector('[data-f="type"]').addEventListener('change', (e)=>{
-    logChange(`${room.number}호 타입 변경: ${room.type} → ${e.target.value}`);
-    room.type = e.target.value; scheduleSave(); render();
-  });
-  grid.querySelector('[data-f="occupancy"]').addEventListener('change', (e)=>{
-    const newCap = e.target.value === '1인실' ? 1 : 2;
-    const currentCount = DB.residents.filter(p=>p.roomId===room.id).length;
-    if(currentCount > newCap){
-      showAlert(`현재 입실자가 ${currentCount}명 등록되어 있어 1인실로 바꿀 수 없습니다. 먼저 입실자를 정리해주세요.`);
-      e.target.value = room.occupancy || '2인실';
-      return;
-    }
-    logChange(`${room.number}호 인실 구분 변경: ${room.occupancy||'2인실'} → ${e.target.value}`);
-    room.occupancy = e.target.value; scheduleSave(); render();
-  });
   const saleStatusSel = grid.querySelector('[data-f="saleStatus"]');
   if(saleStatusSel) saleStatusSel.addEventListener('change', (e)=>{ logChange(`${room.number}호 판매상태 변경: ${room.saleStatus} → ${e.target.value}`); room.saleStatus = e.target.value; scheduleSave(); render(); });
-  grid.querySelector('[data-f="price"]').addEventListener('change', (e)=>{
-    logChange(`${room.number}호 입실료 변경: ${formatWon(room.price)} → ${formatWon(Number(e.target.value)||0)}`);
-    room.price = Number(e.target.value)||0; scheduleSave(); render();
-  });
-  const numberInput = grid.querySelector('[data-f="number"]');
-  numberInput.addEventListener('change', ()=>{
-    const val = numberInput.value.trim();
-    if(!val){ showAlert('호실 번호는 비워둘 수 없습니다.'); numberInput.value = room.number; return; }
-    if(roomNumberTaken(room.branchId, val, room.id)){
-      showAlert(`이 지점에는 이미 "${val}" 호실이 있습니다.`);
-      numberInput.value = room.number; return;
-    }
-    logChange(`호실번호 변경: ${room.number} → ${val}`);
-    room.number = val; scheduleSave(); render();
-  });
   wrap.appendChild(grid);
 
   const chipRow = document.createElement('div');
@@ -1959,6 +1913,225 @@ function renderBulkUploadPanel(){
   return box;
 }
 
+const BRANCH_NAME_ALIASES = {
+  '가산디지털 독산역': '가산독산',
+  '마곡 발산역': '마곡 발산',
+  '방배 이수역': '방배 이수',
+  '군자역': '군자',
+  '고대 안암역': '고대 안암',
+  '잠실 석촌고분역': '잠실'
+};
+function cleanKeyLoose(s){ return String(s||'').replace(/[\u200B-\u200D\uFEFF]/g,'').trim(); }
+function normalizeRoomNo(s){ const c = cleanKeyLoose(s).toLowerCase(); return /^\d+$/.test(c) ? String(parseInt(c,10)) : c; }
+
+function renderRoomBulkCreatePanel(){
+  const box = document.createElement('div');
+  box.className = 'stat-section';
+  box.innerHTML = `
+    <h3>\uD638\uC2E4 \uC77C\uAD04 \uC0DD\uC131</h3>
+    <div style="font-size:12px;color:var(--ink-soft);margin-bottom:12px;">
+      "\uC9C0\uC810\uBA85 / \uD638\uC2E4\uBC88\uD638 / \uD0C0\uC785 / \uC778\uC2E4\uAD6C\uBD84 / \uC815\uC0C1\uC785\uC2E4\uB8CC(\uC6D0)" \uD615\uC2DD\uC758 \uC5D1\uC140\uC744 \uC5C5\uB85C\uB4DC\uD558\uBA74,
+      \uC544\uC9C1 \uB4F1\uB85D\uB418\uC9C0 \uC54A\uC740 \uD638\uC2E4\uB9CC \uC0C8\uB85C \uC0DD\uC131\uD569\uB2C8\uB2E4. \uC774\uBBF8 \uC788\uB294 \uD638\uC2E4\uC740 \uAC74\uB4DC\uB9AC\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.
+    </div>
+  `;
+  const uploadBtn = document.createElement('button');
+  uploadBtn.className = 'btn';
+  uploadBtn.textContent = '\uD638\uC2E4 \uC815\uBCF4 \uC5D1\uC140\uB85C \uC77C\uAD04 \uC0DD\uC131';
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = '.xlsx,.xls';
+  fileInput.style.display = 'none';
+  uploadBtn.onclick = ()=> fileInput.click();
+  fileInput.addEventListener('change', ()=>{
+    if(fileInput.files && fileInput.files[0]){
+      handleRoomBulkCreateFile(fileInput.files[0]);
+      fileInput.value = '';
+    }
+  });
+  box.appendChild(uploadBtn);
+  box.appendChild(fileInput);
+  return box;
+}
+
+function handleRoomBulkCreateFile(file){
+  if(typeof XLSX === 'undefined'){ showAlert('\uC5D1\uC140 \uB77C\uC774\uBE0C\uB7EC\uB9AC\uB97C \uBD88\uB7EC\uC624\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. \uB124\uD2B8\uC6CC\uD06C \uC5F0\uACB0\uC744 \uD655\uC778\uD574\uC8FC\uC138\uC694.'); return; }
+  const reader = new FileReader();
+  reader.onload = (e)=>{
+    try{
+      const wb = XLSX.read(new Uint8Array(e.target.result), { type:'array' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval:'' });
+
+      const result = { created:0, skippedExists:0, unmatchedBranch:[] };
+      const newRooms = [];
+
+      rows.forEach((row, idx)=>{
+        const branchRaw = cleanKeyLoose(row['\uC9C0\uC810\uBA85']);
+        const numberRaw = cleanKeyLoose(String(row['\uD638\uC2E4\uBC88\uD638']||'')).replace(/\uD638$/,'');
+        if(!branchRaw && !numberRaw) return; // \uBE48 \uC5EC\uBC31 \uD589
+
+        const resolvedBranchName = BRANCH_NAME_ALIASES[branchRaw] || branchRaw;
+        const branch = DB.branches.find(b=> cleanKeyLoose(b.name).toLowerCase()===resolvedBranchName.toLowerCase());
+        if(!branch){ result.unmatchedBranch.push(`[${idx+2}\uD589] \uC9C0\uC810 "${branchRaw}"\uC744(\uB97C) \uCC3E\uC744 \uC218 \uC5C6\uC74C`); return; }
+
+        const exists = DB.rooms.some(r=> r.branchId===branch.id && normalizeRoomNo(r.number)===normalizeRoomNo(numberRaw))
+          || newRooms.some(r=> r.branchId===branch.id && normalizeRoomNo(r.number)===normalizeRoomNo(numberRaw));
+        if(exists){ result.skippedExists++; return; }
+
+        const occRaw = cleanKeyLoose(String(row['\uC778\uC2E4\uAD6C\uBD84']||''));
+        const occupancy = (occRaw==='2' || occRaw==='2\uC778\uC2E4') ? '2\uC778\uC2E4' : '1\uC778\uC2E4';
+        const type = cleanKeyLoose(row['\uD0C0\uC785']) || '\uAE30\uD0C0';
+        const price = Number(row['\uC815\uC0C1\uC785\uC2E4\uB8CC(\uC6D0)']) || 0;
+
+        newRooms.push({
+          id: uid('r'), branchId: branch.id, number: numberRaw,
+          type, occupancy, saleStatus:'\uACF5\uC2E4',
+          needsCleaning:false, needsRetouch:false, maintenanceDate:'', preSelling:false, note:'',
+          price
+        });
+        result.created++;
+      });
+
+      const problems = [...result.unmatchedBranch];
+      showConfirm(
+        `\uC5D1\uC140 \uBD84\uC11D \uACB0\uACFC\n`+
+        `- \uC0C8\uB85C \uC0DD\uC131\uB420 \uD638\uC2E4: ${result.created}\uAC1C\n`+
+        `- \uC774\uBBF8 \uC874\uC7AC\uD574\uC11C \uAC74\uB108\uB700: ${result.skippedExists}\uAC1C\n`+
+        `- \uC9C0\uC810\uBA85 \uBD88\uC77C\uCE58: ${result.unmatchedBranch.length}\uAC74\n\n`+
+        `\uACC4\uC18D\uD560\uAE4C\uC694?`,
+        ()=>{
+          DB.rooms.push(...newRooms);
+          logChange(`\uD638\uC2E4 \uC77C\uAD04 \uC0DD\uC131 (${result.created}\uAC1C)`);
+          scheduleSave();
+          render();
+          if(problems.length){
+            showAlert(`\uD638\uC2E4 \uC0DD\uC131 \uC644\uB8CC (${result.created}\uAC1C). \uB2E4\uB9CC \uC544\uB798 ${problems.length}\uAC74\uC740 \uBC18\uC601\uB418\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4:\n\n` +
+              problems.slice(0,30).join('\n') + (problems.length>30 ? `\n...\uC678 ${problems.length-30}\uAC74` : ''));
+          } else {
+            showAlert(`\uD638\uC2E4 \uC0DD\uC131\uC774 \uC644\uB8CC\uB418\uC5C8\uC2B5\uB2C8\uB2E4. (${result.created}\uAC1C)`);
+          }
+        }
+      );
+    }catch(err){
+      console.error(err);
+      showAlert('\uC5D1\uC140 \uCC98\uB9AC \uC911 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4: ' + err.message);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function renderResidentResyncPanel(){
+  const box = document.createElement('div');
+  box.className = 'stat-section';
+  box.innerHTML = `
+    <h3>계약자 DB로 입실자 전체 재등록</h3>
+    <div style="font-size:12px;color:var(--ink-soft);margin-bottom:12px;">
+      "지점명 / 호실번호 / 이름 / 연락처 / 입실일 / 퇴실예정일" 형식의 계약자 DB 엑셀을 업로드하면,
+      현재 등록된 모든 입실자와 퇴실 이력을 지우고 이 파일 내용으로 새로 채웁니다.
+      지점·호실 구성(타입/가격 등)은 그대로 유지됩니다. 이름이 "-" 또는 "*"인 행은 공실로 처리됩니다.
+    </div>
+  `;
+  const uploadBtn = document.createElement('button');
+  uploadBtn.className = 'btn danger';
+  uploadBtn.textContent = '⚠ 입실자 전체 초기화 후 엑셀로 재등록';
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = '.xlsx,.xls';
+  fileInput.style.display = 'none';
+  uploadBtn.onclick = ()=> fileInput.click();
+  fileInput.addEventListener('change', ()=>{
+    if(fileInput.files && fileInput.files[0]){
+      handleResidentResyncFile(fileInput.files[0]);
+      fileInput.value = '';
+    }
+  });
+  box.appendChild(uploadBtn);
+  box.appendChild(fileInput);
+  return box;
+}
+
+function handleResidentResyncFile(file){
+  if(typeof XLSX === 'undefined'){ showAlert('엑셀 라이브러리를 불러오지 못했습니다. 네트워크 연결을 확인해주세요.'); return; }
+  const reader = new FileReader();
+  reader.onload = (e)=>{
+    try{
+      const wb = XLSX.read(new Uint8Array(e.target.result), { type:'array', cellDates:true });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval:'' });
+
+      const result = { matched:0, vacant:0, unmatchedBranch:[], unmatchedRoom:[], overCapacity:[] };
+      const newResidents = [];
+      const slotCounters = {};
+
+      rows.forEach((row, idx)=>{
+        const branchRaw = cleanKeyLoose(row['지점명']);
+        const roomRaw = cleanKeyLoose(String(row['호실번호']||'')).replace(/호$/,'');
+        if(!branchRaw && !roomRaw) return; // 빈 여백 행
+
+        const resolvedBranchName = BRANCH_NAME_ALIASES[branchRaw] || branchRaw;
+        const branch = DB.branches.find(b=> cleanKeyLoose(b.name).toLowerCase()===resolvedBranchName.toLowerCase());
+        if(!branch){ result.unmatchedBranch.push(`[${idx+2}행] 지점 "${branchRaw}"을(를) 찾을 수 없음`); return; }
+
+        const room = DB.rooms.find(r=> r.branchId===branch.id && normalizeRoomNo(r.number)===normalizeRoomNo(roomRaw));
+        if(!room){ result.unmatchedRoom.push(`[${idx+2}행] ${branch.name} "${roomRaw}"호를 찾을 수 없음`); return; }
+
+        const nameRaw = cleanKeyLoose(row['이름']);
+        if(!nameRaw || nameRaw==='-' || nameRaw==='*'){ result.vacant++; return; }
+
+        const cap = occupancyCapacity(room);
+        const slot = slotCounters[room.id] || 0;
+        if(slot >= cap){
+          result.overCapacity.push(`[${idx+2}행] ${branch.name} ${room.number}호 "${nameRaw}" (정원 ${cap}명 초과로 제외)`);
+          return;
+        }
+        slotCounters[room.id] = slot + 1;
+
+        let phone = String(row['연락처']||'').trim();
+        if(phone.startsWith('=')) phone = phone.slice(1);
+        const moveIn = toISODateStr(row['입실일']);
+        const moveOut = toISODateStr(row['퇴실예정일']);
+        const p = {
+          id: uid('p'), roomId: room.id, name: nameRaw,
+          channel: '독립생활', resStatus:'', contractType:'신규',
+          moveIn, moveOut, originalMoveIn: moveIn, scheduledToLeave:false,
+          phone, memo:'', carNumber:'', firstSaveDone:true, slotIndex: slot
+        };
+        p.resStatus = computeResStatus(p);
+        newResidents.push(p);
+        result.matched++;
+      });
+
+      const problems = [...result.unmatchedBranch, ...result.unmatchedRoom, ...result.overCapacity];
+      showConfirm(
+        `엑셀 분석 결과\n`+
+        `- 등록될 입실자: ${result.matched}명\n`+
+        `- 공실 처리(이름 "-"/"*"): ${result.vacant}건\n`+
+        `- 지점명 불일치: ${result.unmatchedBranch.length}건\n`+
+        `- 호실 불일치: ${result.unmatchedRoom.length}건\n`+
+        `- 정원 초과 제외: ${result.overCapacity.length}건\n\n`+
+        `현재 등록된 모든 입실자(${DB.residents.length}명)와 퇴실 이력이 삭제되고 위 내용으로 교체됩니다.\n이 작업은 되돌릴 수 없습니다. 계속할까요?`,
+        ()=>{
+          DB.residents = newResidents;
+          DB.residentHistory = [];
+          logChange(`계약자 DB 엑셀로 입실자 전체 재등록 (${result.matched}명)`);
+          scheduleSave();
+          render();
+          if(problems.length){
+            showAlert(`재등록 완료 (${result.matched}명). 다만 아래 ${problems.length}건은 반영되지 않았습니다:\n\n` +
+              problems.slice(0,30).join('\n') + (problems.length>30 ? `\n...외 ${problems.length-30}건` : ''));
+          } else {
+            showAlert(`입실자 재등록이 완료되었습니다. (${result.matched}명)`);
+          }
+        }
+      );
+    }catch(err){
+      console.error(err);
+      showAlert('엑셀 처리 중 오류가 발생했습니다: ' + err.message);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
 function downloadBulkTemplate(){
   if(typeof XLSX === 'undefined'){ showAlert('엑셀 라이브러리를 불러오지 못했습니다. 네트워크 연결을 확인해주세요.'); return; }
   const wb = XLSX.utils.book_new();
@@ -2456,6 +2629,8 @@ function renderAdminView(){
 
   wrap.appendChild(renderBranchRoomManagePanel());
   wrap.appendChild(renderBulkUploadPanel());
+  wrap.appendChild(renderRoomBulkCreatePanel());
+  wrap.appendChild(renderResidentResyncPanel());
   wrap.appendChild(renderChannelManagePanel());
   wrap.appendChild(renderUserManagePanel());
   wrap.appendChild(renderChangeLogPanel());
@@ -2477,17 +2652,86 @@ function renderBranchRoomManagePanel(){
   const addRoomBtn = document.createElement('button');
   addRoomBtn.className = 'btn primary small';
   addRoomBtn.textContent = UI.addingRoom ? '호실 추가 취소' : '+ 호실 추가';
-  addRoomBtn.onclick = ()=>{ UI.addingRoom = !UI.addingRoom; UI.addingBranch = false; render(); };
-  btnRow.appendChild(addBranchBtn); btnRow.appendChild(addRoomBtn);
+  addRoomBtn.onclick = ()=>{ UI.addingRoom = !UI.addingRoom; UI.addingBranch = false; UI.managingRoom = false; render(); };
+  const manageRoomBtn = document.createElement('button');
+  manageRoomBtn.className = 'btn danger small';
+  manageRoomBtn.textContent = UI.managingRoom ? '호실 정보 수정 취소' : '호실 정보 수정 · 삭제';
+  manageRoomBtn.onclick = ()=>{ UI.managingRoom = !UI.managingRoom; UI.addingBranch = false; UI.addingRoom = false; render(); };
+  btnRow.appendChild(addBranchBtn); btnRow.appendChild(addRoomBtn); btnRow.appendChild(manageRoomBtn);
   box.appendChild(btnRow);
 
   if(UI.addingBranch) box.appendChild(renderAdminAddBranchForm());
   if(UI.addingRoom) box.appendChild(renderAdminAddRoomForm());
-  if(!UI.addingBranch && !UI.addingRoom){
-    box.appendChild(el('div','empty-hint','위 버튼으로 새 지점 또는 호실을 수동으로 추가할 수 있습니다.'));
+  if(UI.managingRoom) box.appendChild(renderAdminRoomManageForm());
+  if(!UI.addingBranch && !UI.addingRoom && !UI.managingRoom){
+    box.appendChild(el('div','empty-hint','위 버튼으로 새 지점 또는 호실을 수동으로 추가하거나, 기존 호실의 입실료를 수정·삭제할 수 있습니다.'));
   }
 
   return box;
+}
+
+function renderAdminRoomManageForm(){
+  const form = document.createElement('div');
+  form.className = 'admin-add-form';
+  if(DB.branches.length===0){
+    form.innerHTML = `<div class="fld">등록된 지점이 없습니다.</div>`;
+    return form;
+  }
+  form.innerHTML = `
+    <div class="fld"><label class="field-label">지점 *</label>
+      <select id="drBranch">${DB.branches.map(b=>`<option value="${b.id}">${esc(b.name)}</option>`).join('')}</select></div>
+    <div class="fld"><label class="field-label">호실 *</label><select id="drRoom"></select></div>
+    <div class="fld"><label class="field-label">정상 입실료(월)</label><input type="number" id="drPrice" min="0" step="10000"></div>
+    <div class="btn-row">
+      <button class="btn primary" id="drSave">가격 저장</button>
+      <button class="btn danger" id="drSubmit">호실 삭제</button>
+      <button class="btn" id="drCancel">취소</button>
+    </div>
+  `;
+  setTimeout(()=>{
+    const branchSel = document.getElementById('drBranch');
+    const roomSel = document.getElementById('drRoom');
+    const priceInput = document.getElementById('drPrice');
+    const fillRooms = ()=>{
+      const rms = DB.rooms.filter(r=>r.branchId===branchSel.value)
+        .sort((a,b)=> a.number.localeCompare(b.number,'ko',{numeric:true}));
+      roomSel.innerHTML = rms.length
+        ? rms.map(r=>`<option value="${r.id}">${esc(r.number)}호 (${esc(r.type)})</option>`).join('')
+        : `<option value="">호실 없음</option>`;
+      updatePrice();
+    };
+    const updatePrice = ()=>{
+      const room = DB.rooms.find(r=>r.id===roomSel.value);
+      priceInput.value = room ? (room.price || 0) : '';
+    };
+    fillRooms();
+    branchSel.onchange = fillRooms;
+    roomSel.onchange = updatePrice;
+    document.getElementById('drCancel').onclick = ()=>{ UI.managingRoom=false; render(); };
+    document.getElementById('drSave').onclick = ()=>{
+      const room = DB.rooms.find(r=>r.id===roomSel.value);
+      if(!room){ showAlert('호실을 선택해주세요.'); return; }
+      const branch = DB.branches.find(b=>b.id===room.branchId);
+      const newPrice = Number(priceInput.value) || 0;
+      logChange(`${branch ? branch.name + ' ' : ''}${room.number}호 입실료 변경: ${formatWon(room.price)} → ${formatWon(newPrice)}`);
+      room.price = newPrice;
+      scheduleSave();
+      showAlert('입실료가 저장되었습니다.');
+    };
+    document.getElementById('drSubmit').onclick = ()=>{
+      const room = DB.rooms.find(r=>r.id===roomSel.value);
+      if(!room){ showAlert('삭제할 호실을 선택해주세요.'); return; }
+      const branch = DB.branches.find(b=>b.id===room.branchId);
+      showConfirm(`${branch ? branch.name + ' ' : ''}${room.number}호를 삭제할까요? 입실자 정보도 함께 삭제됩니다.`, ()=>{
+        DB.residents = DB.residents.filter(p=>p.roomId!==room.id);
+        DB.rooms = DB.rooms.filter(r=>r.id!==room.id);
+        logChange(`${branch ? branch.name + ' ' : ''}${room.number}호 삭제`);
+        UI.managingRoom = false;
+        scheduleSave(); render();
+      });
+    };
+  },0);
+  return form;
 }
 
 function renderAdminAddBranchForm(){
