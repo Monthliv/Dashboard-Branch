@@ -126,6 +126,9 @@
 
   .room-toolbar{ display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; gap:12px; flex-wrap:wrap; }
   .room-toolbar .legend{ display:flex; gap:10px; flex-wrap:wrap; }
+  .legend-btn{ border:1px solid transparent; cursor:pointer; font-family:inherit; }
+  .legend-btn:hover{ border-color:currentColor; }
+  .legend-btn.active{ border-color:currentColor; box-shadow:0 0 0 1px currentColor inset; }
 
   .add-room-form{
     background:var(--panel); border:1.5px dashed var(--accent); border-radius:12px; padding:16px;
@@ -413,11 +416,11 @@
     <div class="nav-row">
       <div class="branch-picker">
         <select id="branchSelect"></select>
-        <button class="btn small" id="addBranchBtn">+ 지점 추가</button>
       </div>
       <div style="display:flex; gap:8px; align-items:center;">
         <span class="sub" id="loggedInAs"></span>
         <button class="btn statstab" id="statsBtn">전체 통계</button>
+        <button class="btn small" id="adminBtn" style="display:none;">관리자 설정</button>
         <button class="btn small" id="changePwBtn">비밀번호 변경</button>
         <button class="btn small" id="logoutBtn">로그아웃</button>
       </div>
@@ -430,10 +433,10 @@
 const STORE_KEY = 'monthliv-state';
 let DB = null;
 let UI = {
-  view:'branch', branchId:null, branchTab:'rooms',
+  view:'stats', branchId:null, branchTab:'rooms',
   roomEditMode:{}, residentEditMode:{}, roomSnapshots:{}, residentSnapshots:{}, draftResident:{}, parkingListOpen:{},
-  branchEditMode:{}, branchSnapshots:{}, addingBranch:false, historyOpen:{}, sectionCollapsed:{},
-  tlYear:null, tlMonth:null, addingRoom:false
+  branchEditMode:{}, branchSnapshots:{}, historyOpen:{}, sectionCollapsed:{},
+  tlYear:null, tlMonth:null, leavingFilterOn:false
 };
 
 function uid(p){ return p + '_' + Math.random().toString(36).slice(2,9); }
@@ -601,30 +604,37 @@ function render(){
   renderTopNav();
   const main = document.getElementById('main');
   main.innerHTML = '';
-  if(UI.addingBranch){ main.appendChild(renderAddBranchForm()); }
   if(UI.view === 'stats'){ main.appendChild(renderStatsView()); return; }
+  if(UI.view === 'admin'){ main.appendChild(renderAdminView()); return; }
   main.appendChild(renderBranchView());
 }
 
 function renderTopNav(){
   const sel = document.getElementById('branchSelect');
   sel.innerHTML = '';
+  const placeholder = document.createElement('option');
+  placeholder.value = ''; placeholder.textContent = '지점 선택';
+  placeholder.selected = UI.view !== 'branch';
+  sel.appendChild(placeholder);
   DB.branches.forEach(br=>{
     const o = document.createElement('option');
     o.value = br.id; o.textContent = br.name;
-    o.selected = UI.branchId===br.id;
+    o.selected = UI.view === 'branch' && UI.branchId===br.id;
     sel.appendChild(o);
   });
-  sel.onchange = ()=>{ UI.view='branch'; UI.branchId = sel.value; UI.addingRoom=false; render(); };
-
-  const addBranchBtn = document.getElementById('addBranchBtn');
-  addBranchBtn.style.display = canEdit() ? '' : 'none';
-  addBranchBtn.textContent = UI.addingBranch ? '지점 추가 취소' : '+ 지점 추가';
-  addBranchBtn.onclick = ()=>{ UI.addingBranch = !UI.addingBranch; render(); };
+  sel.onchange = ()=>{
+    if(!sel.value) return;
+    UI.view='branch'; UI.branchId = sel.value; UI.leavingFilterOn=false; render();
+  };
 
   const statsBtn = document.getElementById('statsBtn');
   statsBtn.className = 'btn statstab' + (UI.view==='stats' ? ' active' : '');
   statsBtn.onclick = ()=>{ UI.view = 'stats'; render(); };
+
+  const adminBtn = document.getElementById('adminBtn');
+  adminBtn.style.display = isSuperAdmin() ? '' : 'none';
+  adminBtn.className = 'btn small' + (UI.view==='admin' ? ' primary' : '');
+  adminBtn.onclick = ()=>{ UI.view = 'admin'; render(); };
 }
 
 function currentBranch(){
@@ -870,33 +880,86 @@ function roomNumberTaken(branchId, number, excludeRoomId){
   return DB.rooms.some(r => r.branchId===branchId && r.id!==excludeRoomId && String(r.number).replace(/[\u200B-\u200D\uFEFF]/g,'').trim().toLowerCase()===norm);
 }
 
+function roomHasScheduledLeaveResident(room){
+  return DB.residents.some(p => p.roomId===room.id && p.scheduledToLeave && isCurrentlyResiding(p));
+}
+function roomIsLeavingSoon(room){
+  return roomHasScheduledLeaveResident(room) || effectiveRoomStatus(room)==='퇴실예정';
+}
+function jumpToStatusSection(branch, status){
+  UI.leavingFilterOn = false;
+  const key = branch.id + '::' + status;
+  UI.sectionCollapsed[key] = false;
+  render();
+  setTimeout(()=>{
+    const target = document.getElementById('sec-' + key);
+    if(target) target.scrollIntoView({ behavior:'smooth', block:'start' });
+  }, 60);
+}
+
 function renderRoomsSection(branch){
   const wrap = document.createElement('div');
+  const rooms = DB.rooms.filter(r=>r.branchId===branch.id);
 
   const toolbar = document.createElement('div');
   toolbar.className = 'room-toolbar';
-  toolbar.innerHTML = `
-    <div class="legend">
-      ${STATUS_LIST.map(s=>{
-        const m = statusMeta(s);
-        return `<span class="badge" style="background:${m.bg};color:${m.fg}"><span class="dot" style="background:${m.fg}"></span>${s}</span>`;
-      }).join('')}
-    </div>
-  `;
-  const addBtn = document.createElement('button');
-  addBtn.className = 'btn primary';
-  addBtn.textContent = UI.addingRoom ? '호실 추가 취소' : '+ 호실 추가';
-  addBtn.onclick = ()=>{ UI.addingRoom = !UI.addingRoom; render(); };
-  if(canEdit()) toolbar.appendChild(addBtn);
+  const legend = document.createElement('div');
+  legend.className = 'legend';
+  STATUS_LIST.forEach(s=>{
+    const m = statusMeta(s);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'badge legend-btn' + (s==='퇴실예정' && UI.leavingFilterOn ? ' active' : '');
+    btn.style.background = m.bg; btn.style.color = m.fg;
+    btn.innerHTML = `<span class="dot" style="background:${m.fg}"></span>${s}`;
+    btn.title = s === '퇴실예정' ? '퇴실예정인 호실만 모아보기' : `${s} 호실로 이동`;
+    btn.onclick = ()=>{
+      if(s === '퇴실예정'){ UI.leavingFilterOn = !UI.leavingFilterOn; render(); }
+      else jumpToStatusSection(branch, s);
+    };
+    legend.appendChild(btn);
+  });
+  toolbar.appendChild(legend);
   wrap.appendChild(toolbar);
 
-  if(UI.addingRoom && canEdit()){
-    wrap.appendChild(renderAddRoomForm(branch));
+  if(rooms.length===0){
+    wrap.appendChild(el('div','empty-hint','등록된 호실이 없습니다.'));
+    return wrap;
   }
 
-  const rooms = DB.rooms.filter(r=>r.branchId===branch.id);
-  if(rooms.length===0 && !UI.addingRoom){
-    wrap.appendChild(el('div','empty-hint','등록된 호실이 없습니다. "+ 호실 추가"로 첫 호실을 등록하세요.'));
+  if(UI.leavingFilterOn){
+    const meta = statusMeta('퇴실예정');
+    const leaving = rooms.filter(roomIsLeavingSoon)
+      .sort((a,b)=> a.number.localeCompare(b.number,'ko',{numeric:true}));
+
+    const section = document.createElement('div');
+    section.className = 'status-section';
+    const head = document.createElement('div');
+    head.className = 'sec-head';
+    head.style.borderColor = meta.fg;
+    head.innerHTML = `
+      <span class="dot" style="background:${meta.fg}"></span>
+      <span class="name" style="color:${meta.fg}">퇴실예정 모아보기</span>
+      <span class="count-badge" style="background:${meta.bg};color:${meta.fg};">${leaving.length}개</span>
+    `;
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'btn small';
+    closeBtn.style.marginLeft = 'auto';
+    closeBtn.textContent = '전체 보기';
+    closeBtn.onclick = ()=>{ UI.leavingFilterOn = false; render(); };
+    head.appendChild(closeBtn);
+    section.appendChild(head);
+
+    if(leaving.length===0){
+      section.appendChild(el('div','sec-empty','퇴실예정인 호실이 없습니다.'));
+    } else {
+      const grid = document.createElement('div');
+      grid.className = 'grid-rooms';
+      leaving.forEach(room => grid.appendChild(renderRoomCard(room, '퇴실예정')));
+      section.appendChild(grid);
+    }
+    wrap.appendChild(section);
     return wrap;
   }
 
@@ -916,6 +979,8 @@ function renderRoomsSection(branch){
         }
       });
       displayCount = relatedIds.size;
+    } else if(status === '퇴실예정'){
+      displayCount = rooms.filter(roomIsLeavingSoon).length;
     }
 
     const key = branch.id + '::' + status;
@@ -923,6 +988,7 @@ function renderRoomsSection(branch){
 
     const section = document.createElement('div');
     section.className = 'status-section';
+    section.id = 'sec-' + key;
     const head = document.createElement('div');
     head.className = 'sec-head' + (collapsed ? ' collapsed' : '');
     head.style.borderColor = meta.fg;
@@ -949,78 +1015,6 @@ function renderRoomsSection(branch){
   });
 
   return wrap;
-}
-
-function renderAddBranchForm(){
-  const form = document.createElement('div');
-  form.className = 'add-branch-form';
-  form.innerHTML = `
-    <div class="fld"><label class="field-label">지점명 *</label><input type="text" id="nbName" placeholder="예: 먼슬리브 신규지점"></div>
-    <div class="fld"><label class="field-label">주차 가능 대수 *</label>
-      <select id="nbCap">${Array.from({length:11},(_,i)=>`<option value="${i}">${i}대</option>`).join('')}</select></div>
-    <button class="btn primary" id="nbSubmit">추가</button>
-    <button class="btn" id="nbCancel">취소</button>
-  `;
-  setTimeout(()=>{
-    document.getElementById('nbName').focus();
-    document.getElementById('nbCancel').onclick = ()=>{ UI.addingBranch=false; render(); };
-    document.getElementById('nbSubmit').onclick = ()=>{
-      const nameEl = document.getElementById('nbName');
-      const name = nameEl.value.trim();
-      if(!name){ showAlert('지점명을 입력해주세요.'); nameEl.focus(); return; }
-      const cap = Number(document.getElementById('nbCap').value) || 0;
-      const nb = { id: uid('b'), name, parkingNote:'', parkingCapacity: cap, memo:'' };
-      DB.branches.push(nb);
-      logChange(`"${name}" 지점 신규 등록`);
-      UI.addingBranch = false;
-      UI.view='branch'; UI.branchId = nb.id;
-      scheduleSave(); render();
-    };
-  },0);
-  return form;
-}
-
-function renderAddRoomForm(branch){
-  const form = document.createElement('div');
-  form.className = 'add-room-form';
-  form.innerHTML = `
-    <div class="fld"><label class="field-label">호실 번호 *</label><input type="text" id="nrNumber" placeholder="예: 305"></div>
-    <div class="fld"><label class="field-label">호실 타입</label>
-      <select id="nrType">${ROOM_TYPE_LIST.map(t=>`<option>${t}</option>`).join('')}</select></div>
-    <div class="fld"><label class="field-label">인실 구분 *</label>
-      <select id="nrOccupancy">${OCCUPANCY_LIST.map(t=>`<option>${t}</option>`).join('')}</select></div>
-    <div class="fld"><label class="field-label">초기 상태</label>
-      <select id="nrStatus">${STATUS_LIST_MANUAL.map(s=>`<option>${s}</option>`).join('')}</select></div>
-    <div class="fld"><label class="field-label">정상 입실료(월)</label><input type="number" id="nrPrice" placeholder="예: 450000" min="0" step="10000"></div>
-    <button class="btn primary" id="nrSubmit">추가</button>
-    <button class="btn" id="nrCancel">취소</button>
-  `;
-  setTimeout(()=>{
-    document.getElementById('nrNumber').focus();
-    document.getElementById('nrCancel').onclick = ()=>{ UI.addingRoom=false; render(); };
-    document.getElementById('nrSubmit').onclick = ()=>{
-      const numberEl = document.getElementById('nrNumber');
-      const number = numberEl.value.trim();
-      if(!number){ showAlert('호실 번호를 입력해주세요.'); numberEl.focus(); return; }
-      if(roomNumberTaken(branch.id, number, null)){
-        showAlert(`이 지점에는 이미 "${number}" 호실이 있습니다. 호실은 지점당 1개씩만 등록할 수 있어요.`);
-        numberEl.focus(); return;
-      }
-      const room = {
-        id: uid('r'), branchId: branch.id, number,
-        type: document.getElementById('nrType').value,
-        occupancy: document.getElementById('nrOccupancy').value,
-        saleStatus: document.getElementById('nrStatus').value,
-        needsCleaning:false, needsRetouch:false, maintenanceDate:'', preSelling:false, note:'',
-        price: Number(document.getElementById('nrPrice').value) || 0
-      };
-      DB.rooms.push(room);
-      UI.addingRoom = false;
-      logChange(`${branch.name} ${room.number}호 신규 등록`);
-      scheduleSave(); render();
-    };
-  },0);
-  return form;
 }
 
 function addResidentToRoom(room){
@@ -1163,6 +1157,7 @@ function renderRoomCard(room, sectionStatus){
   const maintDateSuffix = room.maintenanceDate ? ` · ${room.maintenanceDate.slice(5)}` : '';
   const headerRight = `
     <span class="badge" style="background:${meta.bg};color:${meta.fg}">${effStatus}</span>
+    ${roomHasScheduledLeaveResident(room) ? `<span class="badge res-status leaving">퇴실예정</span>` : ''}
     ${room.needsCleaning ? `<span class="badge" style="background:#FBEFD8;color:#8A5F14;">청소필요${maintDateSuffix}</span>` : ''}
     ${room.needsRetouch ? `<span class="badge" style="background:#E3E8FD;color:#2E3F9E;">리터치필요${maintDateSuffix}</span>` : ''}
   `;
@@ -2400,18 +2395,26 @@ function renderStatsView(){
   branchSection.appendChild(table);
   wrap.appendChild(branchSection);
 
-  if(canEdit()){
-    wrap.appendChild(renderBulkUploadPanel());
-    wrap.appendChild(renderChannelManagePanel());
-  }
-  if(isSuperAdmin()){
-    wrap.appendChild(renderUserManagePanel());
-    wrap.appendChild(renderChangeLogPanel());
-  }
-
   wrap.querySelectorAll('[data-goto]').forEach(a=>{
     a.addEventListener('click', (e)=>{ e.preventDefault(); UI.view='branch'; UI.branchId = a.dataset.goto; UI.branchTab='rooms'; render(); });
   });
+
+  return wrap;
+}
+
+function renderAdminView(){
+  const wrap = document.createElement('div');
+  wrap.style.paddingTop = '18px';
+
+  if(!isSuperAdmin()){
+    wrap.appendChild(el('div','empty-hint','슈퍼어드민 권한이 있는 계정만 볼 수 있는 화면입니다.'));
+    return wrap;
+  }
+
+  wrap.appendChild(renderBulkUploadPanel());
+  wrap.appendChild(renderChannelManagePanel());
+  wrap.appendChild(renderUserManagePanel());
+  wrap.appendChild(renderChangeLogPanel());
 
   return wrap;
 }
