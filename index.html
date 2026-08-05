@@ -1293,15 +1293,15 @@ function renderResidentView(p, room, isSecondary){
     const extendBtn = document.createElement('button');
     extendBtn.className = 'btn small';
     extendBtn.textContent = '연장';
-    extendBtn.title = '오늘 기준 1개월 뒤로 퇴실예정일 연장';
+    extendBtn.title = '퇴실예정일 기준 1개월 뒤로 연장';
     extendBtn.onclick = ()=>{
-      const newMoveOut = addOneMonth(todayISO());
+      const newMoveOut = addOneMonth(p.moveOut || p.moveIn || todayISO());
       const violation = wouldExceedParking(p, p.moveIn, newMoveOut);
       if(violation){
         showAlert(`"${violation.branch.name}" 지점의 주차 가능 대수(${violation.cap}대)를 초과합니다.\n(현재 이용중 ${violation.others}대 + 이 입실자 1대 = ${violation.projected}대)\n\n차량번호를 비우거나 지점의 주차 가능 대수를 먼저 늘려주세요.`);
         return;
       }
-      showConfirm(`퇴실예정일을 ${newMoveOut}로 연장할까요? (오늘 기준 1개월 뒤)`, ()=>{
+      showConfirm(`퇴실예정일을 ${newMoveOut}로 연장할까요? (기존 퇴실예정일 기준 1개월 뒤)`, ()=>{
         p.moveOut = newMoveOut;
         p.scheduledToLeave = false;
         p.contractType = '연장';
@@ -2178,12 +2178,15 @@ function downloadBulkTemplate(){
 function toISODateStr(v){
   if(v == null || v==='') return '';
   if(v instanceof Date){
-    const y = v.getUTCFullYear(), m = String(v.getUTCMonth()+1).padStart(2,'0'), d = String(v.getUTCDate()).padStart(2,'0');
+    // 엑셀/구글시트 날짜 직렬값에 부동소수점 오차가 섞여 있어(예: 자정이 아닌 23:59:xx)
+    // 하루 전날로 잘못 계산되는 경우가 있어, 가장 가까운 날짜로 반올림해 보정합니다.
+    const rounded = new Date(Math.round(v.getTime() / 86400000) * 86400000);
+    const y = rounded.getUTCFullYear(), m = String(rounded.getUTCMonth()+1).padStart(2,'0'), d = String(rounded.getUTCDate()).padStart(2,'0');
     return `${y}-${m}-${d}`;
   }
   if(typeof v === 'number'){
     // 엑셀 날짜 직렬번호(문자열이 아닌 순수 숫자로 남은 경우) 보정
-    const parsed = XLSX.SSF && XLSX.SSF.parse_date_code ? XLSX.SSF.parse_date_code(v) : null;
+    const parsed = XLSX.SSF && XLSX.SSF.parse_date_code ? XLSX.SSF.parse_date_code(Math.round(v)) : null;
     if(parsed){
       const y = parsed.y, m = String(parsed.m).padStart(2,'0'), d = String(parsed.d).padStart(2,'0');
       return `${y}-${m}-${d}`;
