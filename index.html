@@ -435,8 +435,8 @@ let DB = null;
 let UI = {
   view:'stats', branchId:null, branchTab:'rooms',
   roomEditMode:{}, residentEditMode:{}, roomSnapshots:{}, residentSnapshots:{}, draftResident:{}, parkingListOpen:{},
-  branchEditMode:{}, branchSnapshots:{}, historyOpen:{}, sectionCollapsed:{},
-  tlYear:null, tlMonth:null, leavingFilterOn:false
+  branchEditMode:{}, branchSnapshots:{}, historyOpen:{},
+  tlYear:null, tlMonth:null, roomStatusFilter:'이용중'
 };
 
 function uid(p){ return p + '_' + Math.random().toString(36).slice(2,9); }
@@ -624,7 +624,7 @@ function renderTopNav(){
   });
   sel.onchange = ()=>{
     if(!sel.value) return;
-    UI.view='branch'; UI.branchId = sel.value; UI.leavingFilterOn=false; render();
+    UI.view='branch'; UI.branchId = sel.value; UI.roomStatusFilter='이용중'; render();
   };
 
   const statsBtn = document.getElementById('statsBtn');
@@ -647,9 +647,7 @@ function currentBranch(){
 /* ---------------- branch view ---------------- */
 function scrollToRoomCard(room){
   UI.branchTab = 'rooms';
-  const status = effectiveRoomStatus(room);
-  const key = room.branchId + '::' + status;
-  UI.sectionCollapsed[key] = false;
+  UI.roomStatusFilter = effectiveRoomStatus(room);
   render();
   setTimeout(()=>{
     const el = document.getElementById('room-card-' + room.id);
@@ -886,20 +884,12 @@ function roomHasScheduledLeaveResident(room){
 function roomIsLeavingSoon(room){
   return roomHasScheduledLeaveResident(room) || effectiveRoomStatus(room)==='퇴실예정';
 }
-function jumpToStatusSection(branch, status){
-  UI.leavingFilterOn = false;
-  const key = branch.id + '::' + status;
-  UI.sectionCollapsed[key] = false;
-  render();
-  setTimeout(()=>{
-    const target = document.getElementById('sec-' + key);
-    if(target) target.scrollIntoView({ behavior:'smooth', block:'start' });
-  }, 60);
-}
-
 function renderRoomsSection(branch){
   const wrap = document.createElement('div');
   const rooms = DB.rooms.filter(r=>r.branchId===branch.id);
+
+  const status = UI.roomStatusFilter || '이용중';
+  const meta = statusMeta(status);
 
   const toolbar = document.createElement('div');
   toolbar.className = 'room-toolbar';
@@ -909,14 +899,11 @@ function renderRoomsSection(branch){
     const m = statusMeta(s);
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'badge legend-btn' + (s==='퇴실예정' && UI.leavingFilterOn ? ' active' : '');
+    btn.className = 'badge legend-btn' + (status === s ? ' active' : '');
     btn.style.background = m.bg; btn.style.color = m.fg;
     btn.innerHTML = `<span class="dot" style="background:${m.fg}"></span>${s}`;
-    btn.title = s === '퇴실예정' ? '퇴실예정인 호실만 모아보기' : `${s} 호실로 이동`;
-    btn.onclick = ()=>{
-      if(s === '퇴실예정'){ UI.leavingFilterOn = !UI.leavingFilterOn; render(); }
-      else jumpToStatusSection(branch, s);
-    };
+    btn.title = `${s} 호실만 모아보기`;
+    btn.onclick = ()=>{ UI.roomStatusFilter = s; render(); };
     legend.appendChild(btn);
   });
   toolbar.appendChild(legend);
@@ -927,92 +914,30 @@ function renderRoomsSection(branch){
     return wrap;
   }
 
-  if(UI.leavingFilterOn){
-    const meta = statusMeta('퇴실예정');
-    const leaving = rooms.filter(roomIsLeavingSoon)
-      .sort((a,b)=> a.number.localeCompare(b.number,'ko',{numeric:true}));
+  const inStatus = (status === '퇴실예정' ? rooms.filter(roomIsLeavingSoon) : rooms.filter(r=>effectiveRoomStatus(r)===status))
+    .sort((a,b)=> a.number.localeCompare(b.number,'ko',{numeric:true}));
 
-    const section = document.createElement('div');
-    section.className = 'status-section';
-    const head = document.createElement('div');
-    head.className = 'sec-head';
-    head.style.borderColor = meta.fg;
-    head.innerHTML = `
-      <span class="dot" style="background:${meta.fg}"></span>
-      <span class="name" style="color:${meta.fg}">퇴실예정 모아보기</span>
-      <span class="count-badge" style="background:${meta.bg};color:${meta.fg};">${leaving.length}개</span>
-    `;
-    const closeBtn = document.createElement('button');
-    closeBtn.type = 'button';
-    closeBtn.className = 'btn small';
-    closeBtn.style.marginLeft = 'auto';
-    closeBtn.textContent = '전체 보기';
-    closeBtn.onclick = ()=>{ UI.leavingFilterOn = false; render(); };
-    head.appendChild(closeBtn);
-    section.appendChild(head);
+  const section = document.createElement('div');
+  section.className = 'status-section';
+  const head = document.createElement('div');
+  head.className = 'sec-head';
+  head.style.borderColor = meta.fg;
+  head.innerHTML = `
+    <span class="dot" style="background:${meta.fg}"></span>
+    <span class="name" style="color:${meta.fg}">${status}</span>
+    <span class="count-badge" style="background:${meta.bg};color:${meta.fg};">${inStatus.length}개</span>
+  `;
+  section.appendChild(head);
 
-    if(leaving.length===0){
-      section.appendChild(el('div','sec-empty','퇴실예정인 호실이 없습니다.'));
-    } else {
-      const grid = document.createElement('div');
-      grid.className = 'grid-rooms';
-      leaving.forEach(room => grid.appendChild(renderRoomCard(room, '퇴실예정')));
-      section.appendChild(grid);
-    }
-    wrap.appendChild(section);
-    return wrap;
+  if(inStatus.length===0){
+    section.appendChild(el('div','sec-empty', `${status} 상태의 호실이 없습니다.`));
+  } else {
+    const grid = document.createElement('div');
+    grid.className = 'grid-rooms';
+    inStatus.forEach(room => grid.appendChild(renderRoomCard(room, status)));
+    section.appendChild(grid);
   }
-
-  STATUS_LIST.forEach(status=>{
-    const meta = statusMeta(status);
-    const inStatus = rooms.filter(r=>effectiveRoomStatus(r)===status)
-      .sort((a,b)=> a.number.localeCompare(b.number,'ko',{numeric:true}));
-
-    // "이용중" 배지 숫자에는 사전판매중 / 입실예정 / 연체 상태의 방도 모두 포함합니다.
-    let displayCount = inStatus.length;
-    if(status === '이용중'){
-      const relatedIds = new Set();
-      rooms.forEach(r=>{
-        const es = effectiveRoomStatus(r);
-        if(es === '이용중' || es === '사전판매중' || roomHasUpcomingResident(r) || roomHasOverdueResident(r)){
-          relatedIds.add(r.id);
-        }
-      });
-      displayCount = relatedIds.size;
-    } else if(status === '퇴실예정'){
-      displayCount = rooms.filter(roomIsLeavingSoon).length;
-    }
-
-    const key = branch.id + '::' + status;
-    const collapsed = !!UI.sectionCollapsed[key];
-
-    const section = document.createElement('div');
-    section.className = 'status-section';
-    section.id = 'sec-' + key;
-    const head = document.createElement('div');
-    head.className = 'sec-head' + (collapsed ? ' collapsed' : '');
-    head.style.borderColor = meta.fg;
-    head.innerHTML = `
-      <span class="dot" style="background:${meta.fg}"></span>
-      <span class="name" style="color:${meta.fg}">${status}</span>
-      <span class="count-badge" style="background:${meta.bg};color:${meta.fg};">${displayCount}개</span>
-      <span class="sec-toggle-caret">${collapsed ? '▸' : '▾'}</span>
-    `;
-    head.onclick = ()=>{ UI.sectionCollapsed[key] = !collapsed; render(); };
-    section.appendChild(head);
-
-    if(!collapsed){
-      if(inStatus.length===0){
-        section.appendChild(el('div','sec-empty', `${status} 상태의 호실이 없습니다.`));
-      } else {
-        const grid = document.createElement('div');
-        grid.className = 'grid-rooms';
-        inStatus.forEach(room => grid.appendChild(renderRoomCard(room, status)));
-        section.appendChild(grid);
-      }
-    }
-    wrap.appendChild(section);
-  });
+  wrap.appendChild(section);
 
   return wrap;
 }
@@ -1054,9 +979,6 @@ function isOverdue(p){
 }
 function isUpcoming(p){
   return !!(p.moveIn && p.moveIn > todayISO());
-}
-function roomHasUpcomingResident(room){
-  return DB.residents.some(p => p.roomId===room.id && isUpcoming(p));
 }
 function roomHasOverdueResident(room){
   return DB.residents.some(p => p.roomId===room.id && isOverdue(p));
@@ -2396,7 +2318,7 @@ function renderStatsView(){
   wrap.appendChild(branchSection);
 
   wrap.querySelectorAll('[data-goto]').forEach(a=>{
-    a.addEventListener('click', (e)=>{ e.preventDefault(); UI.view='branch'; UI.branchId = a.dataset.goto; UI.branchTab='rooms'; render(); });
+    a.addEventListener('click', (e)=>{ e.preventDefault(); UI.view='branch'; UI.branchId = a.dataset.goto; UI.branchTab='rooms'; UI.roomStatusFilter='이용중'; render(); });
   });
 
   return wrap;
@@ -2506,7 +2428,7 @@ function renderCleaningCard(title, list, showDate){
       row.title = '해당 지점으로 이동';
       row.onclick = ()=>{
         if(!x.branch) return;
-        UI.view='branch'; UI.branchId = x.branch.id; UI.branchTab='rooms'; render();
+        UI.view='branch'; UI.branchId = x.branch.id; UI.branchTab='rooms'; UI.roomStatusFilter='이용중'; render();
       };
       card.appendChild(row);
     });
