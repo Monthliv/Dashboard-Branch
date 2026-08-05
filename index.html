@@ -204,7 +204,7 @@
   .rc-title{ display:flex; align-items:baseline; gap:6px; min-width:0; flex:1; }
   .rc-title .roomno{ font-family:'JetBrains Mono',monospace; font-weight:700; font-size:15px; white-space:nowrap; }
   .rc-title .roomtype{ font-size:11.5px; color:var(--ink-soft); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .rc-title .room-price{ font-size:11.5px; color:var(--accent-ink); font-weight:700; white-space:nowrap; margin-left:auto; }
+  .rc-title .room-price{ font-size:11.5px; color:var(--accent-ink); font-weight:700; white-space:nowrap; }
   .rc-header-badges{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
   .history-btn{
     font-size:10px; font-weight:700; padding:3px 8px; border-radius:20px; border:1px solid var(--line);
@@ -315,6 +315,13 @@
   .cleaning-row{ display:flex; align-items:center; gap:10px; font-size:12.5px; padding:6px 0; border-bottom:1px dashed var(--line); }
   .cleaning-row:last-child{ border-bottom:none; }
   .cleaning-row:hover{ background:#FAF8F2; }
+  .overdue-branch-group{ padding:8px 0; border-bottom:1px dashed var(--line); }
+  .overdue-branch-group:last-child{ border-bottom:none; }
+  .overdue-branch-name{ font-weight:700; font-size:13px; margin-bottom:6px; }
+  .overdue-branch-name:hover{ text-decoration:underline; }
+  .overdue-room-chips{ display:flex; flex-wrap:wrap; gap:6px; }
+  .overdue-room-chip{ cursor:pointer; }
+  .overdue-room-chip:hover{ opacity:.85; }
   .cleaning-row .br{ color:var(--ink-soft); flex:none; }
   .cleaning-row .rm{ font-family:'JetBrains Mono',monospace; font-weight:700; flex:none; }
   .cleaning-row .kind{ margin-left:auto; display:flex; align-items:center; gap:6px; flex:none; }
@@ -1013,6 +1020,9 @@ function isOverdue(p){
 function isUpcoming(p){
   return !!(p.moveIn && p.moveIn > todayISO());
 }
+function occupiesRoom(p){
+  return isCurrentlyResiding(p) || isUpcoming(p);
+}
 function roomHasOverdueResident(room){
   return DB.residents.some(p => p.roomId===room.id && isOverdue(p));
 }
@@ -1069,7 +1079,7 @@ function processScheduledLeaves(){
   scheduleSave();
 }
 function roomHasActiveResident(room){
-  return DB.residents.some(p => p.roomId===room.id && isCurrentlyResiding(p));
+  return DB.residents.some(p => p.roomId===room.id && occupiesRoom(p));
 }
 function branchActiveCarResidents(branchId){
   const roomIds = new Set(DB.rooms.filter(r=>r.branchId===branchId).map(r=>r.id));
@@ -1240,11 +1250,12 @@ function renderResidentView(p, room, isSecondary){
   const block = document.createElement('div');
   block.className = 'resident-block';
 
-  if(!isSecondary && (p.channel !== '독립생활' || isOverdue(p) || p.scheduledToLeave)){
+  if(!isSecondary && (p.channel !== '독립생활' || isOverdue(p) || p.scheduledToLeave || isUpcoming(p))){
     const flagsLine = document.createElement('div');
     flagsLine.className = 'resident-flags';
     flagsLine.innerHTML = `
       ${isOverdue(p) ? '<span class="badge overdue-badge">⚠ 연체</span>' : ''}
+      ${isUpcoming(p) ? '<span class="badge res-status upcoming">입실예정</span>' : ''}
       ${p.scheduledToLeave ? '<span class="badge res-status leaving">퇴실예정</span>' : ''}
       ${p.channel !== '독립생활' ? `<span class="badge" style="background:#F1EFE8;color:${channelColor(p.channel)}">${esc(p.channel)}</span>` : ''}
     `;
@@ -2824,13 +2835,8 @@ function renderOverdueStatsCard(){
       items.push({ room, branch, resident:p });
     });
   });
-  items.sort((a,b)=>{
-    const bn = (a.branch?a.branch.name:'').localeCompare(b.branch?b.branch.name:'');
-    if(bn !== 0) return bn;
-    return a.room.number.localeCompare(b.room.number,'ko',{numeric:true});
-  });
 
-const card = document.createElement('div');
+  const card = document.createElement('div');
   card.className = 'stat-section cleaning-card overdue-stats-card';
 
   if(items.length===0){
@@ -2838,6 +2844,16 @@ const card = document.createElement('div');
     card.appendChild(el('div','cleaning-empty','전체 지점에 연체 중인 호실이 없습니다.'));
     return card;
   }
+
+  const groupMap = new Map();
+  items.forEach(item=>{
+    const key = item.branch ? item.branch.id : '__none__';
+    if(!groupMap.has(key)) groupMap.set(key, { branch: item.branch, entries: [] });
+    groupMap.get(key).entries.push(item);
+  });
+  const groups = [...groupMap.values()];
+  groups.forEach(g=> g.entries.sort((a,b)=> a.room.number.localeCompare(b.room.number,'ko',{numeric:true})));
+  groups.sort((a,b)=> (a.branch?a.branch.name:'').localeCompare(b.branch?b.branch.name:''));
 
   const header = document.createElement('div');
   header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;';
@@ -2857,29 +2873,47 @@ const card = document.createElement('div');
   function renderPage(){
     body.innerHTML = '';
     pager.innerHTML = '';
-    const totalPages = Math.ceil(items.length / OVERDUE_PAGE_SIZE);
+    const totalPages = Math.ceil(groups.length / OVERDUE_PAGE_SIZE);
     if(currentPage > totalPages) currentPage = totalPages;
     const start = (currentPage - 1) * OVERDUE_PAGE_SIZE;
-    items.slice(start, start + OVERDUE_PAGE_SIZE).forEach(item=>{
-      const row = document.createElement('div');
-      row.className = 'cleaning-row';
-      const days = Math.max(1, Math.round((new Date(today) - new Date(item.resident.moveOut)) / 86400000));
-      row.innerHTML = `
-        <span class="br">${esc(item.branch ? item.branch.name : '-')}</span>
-        <span class="rm">${esc(item.room.number)}호</span>
-        <span class="kind"><span class="badge overdue-badge">${days}일 연체</span></span>
-      `;
-      row.style.cursor = 'pointer';
-      row.title = '해당 호실로 이동';
-      row.onclick = ()=>{
-        if(!item.branch) return;
-        UI.view = 'branch';
-        UI.branchId = item.branch.id;
-        scrollToRoomCard(item.room);
-      };
-      body.appendChild(row);
+    groups.slice(start, start + OVERDUE_PAGE_SIZE).forEach(group=>{
+      const groupWrap = document.createElement('div');
+      groupWrap.className = 'overdue-branch-group';
+
+      const branchName = document.createElement('div');
+      branchName.className = 'overdue-branch-name';
+      branchName.textContent = group.branch ? group.branch.name : '(지점 정보 없음)';
+      if(group.branch){
+        branchName.style.cursor = 'pointer';
+        branchName.title = '해당 지점으로 이동';
+        branchName.onclick = ()=>{
+          UI.view = 'branch';
+          UI.branchId = group.branch.id;
+          render();
+        };
+      }
+      groupWrap.appendChild(branchName);
+
+      const chipRow = document.createElement('div');
+      chipRow.className = 'overdue-room-chips';
+      group.entries.forEach(item=>{
+        const days = Math.max(1, Math.round((new Date(today) - new Date(item.resident.moveOut)) / 86400000));
+        const chip = document.createElement('span');
+        chip.className = 'badge overdue-badge overdue-room-chip';
+        chip.textContent = `${item.room.number}호 ${days}일 연체`;
+        chip.title = '해당 호실로 이동';
+        chip.onclick = ()=>{
+          if(!item.branch) return;
+          UI.view = 'branch';
+          UI.branchId = item.branch.id;
+          scrollToRoomCard(item.room);
+        };
+        chipRow.appendChild(chip);
+      });
+      groupWrap.appendChild(chipRow);
+      body.appendChild(groupWrap);
     });
-    if(items.length > OVERDUE_PAGE_SIZE){
+    if(groups.length > OVERDUE_PAGE_SIZE){
       for(let p=1; p<=totalPages; p++){
         const pBtn = document.createElement('button');
         pBtn.className = 'btn small' + (p===currentPage ? ' primary' : '');
