@@ -2834,20 +2834,26 @@ function renderOverdueStatsCard(){
     return a.room.number.localeCompare(b.room.number,'ko',{numeric:true});
   });
 
-  const card = document.createElement('div');
+const card = document.createElement('div');
   card.className = 'stat-section cleaning-card overdue-stats-card';
-  card.innerHTML = `<h3>연체 중인 호실 <span class="cnt-badge overdue-cnt-badge">${items.length}</span></h3>`;
 
   if(items.length===0){
+    card.innerHTML = `<h3>연체 중인 호실 <span class="cnt-badge overdue-cnt-badge">${items.length}</span></h3>`;
     card.appendChild(el('div','cleaning-empty','전체 지점에 연체 중인 호실이 없습니다.'));
     return card;
   }
 
-  const body = document.createElement('div');
-  card.appendChild(body);
+  const header = document.createElement('div');
+  header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;';
+  header.innerHTML = `<h3 style="margin:0;">연체 중인 호실 <span class="cnt-badge overdue-cnt-badge">${items.length}</span></h3>`;
+  card.appendChild(header);
   const pager = document.createElement('div');
   pager.className = 'log-pager';
-  card.appendChild(pager);
+  pager.style.marginTop = '0';
+  header.appendChild(pager);
+
+  const body = document.createElement('div');
+  card.appendChild(body);
 
   const today = todayISO();
   let currentPage = 1;
