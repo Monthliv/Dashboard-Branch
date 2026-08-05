@@ -374,6 +374,10 @@
   }
   .modal-msg{ font-size:13.5px; color:var(--ink); white-space:pre-wrap; line-height:1.6; margin-bottom:16px; }
   .modal-btn-row{ display:flex; justify-content:flex-end; gap:8px; }
+
+  @media (max-width: 640px){
+    .cleaning-cards-grid{ grid-template-columns:1fr; }
+  }
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -1745,11 +1749,9 @@ function renderTimelineSection(branch){
 
   const tlLegend = document.createElement('div');
   tlLegend.className = 'tl-legend';
-  const legendItems = [...STATUS_LIST, '연체중'];
-  tlLegend.innerHTML = legendItems.map(s=>{
-    const m = s==='연체중' ? { fg:'var(--st-hold)', bg:'var(--st-hold-bg)' } : statusMeta(s);
-    return `<span class="badge" style="background:${m.bg};color:${m.fg}"><span class="dot" style="background:${m.fg}"></span>${s}</span>`;
-  }).join('');
+  tlLegend.innerHTML = TIMELINE_BAR_STATUSES.map(m=>
+    `<span class="badge" style="background:${m.bg};color:${m.fg}"><span class="dot" style="background:${m.fg}"></span>${m.key}</span>`
+  ).join('');
   wrap.appendChild(tlLegend);
 
   const monthStart = new Date(UI.tlYear, UI.tlMonth, 1);
@@ -1821,7 +1823,7 @@ function renderTimelineSection(branch){
         days.appendChild(cell);
       }
       if(p && p.moveIn){
-        const bar = buildBar(p, monthStart, daysInMonth);
+        const bar = buildBar(p, room, monthStart, daysInMonth);
         if(bar) days.appendChild(bar);
       }
       row.appendChild(days);
@@ -1842,7 +1844,19 @@ function renderTimelineSection(branch){
   return wrap;
 }
 
-function buildBar(p, monthStart, daysInMonth){
+const TIMELINE_BAR_STATUSES = [
+  { key:'정상',     fg:'var(--st-occupied)', bg:'var(--st-occupied-bg)' },
+  { key:'연체',     fg:'var(--st-hold)',     bg:'var(--st-hold-bg)' },
+  { key:'퇴실예정', fg:'var(--st-leaving)',  bg:'var(--st-leaving-bg)' },
+  { key:'사전판매중', fg:'var(--st-presell)', bg:'var(--st-presell-bg)' }
+];
+function residentTimelineMeta(p, room){
+  if(isOverdue(p)) return TIMELINE_BAR_STATUSES[1];
+  if(p.scheduledToLeave) return TIMELINE_BAR_STATUSES[2];
+  if(room && effectiveRoomStatus(room)==='사전판매중') return TIMELINE_BAR_STATUSES[3];
+  return TIMELINE_BAR_STATUSES[0];
+}
+function buildBar(p, room, monthStart, daysInMonth){
   const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth(), daysInMonth);
   const inD = new Date(p.moveIn);
   const outD = p.moveOut ? new Date(p.moveOut) : new Date(monthStart.getFullYear(), monthStart.getMonth()+2, 0);
@@ -1857,11 +1871,12 @@ function buildBar(p, monthStart, daysInMonth){
   bar.className = 'tl-bar';
   bar.style.left = leftPct + '%';
   bar.style.width = widthPct + '%';
-  bar.style.background = channelColor(p.channel);
+  const meta = residentTimelineMeta(p, room);
+  bar.style.background = meta.fg;
   const nameText = esc(p.name || p.resStatus);
   const memoText = p.memo ? ` <span class="tl-bar-memo">${esc(p.memo)}</span>` : '';
   bar.innerHTML = `<span class="tl-bar-name">${nameText}</span>${memoText}`;
-  bar.title = `${p.name || '이름 미입력'} · ${p.channel} · ${p.moveIn} ~ ${p.moveOut || '미정'}${p.memo ? ' · ' + p.memo : ''}`;
+  bar.title = `${p.name || '이름 미입력'} · ${meta.key} · ${p.channel} · ${p.moveIn} ~ ${p.moveOut || '미정'}${p.memo ? ' · ' + p.memo : ''}`;
   return bar;
 }
 
