@@ -1253,25 +1253,12 @@ function renderResidentView(p, room, isSecondary){
 
   const nameLine = document.createElement('div');
   nameLine.className = 'resident-name-row';
+  const nameWrap = document.createElement('div');
+  nameWrap.style.cssText = 'display:flex;align-items:center;gap:4px;min-width:0;';
   const nm = document.createElement('span');
   nm.className = 'nm';
   nm.textContent = p.name || '(이름 미입력)';
-  const acts = document.createElement('div');
-  acts.className = 'acts';
-  if(!isSecondary && p.firstSaveDone && canEdit()){
-    const leaveBtn = document.createElement('button');
-    leaveBtn.className = 'btn small danger';
-    leaveBtn.textContent = '퇴실';
-    leaveBtn.title = '지금(오늘 날짜)로 즉시 퇴실 처리 (정보는 히스토리로 이동하고 자리가 비워집니다)';
-    leaveBtn.onclick = ()=>{
-      const today = todayISO();
-      showConfirm(`${p.name || '이 입실자'}를 오늘(${today}) 날짜로 퇴실 처리할까요?\n정보는 히스토리로 이동되고, 이 자리에 새 입실자를 등록할 수 있게 됩니다.`, ()=>{
-        moveResidentToHistory(p, today);
-        scheduleSave(); render();
-      });
-    };
-    acts.appendChild(leaveBtn);
-  }
+  nameWrap.appendChild(nm);
   if(canEdit()){
     const editBtn = document.createElement('button');
     editBtn.className = 'iconbtn';
@@ -1281,18 +1268,46 @@ function renderResidentView(p, room, isSecondary){
       UI.residentSnapshots[p.id] = Object.assign({}, p);
       UI.residentEditMode[p.id] = true; render();
     };
-    const delBtn = document.createElement('button');
-    delBtn.className = 'iconbtn del';
-    delBtn.innerHTML = '&times;';
-    delBtn.title = '입실자 삭제';
-    delBtn.onclick = ()=>{
-      showConfirm(`${p.name || '이 입실자'} 정보를 삭제할까요? 이 입실자의 모든 정보가 삭제됩니다.`, ()=>{
-        DB.residents = DB.residents.filter(x=>x.id!==p.id); scheduleSave(); render();
+    nameWrap.appendChild(editBtn);
+  }
+  const acts = document.createElement('div');
+  acts.className = 'acts';
+  if(!isSecondary && p.firstSaveDone && canEdit()){
+    const leaveBtn = document.createElement('button');
+    leaveBtn.className = 'btn small danger';
+    leaveBtn.textContent = '퇴실';
+    leaveBtn.title = '퇴실 유형을 선택해 처리합니다';
+    leaveBtn.onclick = ()=> showLeaveChoiceModal(p, room);
+
+    const extendBtn = document.createElement('button');
+    extendBtn.className = 'btn small';
+    extendBtn.textContent = '연장';
+    extendBtn.title = '오늘 기준 1개월 뒤로 퇴실예정일 연장';
+    extendBtn.onclick = ()=>{
+      const newMoveOut = addOneMonth(todayISO());
+      const violation = wouldExceedParking(p, p.moveIn, newMoveOut);
+      if(violation){
+        showAlert(`"${violation.branch.name}" 지점의 주차 가능 대수(${violation.cap}대)를 초과합니다.\n(현재 이용중 ${violation.others}대 + 이 입실자 1대 = ${violation.projected}대)\n\n차량번호를 비우거나 지점의 주차 가능 대수를 먼저 늘려주세요.`);
+        return;
+      }
+      showConfirm(`퇴실예정일을 ${newMoveOut}로 연장할까요? (오늘 기준 1개월 뒤)`, ()=>{
+        p.moveOut = newMoveOut;
+        p.scheduledToLeave = false;
+        p.contractType = '연장';
+        logChange(`${room ? room.number + '호 ' : ''}"${p.name}" 퇴실예정일 연장: ${newMoveOut}`);
+        scheduleSave(); render();
       });
     };
-    acts.appendChild(editBtn); acts.appendChild(delBtn);
+
+    const paymentBtn = document.createElement('button');
+    paymentBtn.className = 'btn small';
+    paymentBtn.textContent = '결제현황';
+    paymentBtn.title = '회차별 납부 기록 보기';
+    paymentBtn.onclick = ()=> showPaymentModal(p, room);
+
+    acts.appendChild(leaveBtn); acts.appendChild(extendBtn); acts.appendChild(paymentBtn);
   }
-  nameLine.appendChild(nm); nameLine.appendChild(acts);
+  nameLine.appendChild(nameWrap); nameLine.appendChild(acts);
   block.appendChild(nameLine);
 
   if(!isSecondary){
@@ -1324,25 +1339,6 @@ function renderResidentView(p, room, isSecondary){
 /* ---------------- room info: edit mode (방 정보만) ---------------- */
 function renderRoomEditForm(room){
   const wrap = document.createElement('div');
-
-  const roomLabel = document.createElement('div');
-  roomLabel.className = 'edit-section-label';
-  roomLabel.innerHTML = `<span>방 정보</span>`;
-  const btnGroup = document.createElement('div');
-  btnGroup.style.cssText = 'display:flex;gap:6px;';
-  const cancelBtn = document.createElement('button');
-  cancelBtn.className = 'btn small';
-  cancelBtn.textContent = '취소';
-  cancelBtn.onclick = ()=>{
-    const snap = UI.roomSnapshots[room.id];
-    if(snap) Object.assign(room, snap);
-    delete UI.roomSnapshots[room.id];
-    UI.roomEditMode[room.id] = false;
-    scheduleSave(); render();
-  };
-  btnGroup.appendChild(cancelBtn);
-  roomLabel.appendChild(btnGroup);
-  wrap.appendChild(roomLabel);
 
   const grid = document.createElement('div');
   grid.className = 'edit-grid';
@@ -2998,6 +2994,207 @@ function showConfirm(message, onConfirm){
   overlay.appendChild(box);
   document.body.appendChild(overlay);
   setTimeout(()=> okBtn.focus(), 0);
+}
+
+function showLeaveChoiceModal(p, room){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  const box = document.createElement('div');
+  box.className = 'modal-box';
+  const close = ()=> overlay.remove();
+
+  function renderChoices(){
+    box.innerHTML = `<div class="modal-msg" style="margin-bottom:12px;font-weight:700;">${esc(p.name || '이 입실자')} 퇴실 처리</div>`;
+    const btnCol = document.createElement('div');
+    btnCol.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
+
+    const expireBtn = document.createElement('button');
+    expireBtn.className = 'btn';
+    expireBtn.textContent = `만기퇴실 (퇴실예정일: ${p.moveOut || '미정'})`;
+    expireBtn.title = '계약 만료일까지 퇴실예정으로 표시하고, 만료일이 지나면 자동으로 퇴실 처리됩니다';
+    expireBtn.onclick = ()=>{
+      if(!p.moveOut){ showAlert('퇴실예정일이 설정되어 있지 않습니다. 먼저 입실자 정보 수정에서 퇴실예정일을 입력해주세요.'); return; }
+      p.scheduledToLeave = true;
+      logChange(`${room ? room.number + '호 ' : ''}"${p.name}" 만기퇴실 예약 (${p.moveOut})`);
+      scheduleSave();
+      close(); render();
+    };
+
+    const midBtn = document.createElement('button');
+    midBtn.className = 'btn';
+    midBtn.textContent = '중도퇴실 (날짜 지정)';
+    midBtn.onclick = renderMidTermStep;
+
+    const sameDayBtn = document.createElement('button');
+    sameDayBtn.className = 'btn danger';
+    sameDayBtn.textContent = '당일퇴실 (오늘 날짜로 즉시 처리)';
+    sameDayBtn.onclick = ()=>{
+      const today = todayISO();
+      showConfirm(`${p.name || '이 입실자'}를 오늘(${today}) 날짜로 퇴실 처리할까요?\n정보는 히스토리로 이동되고, 이 자리에 새 입실자를 등록할 수 있게 됩니다.`, ()=>{
+        moveResidentToHistory(p, today);
+        scheduleSave();
+        close(); render();
+      });
+    };
+
+    btnCol.appendChild(expireBtn); btnCol.appendChild(midBtn); btnCol.appendChild(sameDayBtn);
+    box.appendChild(btnCol);
+
+    const btnRow = document.createElement('div');
+    btnRow.className = 'modal-btn-row';
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'btn'; closeBtn.textContent = '닫기';
+    closeBtn.onclick = close;
+    btnRow.appendChild(closeBtn);
+    box.appendChild(btnRow);
+  }
+
+  function renderMidTermStep(){
+    box.innerHTML = `<div class="modal-msg" style="margin-bottom:12px;font-weight:700;">${esc(p.name || '이 입실자')} 중도퇴실 - 날짜 지정</div>`;
+    const dateInput = document.createElement('input');
+    dateInput.type = 'date';
+    dateInput.value = p.moveOut || todayISO();
+    dateInput.style.width = '100%';
+    const dateRow = labeledReq('퇴실 날짜', dateInput);
+    dateRow.style.marginBottom = '14px';
+    box.appendChild(dateRow);
+
+    const btnRow = document.createElement('div');
+    btnRow.className = 'modal-btn-row';
+    const backBtn = document.createElement('button');
+    backBtn.className = 'btn'; backBtn.textContent = '뒤로';
+    backBtn.onclick = renderChoices;
+    const okBtn = document.createElement('button');
+    okBtn.className = 'btn primary'; okBtn.textContent = '확인';
+    okBtn.onclick = ()=>{
+      const chosen = dateInput.value;
+      if(!chosen){ showAlert('퇴실 날짜를 선택해주세요.'); return; }
+      const today = todayISO();
+      if(chosen > today){
+        p.moveOut = chosen;
+        p.scheduledToLeave = true;
+        logChange(`${room ? room.number + '호 ' : ''}"${p.name}" 중도퇴실 예약 (${chosen})`);
+        scheduleSave();
+        close(); render();
+      } else {
+        showConfirm(`${p.name || '이 입실자'}를 ${chosen} 날짜로 퇴실 처리할까요?\n정보는 히스토리로 이동되고, 이 자리에 새 입실자를 등록할 수 있게 됩니다.`, ()=>{
+          moveResidentToHistory(p, chosen);
+          scheduleSave();
+          close(); render();
+        });
+      }
+    };
+    btnRow.appendChild(backBtn); btnRow.appendChild(okBtn);
+    box.appendChild(btnRow);
+  }
+
+  overlay.addEventListener('click', (e)=>{ if(e.target===overlay) close(); });
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+  renderChoices();
+}
+
+function showPaymentModal(p, room){
+  p.payments = p.payments || [];
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  const box = document.createElement('div');
+  box.className = 'modal-box';
+  const close = ()=> overlay.remove();
+
+  function renderList(){
+    box.innerHTML = `<div class="modal-msg" style="margin-bottom:12px;font-weight:700;">${esc(p.name || '이 입실자')} 결제현황</div>`;
+
+    const listWrap = document.createElement('div');
+    listWrap.style.cssText = 'max-height:340px;overflow-y:auto;margin-bottom:12px;';
+    const sorted = [...p.payments].sort((a,b)=> (a.round||0)-(b.round||0));
+    const today = todayISO();
+
+    if(sorted.length===0){
+      listWrap.appendChild(el('div','cleaning-empty','등록된 납부 기록이 없습니다.'));
+    } else {
+      sorted.forEach(pay=>{
+        const row = document.createElement('div');
+        row.style.cssText = 'border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:8px;';
+        const status = pay.paidDate ? '완납' : (pay.dueDate && pay.dueDate < today ? '연체' : '예정');
+        const statusColor = status==='완납' ? 'var(--st-occupied)' : (status==='연체' ? 'var(--st-hold)' : 'var(--ink-soft)');
+        const head = document.createElement('div');
+        head.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;';
+        head.innerHTML = `<span style="font-weight:700;">${esc(pay.round)}회차</span><span class="badge" style="background:#F1EFE8;color:${statusColor};">${status}</span>`;
+        row.appendChild(head);
+
+        const dueWrap = document.createElement('div');
+        dueWrap.style.cssText = 'display:flex;gap:6px;margin-bottom:6px;';
+        const dueInput = document.createElement('input');
+        dueInput.type = 'date'; dueInput.value = pay.dueDate || ''; dueInput.style.width = '100%';
+        dueInput.addEventListener('change', ()=>{
+          pay.dueDate = dueInput.value;
+          logChange(`${room ? room.number + '호 ' : ''}"${p.name}" ${pay.round}회차 납부예정일 수정`);
+          scheduleSave(); renderList();
+        });
+        const paidInput = document.createElement('input');
+        paidInput.type = 'date'; paidInput.value = pay.paidDate || ''; paidInput.style.width = '100%';
+        paidInput.addEventListener('change', ()=>{
+          pay.paidDate = paidInput.value;
+          logChange(`${room ? room.number + '호 ' : ''}"${p.name}" ${pay.round}회차 납부일 ${paidInput.value ? '기록' : '삭제'}`);
+          scheduleSave(); renderList();
+        });
+        dueWrap.appendChild(labeled('납부예정일', dueInput));
+        dueWrap.appendChild(labeled('납부일', paidInput));
+        row.appendChild(dueWrap);
+
+        const amtWrap = document.createElement('div');
+        amtWrap.style.cssText = 'display:flex;gap:6px;align-items:flex-end;';
+        const amtInput = document.createElement('input');
+        amtInput.type = 'number'; amtInput.min = '0'; amtInput.step = '10000';
+        amtInput.value = pay.amount || ''; amtInput.placeholder = '금액'; amtInput.style.width = '100%';
+        amtInput.addEventListener('change', ()=>{
+          pay.amount = Number(amtInput.value) || 0;
+          logChange(`${room ? room.number + '호 ' : ''}"${p.name}" ${pay.round}회차 금액 수정`);
+          scheduleSave();
+        });
+        const delBtn = document.createElement('button');
+        delBtn.className = 'iconbtn del'; delBtn.innerHTML = '&times;'; delBtn.title = '이 회차 삭제';
+        delBtn.onclick = ()=>{
+          showConfirm(`${pay.round}회차 납부 기록을 삭제할까요?`, ()=>{
+            p.payments = p.payments.filter(x=>x.id!==pay.id);
+            logChange(`${room ? room.number + '호 ' : ''}"${p.name}" ${pay.round}회차 납부 기록 삭제`);
+            scheduleSave(); renderList();
+          });
+        };
+        amtWrap.appendChild(labeled('금액', amtInput));
+        amtWrap.appendChild(delBtn);
+        row.appendChild(amtWrap);
+
+        listWrap.appendChild(row);
+      });
+    }
+    box.appendChild(listWrap);
+
+    const addBtn = document.createElement('button');
+    addBtn.className = 'btn small';
+    addBtn.textContent = '+ 회차 추가';
+    addBtn.onclick = ()=>{
+      const nextRound = p.payments.length ? Math.max(...p.payments.map(x=>x.round||0)) + 1 : 1;
+      p.payments.push({ id: uid('pay'), round: nextRound, dueDate:'', paidDate:'', amount: room ? (room.price||0) : 0 });
+      logChange(`${room ? room.number + '호 ' : ''}"${p.name}" 결제 회차 추가 (${nextRound}회차)`);
+      scheduleSave(); renderList();
+    };
+    box.appendChild(addBtn);
+
+    const btnRow = document.createElement('div');
+    btnRow.className = 'modal-btn-row';
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'btn primary'; closeBtn.textContent = '닫기';
+    closeBtn.onclick = close;
+    btnRow.appendChild(closeBtn);
+    box.appendChild(btnRow);
+  }
+
+  overlay.addEventListener('click', (e)=>{ if(e.target===overlay) close(); });
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+  renderList();
 }
 
 function esc(s){
