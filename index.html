@@ -2819,6 +2819,7 @@ function renderAdminAddRoomForm(){
   return form;
 }
 
+const OVERDUE_PAGE_SIZE = 5;
 function renderOverdueStatsCard(){
   const items = [];
   DB.rooms.forEach(room=>{
@@ -2839,9 +2840,25 @@ function renderOverdueStatsCard(){
 
   if(items.length===0){
     card.appendChild(el('div','cleaning-empty','전체 지점에 연체 중인 호실이 없습니다.'));
-  } else {
-    const today = todayISO();
-    items.forEach(item=>{
+    return card;
+  }
+
+  const body = document.createElement('div');
+  card.appendChild(body);
+  const pager = document.createElement('div');
+  pager.className = 'log-pager';
+  card.appendChild(pager);
+
+  const today = todayISO();
+  let currentPage = 1;
+
+  function renderPage(){
+    body.innerHTML = '';
+    pager.innerHTML = '';
+    const totalPages = Math.ceil(items.length / OVERDUE_PAGE_SIZE);
+    if(currentPage > totalPages) currentPage = totalPages;
+    const start = (currentPage - 1) * OVERDUE_PAGE_SIZE;
+    items.slice(start, start + OVERDUE_PAGE_SIZE).forEach(item=>{
       const row = document.createElement('div');
       row.className = 'cleaning-row';
       const days = Math.max(1, Math.round((new Date(today) - new Date(item.resident.moveOut)) / 86400000));
@@ -2858,9 +2875,20 @@ function renderOverdueStatsCard(){
         UI.branchId = item.branch.id;
         scrollToRoomCard(item.room);
       };
-      card.appendChild(row);
+      body.appendChild(row);
     });
+    if(items.length > OVERDUE_PAGE_SIZE){
+      for(let p=1; p<=totalPages; p++){
+        const pBtn = document.createElement('button');
+        pBtn.className = 'btn small' + (p===currentPage ? ' primary' : '');
+        pBtn.textContent = String(p);
+        pBtn.onclick = ()=>{ currentPage = p; renderPage(); };
+        pager.appendChild(pBtn);
+      }
+    }
   }
+  renderPage();
+
   return card;
 }
 
