@@ -43,6 +43,9 @@
     background:var(--accent-soft); padding:2px 8px; border-radius:20px; vertical-align:middle;
   }
   .brand .sub{ font-size:12px; color:var(--ink-soft); }
+  .home-link{ cursor:pointer; display:flex; align-items:center; }
+  .home-link:hover{ color:var(--accent-ink); }
+  .home-icon{ font-size:20px; margin-right:8px; line-height:1; }
 
   .nav-row{ display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap; }
   .branch-picker{ display:flex; align-items:center; gap:8px; }
@@ -65,8 +68,6 @@
   .btn.danger:hover{ border-color:var(--st-hold); color:var(--st-hold); }
   .btn.small{ padding:4px 9px; font-size:11.5px; border-radius:6px; }
   .btn:disabled{ opacity:.4; cursor:not-allowed; }
-  .btn.statstab{ font-weight:700; }
-  .btn.statstab.active{ background:var(--st-leaving-bg); border-color:var(--st-leaving); color:#8A5F14; }
 
   .iconbtn{
     width:26px; height:26px; border-radius:7px; border:1px solid var(--line); background:#fff;
@@ -103,13 +104,13 @@
   .branch-bar{
     position:relative;
     background:var(--panel); border:1px solid var(--line); border-radius:14px;
-    padding:16px 18px; margin-bottom:18px; display:grid; grid-template-columns:1.2fr 1fr 1fr; gap:16px;
+    padding:16px 18px; margin-bottom:18px; display:flex; flex-direction:column; gap:14px;
   }
   .branch-bar .branch-edit-pencil{ position:absolute; top:14px; right:14px; }
   .branch-bar .col h3{ margin:0 0 6px; font-size:11px; color:var(--ink-soft); font-weight:700; letter-spacing:.02em; }
   .branch-bar input, .branch-bar textarea{ width:100%; }
   .branch-bar .namewrap{ display:flex; gap:8px; align-items:center; }
-  .branch-bar .namewrap input{ font-size:16px; font-weight:800; border:none; background:transparent; padding:2px 0; }
+  .branch-bar .namewrap input{ font-size:19px; font-weight:800; border:none; background:transparent; padding:2px 0; }
   .branch-bar .namewrap input:focus{ outline:none; border-bottom:1px solid var(--accent); }
   .parking-cap-row select{ width:100px; }
   .parking-cap-row{ margin-bottom:8px; }
@@ -145,7 +146,7 @@
   .add-branch-form input, .add-branch-form select{ width:100%; }
 
   .branch-view-text{ font-size:14px; font-weight:600; padding:2px 0; }
-  .branch-view-text.title{ font-size:16px; font-weight:800; }
+  .branch-view-text.title{ font-size:19px; font-weight:800; }
   .branch-view-text.small{ font-size:12.5px; font-weight:400; color:var(--ink-soft); white-space:pre-wrap; }
 
   .overdue-banner{
@@ -410,7 +411,9 @@
 <div id="app" style="display:none;">
   <header class="top">
     <div class="brand">
-      <h1>먼슬리브 계약/입실 관리</h1>
+      <h1 id="homeLink" class="home-link" title="전체 통계로 이동">
+        <span class="home-icon" aria-hidden="true">&#8962;</span>먼슬리브 계약/입실 관리
+      </h1>
       <div class="sub" id="savedNote">불러오는 중…</div>
     </div>
     <div class="nav-row">
@@ -419,7 +422,6 @@
       </div>
       <div style="display:flex; gap:8px; align-items:center;">
         <span class="sub" id="loggedInAs"></span>
-        <button class="btn statstab" id="statsBtn">전체 통계</button>
         <button class="btn small" id="adminBtn" style="display:none;">관리자 설정</button>
         <button class="btn small" id="changePwBtn">비밀번호 변경</button>
         <button class="btn small" id="logoutBtn">로그아웃</button>
@@ -627,10 +629,6 @@ function renderTopNav(){
     UI.view='branch'; UI.branchId = sel.value; UI.roomStatusFilter='이용중'; render();
   };
 
-  const statsBtn = document.getElementById('statsBtn');
-  statsBtn.className = 'btn statstab' + (UI.view==='stats' ? ' active' : '');
-  statsBtn.onclick = ()=>{ UI.view = 'stats'; render(); };
-
   const adminBtn = document.getElementById('adminBtn');
   adminBtn.style.display = isSuperAdmin() ? '' : 'none';
   adminBtn.className = 'btn small' + (UI.view==='admin' ? ' primary' : '');
@@ -744,8 +742,8 @@ function renderBranchInfoBar(branch){
 
   // ---- 지점명 ----
   const col1 = document.createElement('div'); col1.className = 'col';
-  col1.appendChild(el('h3', null, '지점명'));
   if(editOn){
+    const namewrap = document.createElement('div'); namewrap.className = 'namewrap';
     const nameInput = document.createElement('input');
     nameInput.type = 'text'; nameInput.value = branch.name;
     nameInput.addEventListener('input', ()=>{
@@ -753,7 +751,8 @@ function renderBranchInfoBar(branch){
       branch.name = nameInput.value; scheduleSave();
       const opt = document.querySelector(`#branchSelect option[value="${branch.id}"]`); if(opt) opt.textContent = nameInput.value;
     });
-    col1.appendChild(nameInput);
+    namewrap.appendChild(nameInput);
+    col1.appendChild(namewrap);
   } else {
     col1.appendChild(el('div', 'branch-view-text title', branch.name));
   }
@@ -1079,7 +1078,6 @@ function renderRoomCard(room, sectionStatus){
   const maintDateSuffix = room.maintenanceDate ? ` · ${room.maintenanceDate.slice(5)}` : '';
   const headerRight = `
     <span class="badge" style="background:${meta.bg};color:${meta.fg}">${effStatus}</span>
-    ${roomHasScheduledLeaveResident(room) ? `<span class="badge res-status leaving">퇴실예정</span>` : ''}
     ${room.needsCleaning ? `<span class="badge" style="background:#FBEFD8;color:#8A5F14;">청소필요${maintDateSuffix}</span>` : ''}
     ${room.needsRetouch ? `<span class="badge" style="background:#E3E8FD;color:#2E3F9E;">리터치필요${maintDateSuffix}</span>` : ''}
   `;
@@ -1208,11 +1206,12 @@ function renderResidentView(p, room, isSecondary){
   const block = document.createElement('div');
   block.className = 'resident-block';
 
-  if(!isSecondary && (p.channel !== '독립생활' || isOverdue(p))){
+  if(!isSecondary && (p.channel !== '독립생활' || isOverdue(p) || p.scheduledToLeave)){
     const flagsLine = document.createElement('div');
     flagsLine.className = 'resident-flags';
     flagsLine.innerHTML = `
       ${isOverdue(p) ? '<span class="badge overdue-badge">⚠ 연체</span>' : ''}
+      ${p.scheduledToLeave ? '<span class="badge res-status leaving">퇴실예정</span>' : ''}
       ${p.channel !== '독립생활' ? `<span class="badge" style="background:#F1EFE8;color:${channelColor(p.channel)}">${esc(p.channel)}</span>` : ''}
     `;
     block.appendChild(flagsLine);
@@ -2703,6 +2702,7 @@ document.getElementById('logoutBtn').addEventListener('click', ()=>{
   showConfirm('로그아웃할까요?', ()=> firebase.auth().signOut());
 });
 document.getElementById('changePwBtn').addEventListener('click', showChangePasswordModal);
+document.getElementById('homeLink').addEventListener('click', ()=>{ UI.view = 'stats'; render(); });
 
 function showChangePasswordModal(){
   const overlay = document.createElement('div');
