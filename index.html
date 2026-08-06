@@ -627,6 +627,12 @@ let CURRENT_USER = null;   // { uid, email }
 let USER_ROLE = null;      // 'pending' | 'viewer' | 'editor' | 'superadmin'
 function canEdit(){ return USER_ROLE === 'editor' || USER_ROLE === 'superadmin'; }
 function isSuperAdmin(){ return USER_ROLE === 'superadmin'; }
+/* 보기 권한(viewer) 계정에는 입실자 이름 앞 두 글자만 보여주고 나머지는 마스킹한다. */
+function maskViewerName(name){
+  if(!name || USER_ROLE !== 'viewer') return name;
+  const s = String(name);
+  return s.length <= 2 ? s : s.slice(0,2) + '*'.repeat(s.length-2);
+}
 
 let pendingChangeSummary = '';
 function logChange(summary){ pendingChangeSummary = summary; }
@@ -1211,7 +1217,7 @@ function branchActiveCarResidents(branchId){
     .filter(p => roomIds.has(p.roomId) && p.carNumber && p.carNumber.trim() && isCurrentlyResiding(p))
     .map(p => {
       const room = DB.rooms.find(r=>r.id===p.roomId);
-      return { roomNumber: room ? room.number : '-', name: p.name || '(이름 미입력)', carNumber: p.carNumber };
+      return { roomNumber: room ? room.number : '-', name: maskViewerName(p.name) || '(이름 미입력)', carNumber: p.carNumber };
     });
 }
 function branchActiveCarCount(branchId, excludeResidentId){
@@ -1292,7 +1298,7 @@ function renderRoomCard(room, sectionStatus){
         entry.className = 'history-entry';
         const topRow = document.createElement('div');
         topRow.className = 'history-top';
-        topRow.innerHTML = `<span class="nm">${esc(h.name)}</span><span class="ph">${esc(h.phone||'-')}</span>`;
+        topRow.innerHTML = `<span class="nm">${esc(maskViewerName(h.name))}</span><span class="ph">${esc(h.phone||'-')}</span>`;
         if(canEdit() && !roomOccupied){
           if(idx === 0){
             const restoreBtn = document.createElement('button');
@@ -1398,7 +1404,7 @@ function renderResidentView(p, room, isSecondary){
   nameWrap.style.cssText = 'display:flex;align-items:center;gap:4px;min-width:0;';
   const nm = document.createElement('span');
   nm.className = 'nm';
-  nm.textContent = p.name || '(이름 미입력)';
+  nm.textContent = maskViewerName(p.name) || '(이름 미입력)';
   nameWrap.appendChild(nm);
   if(canEdit()){
     const editBtn = document.createElement('button');
@@ -1933,12 +1939,12 @@ function renderTimelineSection(branch){
       const personOverdue = p && isOverdue(p);
       lbl.innerHTML = p
         ? `<span class="rm">${esc(room.number)}</span>
-           <span class="nm"><span class="tl-status-dot" style="background:${rowMeta.fg}"></span>${esc(p.name || '이름 미입력')}${personOverdue ? ' ⚠' : ''} · ${p.channel}</span>`
+           <span class="nm"><span class="tl-status-dot" style="background:${rowMeta.fg}"></span>${esc(maskViewerName(p.name) || '이름 미입력')}${personOverdue ? ' ⚠' : ''} · ${p.channel}</span>`
         : `<span class="rm">${esc(room.number)}</span>
            <span class="nm" style="color:${rowMeta.fg};font-weight:700;"><span class="tl-status-dot" style="background:${rowMeta.fg}"></span>${esc(rowStatusLabel)}</span>`;
       if(p){
         lbl.style.cursor = 'pointer';
-        lbl.title = `${p.name || '이름 미입력'} · ${p.channel} · ${p.moveIn} ~ ${p.moveOut || '미정'}${p.memo ? ' · ' + p.memo : ''} (클릭 시 호실로 이동)`;
+        lbl.title = `${maskViewerName(p.name) || '이름 미입력'} · ${p.channel} · ${p.moveIn} ~ ${p.moveOut || '미정'}${p.memo ? ' · ' + p.memo : ''} (클릭 시 호실로 이동)`;
         lbl.onclick = ()=> scrollToRoomCard(room);
       }
       row.appendChild(lbl);
@@ -2006,10 +2012,10 @@ function buildBar(p, room, monthStart, daysInMonth){
   bar.style.width = widthPct + '%';
   const meta = residentTimelineMeta(p, room);
   bar.style.background = meta.fg;
-  const nameText = esc(p.name || p.resStatus);
+  const nameText = esc(maskViewerName(p.name) || p.resStatus);
   const memoText = p.memo ? ` <span class="tl-bar-memo">${esc(p.memo)}</span>` : '';
   bar.innerHTML = `<span class="tl-bar-name">${nameText}</span>${memoText}`;
-  bar.title = `${p.name || '이름 미입력'} · ${meta.key} · ${p.channel} · ${p.moveIn} ~ ${p.moveOut || '미정'}${p.memo ? ' · ' + p.memo : ''} (클릭 시 호실로 이동)`;
+  bar.title = `${maskViewerName(p.name) || '이름 미입력'} · ${meta.key} · ${p.channel} · ${p.moveIn} ~ ${p.moveOut || '미정'}${p.memo ? ' · ' + p.memo : ''} (클릭 시 호실로 이동)`;
   bar.style.cursor = 'pointer';
   bar.onclick = ()=> scrollToRoomCard(room);
   return bar;
