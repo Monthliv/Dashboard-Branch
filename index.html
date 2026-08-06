@@ -377,10 +377,13 @@
   .channel-chip .iconbtn{ width:20px; height:20px; border-radius:50%; }
   .channel-add-row{ display:flex; gap:8px; align-items:center; }
   .channel-add-row input{ flex:1; max-width:280px; }
-  .user-row{ display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px dashed var(--line); flex-wrap:wrap; }
-  .user-row:last-child{ border-bottom:none; }
+  .user-entry{ padding:8px 0; border-bottom:1px dashed var(--line); }
+  .user-entry:last-child{ border-bottom:none; }
+  .user-row{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   .user-row .user-email{ font-weight:600; font-size:12.5px; min-width:160px; }
   .user-row select{ font-size:12px; }
+  .user-branch-checks{ display:flex; flex-wrap:wrap; gap:4px 14px; margin:8px 0 2px 0; padding:8px 10px; background:#FAF8F2; border-radius:8px; }
+  .user-branch-check-item{ display:flex; align-items:center; gap:5px; font-size:12px; color:var(--ink); cursor:pointer; }
   .log-row{ display:flex; align-items:center; gap:10px; padding:6px 0; border-bottom:1px dashed var(--line); font-size:12px; }
   .log-row:last-child{ border-bottom:none; }
   .log-row .log-time{ font-family:'JetBrains Mono',monospace; color:var(--ink-soft); flex:none; white-space:nowrap; }
@@ -625,6 +628,8 @@ function indexEmail(email){
 
 let CURRENT_USER = null;   // { uid, email }
 let USER_ROLE = null;      // 'pending' | 'viewer' | 'editor' | 'superadmin'
+let USER_BRANCH_SCOPE = 'all'; // 'all' | 'selected' — superadmin is always effectively 'all'
+let USER_BRANCH_IDS = null;    // array of branch ids, only meaningful when scope === 'selected'
 function canEdit(){ return USER_ROLE === 'editor' || USER_ROLE === 'superadmin'; }
 function isSuperAdmin(){ return USER_ROLE === 'superadmin'; }
 /* 보기 권한(viewer) 계정에는 입실자 이름 앞 두 글자만 보여주고 나머지는 마스킹한다. */
@@ -632,6 +637,15 @@ function maskViewerName(name){
   if(!name || USER_ROLE !== 'viewer') return name;
   const s = String(name);
   return s.length <= 2 ? s : s.slice(0,2) + '*'.repeat(s.length-2);
+}
+/* 슈퍼어드민은 항상 전체 지점에 접근 가능. 그 외 계정은 관리자가 지정한 범위(전체 또는 선택한 지점)로 제한된다. */
+function hasBranchAccess(branchId){
+  if(isSuperAdmin() || USER_BRANCH_SCOPE !== 'selected') return true;
+  return Array.isArray(USER_BRANCH_IDS) && USER_BRANCH_IDS.includes(branchId);
+}
+function allowedBranches(){
+  if(isSuperAdmin() || USER_BRANCH_SCOPE !== 'selected') return DB.branches;
+  return DB.branches.filter(b=> Array.isArray(USER_BRANCH_IDS) && USER_BRANCH_IDS.includes(b.id));
 }
 
 let pendingChangeSummary = '';
@@ -714,7 +728,7 @@ function renderTopNav(){
   placeholder.value = ''; placeholder.textContent = '지점 선택';
   placeholder.selected = UI.view !== 'branch';
   sel.appendChild(placeholder);
-  DB.branches.forEach(br=>{
+  allowedBranches().forEach(br=>{
     const o = document.createElement('option');
     o.value = br.id; o.textContent = br.name;
     o.selected = UI.view === 'branch' && UI.branchId===br.id;
@@ -736,10 +750,11 @@ function renderTopNav(){
 }
 
 function currentBranch(){
-  if(!UI.branchId || !DB.branches.find(b=>b.id===UI.branchId)){
-    UI.branchId = DB.branches[0] ? DB.branches[0].id : null;
+  const allowed = allowedBranches();
+  if(!UI.branchId || !allowed.find(b=>b.id===UI.branchId)){
+    UI.branchId = allowed[0] ? allowed[0].id : null;
   }
-  return DB.branches.find(b=>b.id===UI.branchId);
+  return allowed.find(b=>b.id===UI.branchId);
 }
 
 /* ---------------- branch view ---------------- */
@@ -2295,6 +2310,9 @@ function renderUserManagePanel(){
 
     users.forEach(u=>{
       const isPending = u.role === 'pending';
+      const entryWrap = document.createElement('div');
+      entryWrap.className = 'user-entry';
+
       const row = document.createElement('div');
       row.className = 'user-row';
 
@@ -2328,13 +2346,57 @@ function renderUserManagePanel(){
       });
       row.appendChild(roleSel);
 
+      const scopeSel = document.createElement('select');
+      scopeSel.title = '이 계정이 접근할 수 있는 지점 범위';
+      [['all','전체 지점'], ['selected','지점 선택']].forEach(([val,label])=>{
+        const o = document.createElement('option');
+        o.value = val; o.textContent = label; o.selected = (u.branchScope || 'all') === val;
+        scopeSel.appendChild(o);
+      });
+      row.appendChild(scopeSel);
+
+      const branchChecks = document.createElement('div');
+      branchChecks.className = 'user-branch-checks';
+      const checkInputs = DB.branches.map(b=>{
+        const lbl = document.createElement('label');
+        lbl.className = 'user-branch-check-item';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox'; cb.value = b.id;
+        cb.checked = Array.isArray(u.branchIds) && u.branchIds.includes(b.id);
+        lbl.appendChild(cb);
+        lbl.appendChild(document.createTextNode(b.name));
+        branchChecks.appendChild(lbl);
+        return cb;
+      });
+
+      function syncScopeVisibility(){
+        const isSuper = roleSel.value === 'superadmin';
+        scopeSel.style.display = isSuper ? 'none' : '';
+        branchChecks.style.display = (!isSuper && scopeSel.value === 'selected') ? '' : 'none';
+      }
+      roleSel.addEventListener('change', syncScopeVisibility);
+      scopeSel.addEventListener('change', syncScopeVisibility);
+      syncScopeVisibility();
+
       const approveBtn = document.createElement('button');
       approveBtn.className = 'btn small primary';
       approveBtn.textContent = isPending ? '승인' : '역할 변경';
       approveBtn.onclick = ()=>{
         const newRole = roleSel.value;
-        USERS_COL.doc(u.id).set({ email: u.email, role: newRole, approvedBy: CURRENT_USER.email, approvedAt: new Date().toISOString() }, { merge:true })
-          .then(()=>{ writeChangeLog(`${u.email} 계정 권한을 "${newRole}"(으)로 설정`); render(); })
+        const branchScope = newRole === 'superadmin' ? 'all' : scopeSel.value;
+        const branchIds = branchScope === 'selected' ? checkInputs.filter(cb=>cb.checked).map(cb=>cb.value) : [];
+        if(branchScope === 'selected' && branchIds.length===0){
+          showAlert('지점을 1개 이상 선택해주세요.');
+          return;
+        }
+        USERS_COL.doc(u.id).set({ email: u.email, role: newRole, branchScope, branchIds, approvedBy: CURRENT_USER.email, approvedAt: new Date().toISOString() }, { merge:true })
+          .then(()=>{
+            const scopeLabel = branchScope === 'selected'
+              ? ` (${branchIds.map(id=> DB.branches.find(b=>b.id===id)?.name || id).join(', ')})`
+              : '';
+            writeChangeLog(`${u.email} 계정 권한을 "${newRole}"(으)로 설정${scopeLabel}`);
+            render();
+          })
           .catch(e=> showAlert('처리 실패: ' + e.message));
       };
       row.appendChild(approveBtn);
@@ -2351,7 +2413,9 @@ function renderUserManagePanel(){
       };
       row.appendChild(delBtn);
 
-      body.appendChild(row);
+      entryWrap.appendChild(row);
+      entryWrap.appendChild(branchChecks);
+      body.appendChild(entryWrap);
     });
   }).catch(e=>{ body.textContent = '사용자 목록을 불러오지 못했습니다: ' + e.message; });
 
@@ -2527,7 +2591,7 @@ function renderStatsView(){
   const today = todayISO();
   const tbody = document.createElement('tbody');
   const totals = { total:0, occupied:0, forSale:0, hold:0, reserved:0, activeCount:0 };
-  DB.branches.forEach(b=>{
+  allowedBranches().forEach(b=>{
     const rms = DB.rooms.filter(r=>r.branchId===b.id);
     const roomIds = new Set(rms.map(r=>r.id));
     const total = rms.length;
@@ -2821,7 +2885,7 @@ function renderAdminAddRoomForm(){
 
 function renderOverdueStatsCard(){
   const items = [];
-  DB.rooms.forEach(room=>{
+  DB.rooms.filter(room=> hasBranchAccess(room.branchId)).forEach(room=>{
     const branch = DB.branches.find(b=>b.id===room.branchId);
     DB.residents.filter(p=>p.roomId===room.id && isOverdue(p)).forEach(p=>{
       items.push({ room, branch, resident:p });
@@ -2889,7 +2953,7 @@ function renderOverdueStatsCard(){
 
 function renderShortSaleAlertCard(){
   const items = [];
-  DB.rooms.forEach(room=>{
+  DB.rooms.filter(room=> hasBranchAccess(room.branchId)).forEach(room=>{
     if(effectiveRoomStatus(room) !== '단기판매') return;
     const branch = DB.branches.find(b=>b.id===room.branchId);
     DB.residents.filter(p=>p.roomId===room.id && isUpcoming(p)).forEach(p=>{
@@ -2953,6 +3017,7 @@ function renderPendingMoveStatsCard(){
   DB.residents.forEach(p=>{
     if(!p.pendingRoomMove) return;
     const room = DB.rooms.find(r=>r.id===p.roomId);
+    if(room && !hasBranchAccess(room.branchId)) return;
     const toRoom = DB.rooms.find(r=>r.id===p.pendingRoomMove.toRoomId);
     const branch = room ? DB.branches.find(b=>b.id===room.branchId) : null;
     items.push({ p, room, toRoom, branch, date: p.pendingRoomMove.date });
@@ -3024,14 +3089,14 @@ function renderCleaningView(){
    표시되지만, 날짜가 없어 주간표에는 올릴 수 없음 — 소비하는 쪽에서 구분해서 처리한다). */
 function collectCleaningEntries(){
   const entries = [];
-  DB.rooms.filter(r=> r.needsCleaning || r.needsRetouch || r.needsExtraCleaning).forEach(r=>{
+  DB.rooms.filter(r=> (r.needsCleaning || r.needsRetouch || r.needsExtraCleaning) && hasBranchAccess(r.branchId)).forEach(r=>{
     const branch = DB.branches.find(b=>b.id===r.branchId);
     const kind = roomMaintKind(r);
     entries.push({ type:kind, branch, room:r, date: r.maintenanceDate || (kind==='moveout' ? todayISO() : null) });
   });
   DB.residents.filter(p=> p.scheduledToLeave && p.moveOut).forEach(p=>{
     const room = DB.rooms.find(r=>r.id===p.roomId);
-    if(!room || roomMaintKind(room)) return;
+    if(!room || roomMaintKind(room) || !hasBranchAccess(room.branchId)) return;
     const branch = DB.branches.find(b=>b.id===room.branchId);
     entries.push({ type:'moveout', branch, room, date: nextMonWedFri(p.moveOut) });
   });
@@ -3085,7 +3150,8 @@ function renderCleaningWeekMatrix(){
   legend.innerHTML = `<span class="cal-legend-item">클릭 시 계약/입실관리의 해당 지점으로 이동 · 해당 없는 항목은 표시하지 않음</span>`;
   box.appendChild(legend);
 
-  if(DB.branches.length===0){
+  const branches = allowedBranches();
+  if(branches.length===0){
     box.appendChild(el('div','cleaning-empty','지점이 없습니다.'));
     return box;
   }
@@ -3113,7 +3179,7 @@ function renderCleaningWeekMatrix(){
   table.innerHTML = `<thead><tr><th>지점</th>${theadCells}</tr></thead>`;
   const tbody = document.createElement('tbody');
 
-  DB.branches.forEach(branch=>{
+  branches.forEach(branch=>{
     const dmap = grid.get(branch.id);
     const tr = document.createElement('tr');
     const nameTd = document.createElement('td');
@@ -3602,7 +3668,10 @@ async function initApp(user){
     await USERS_COL.doc(user.uid).set({ email: user.email, role:'pending', createdAt: new Date().toISOString() });
     USER_ROLE = 'pending';
   } else {
-    USER_ROLE = roleDoc.data().role || 'pending';
+    const roleData = roleDoc.data();
+    USER_ROLE = roleData.role || 'pending';
+    USER_BRANCH_SCOPE = roleData.branchScope || 'all';
+    USER_BRANCH_IDS = Array.isArray(roleData.branchIds) ? roleData.branchIds : null;
   }
 
   if(USER_ROLE === 'pending'){
@@ -3641,7 +3710,7 @@ async function initApp(user){
     }
   });
   if(canEdit() && statusFixed) scheduleSave();
-  UI.branchId = DB.branches[0] ? DB.branches[0].id : null;
+  UI.branchId = allowedBranches()[0] ? allowedBranches()[0].id : null;
   if(!isSuperAdmin()) UI.view = 'branch'; // 슈퍼어드민이 아니면 전체 통계 대신 지점 대시보드로 바로 진입
   render();
   document.getElementById('savedNote').textContent = '자동 저장됨 · 이 대시보드를 사용하는 모든 사람에게 공유됩니다';
