@@ -2057,7 +2057,9 @@ function renderResidentResyncPanel(){
     <div style="font-size:12px;color:var(--ink-soft);margin-bottom:12px;">
       "지점명 / 호실번호 / 이름 / 연락처 / 입실일 / 퇴실예정일" 형식의 계약자 DB 엑셀을 업로드하면,
       현재 등록된 모든 입실자와 퇴실 이력을 지우고 이 파일 내용으로 새로 채웁니다.
-      지점·호실 구성(타입/가격 등)은 그대로 유지됩니다. 이름이 "-" 또는 "*"인 행은 공실로 처리됩니다.
+      지점명·호실번호가 아직 없으면 새로 만듭니다(이때 "타입 / 인실구분 / 정상입실료(원)" 컬럼이 있으면 반영되고,
+      없으면 기타 / 1인실 / 0원으로 생성됩니다). 이미 있는 지점·호실은 그대로 유지됩니다.
+      이름이 "-" 또는 "*"인 행은 공실로 처리됩니다.
     </div>
   `;
   const uploadBtn = document.createElement('button');
@@ -2088,21 +2090,47 @@ function handleResidentResyncFile(file){
       const sheet = wb.Sheets[wb.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(sheet, { defval:'' });
 
-      const result = { matched:0, vacant:0, unmatchedBranch:[], unmatchedRoom:[], overCapacity:[] };
+      const result = { matched:0, vacant:0, branchesCreated:0, roomsCreated:0, overCapacity:[] };
       const newResidents = [];
+      const newBranches = [];
+      const newRooms = [];
       const slotCounters = {};
+
+      function findOrCreateBranch(branchRaw){
+        const resolvedName = BRANCH_NAME_ALIASES[branchRaw] || branchRaw;
+        let branch = DB.branches.find(b=> cleanKeyLoose(b.name).toLowerCase()===resolvedName.toLowerCase())
+          || newBranches.find(b=> cleanKeyLoose(b.name).toLowerCase()===resolvedName.toLowerCase());
+        if(!branch){
+          branch = { id: uid('b'), name: resolvedName, address:'', parkingNote:'', parkingCapacity:0, memo:'' };
+          newBranches.push(branch);
+          result.branchesCreated++;
+        }
+        return branch;
+      }
+
+      function findOrCreateRoom(branch, roomRaw, row){
+        let room = DB.rooms.find(r=> r.branchId===branch.id && normalizeRoomNo(r.number)===normalizeRoomNo(roomRaw))
+          || newRooms.find(r=> r.branchId===branch.id && normalizeRoomNo(r.number)===normalizeRoomNo(roomRaw));
+        if(!room){
+          const type = cleanKeyLoose(row['타입']) || '기타';
+          const occRaw = cleanKeyLoose(String(row['인실구분']||''));
+          const occupancy = (occRaw==='2' || occRaw==='2인실') ? '2인실' : '1인실';
+          const price = Number(row['정상입실료(원)']) || Number(row['정상입실료']) || 0;
+          room = { id: uid('r'), branchId: branch.id, number: roomRaw, type, occupancy, saleStatus:'공실',
+            needsCleaning:false, needsRetouch:false, note:'', price };
+          newRooms.push(room);
+          result.roomsCreated++;
+        }
+        return room;
+      }
 
       rows.forEach((row, idx)=>{
         const branchRaw = cleanKeyLoose(row['지점명']);
         const roomRaw = cleanKeyLoose(String(row['호실번호']||'')).replace(/호$/,'');
         if(!branchRaw && !roomRaw) return; // 빈 여백 행
 
-        const resolvedBranchName = BRANCH_NAME_ALIASES[branchRaw] || branchRaw;
-        const branch = DB.branches.find(b=> cleanKeyLoose(b.name).toLowerCase()===resolvedBranchName.toLowerCase());
-        if(!branch){ result.unmatchedBranch.push(`[${idx+2}행] 지점 "${branchRaw}"을(를) 찾을 수 없음`); return; }
-
-        const room = DB.rooms.find(r=> r.branchId===branch.id && normalizeRoomNo(r.number)===normalizeRoomNo(roomRaw));
-        if(!room){ result.unmatchedRoom.push(`[${idx+2}행] ${branch.name} "${roomRaw}"호를 찾을 수 없음`); return; }
+        const branch = findOrCreateBranch(branchRaw);
+        const room = findOrCreateRoom(branch, roomRaw, row);
 
         const nameRaw = cleanKeyLoose(row['이름']);
         if(!nameRaw || nameRaw==='-' || nameRaw==='*'){ result.vacant++; return; }
@@ -2130,19 +2158,21 @@ function handleResidentResyncFile(file){
         result.matched++;
       });
 
-      const problems = [...result.unmatchedBranch, ...result.unmatchedRoom, ...result.overCapacity];
+      const problems = [...result.overCapacity];
       showConfirm(
         `엑셀 분석 결과\n`+
+        `- 새로 생성될 지점: ${result.branchesCreated}개\n`+
+        `- 새로 생성될 호실: ${result.roomsCreated}개\n`+
         `- 등록될 입실자: ${result.matched}명\n`+
         `- 공실 처리(이름 "-"/"*"): ${result.vacant}건\n`+
-        `- 지점명 불일치: ${result.unmatchedBranch.length}건\n`+
-        `- 호실 불일치: ${result.unmatchedRoom.length}건\n`+
         `- 정원 초과 제외: ${result.overCapacity.length}건\n\n`+
         `현재 등록된 모든 입실자(${DB.residents.length}명)와 퇴실 이력이 삭제되고 위 내용으로 교체됩니다.\n이 작업은 되돌릴 수 없습니다. 계속할까요?`,
         ()=>{
+          DB.branches.push(...newBranches);
+          DB.rooms.push(...newRooms);
           DB.residents = newResidents;
           DB.residentHistory = [];
-          logChange(`계약자 DB 엑셀로 입실자 전체 재등록 (${result.matched}명)`);
+          logChange(`계약자 DB 엑셀로 지점 ${result.branchesCreated}개·호실 ${result.roomsCreated}개 생성, 입실자 ${result.matched}명 재등록`);
           scheduleSave();
           render();
           if(problems.length){
