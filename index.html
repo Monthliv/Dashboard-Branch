@@ -473,6 +473,7 @@ let UI = {
   view:'stats', branchId:null, branchTab:'rooms',
   roomEditMode:{}, residentEditMode:{}, roomSnapshots:{}, residentSnapshots:{}, draftResident:{}, parkingListOpen:{},
   branchEditMode:{}, branchSnapshots:{}, historyOpen:{}, addingBranch:false, addingRoom:false, managingRoom:false,
+  reorderingBranch:false, bulkUploading:false, bulkCreatingRooms:false,
   tlYear:null, tlMonth:null, roomStatusFilter:'이용중'
 };
 
@@ -1903,11 +1904,9 @@ function buildBar(p, room, monthStart, daysInMonth){
 }
 
 /* ---------------- bulk upload (excel) ---------------- */
-function renderBulkUploadPanel(){
+function renderBulkUploadBody(){
   const box = document.createElement('div');
-  box.className = 'stat-section';
   box.innerHTML = `
-    <h3>지점 · 호실 · 입실자 엑셀 일괄 업로드</h3>
     <div style="font-size:12px;color:var(--ink-soft);margin-bottom:12px;">
       양식을 다운로드해 "지점", "호실", "입실자" 시트를 채운 뒤 업로드하세요. 이미 있는 지점명/호실번호는 정보가 갱신되고, 입실자는 매번 새로 추가됩니다.
     </div>
@@ -1956,11 +1955,9 @@ const BRANCH_NAME_ALIASES = {
 function cleanKeyLoose(s){ return String(s||'').replace(/[\u200B-\u200D\uFEFF]/g,'').trim(); }
 function normalizeRoomNo(s){ const c = cleanKeyLoose(s).toLowerCase(); return /^\d+$/.test(c) ? String(parseInt(c,10)) : c; }
 
-function renderRoomBulkCreatePanel(){
+function renderRoomBulkCreateBody(){
   const box = document.createElement('div');
-  box.className = 'stat-section';
   box.innerHTML = `
-    <h3>\uD638\uC2E4 \uC77C\uAD04 \uC0DD\uC131</h3>
     <div style="font-size:12px;color:var(--ink-soft);margin-bottom:12px;">
       "\uC9C0\uC810\uBA85 / \uD638\uC2E4\uBC88\uD638 / \uD0C0\uC785 / \uC778\uC2E4\uAD6C\uBD84 / \uC815\uC0C1\uC785\uC2E4\uB8CC(\uC6D0)" \uD615\uC2DD\uC758 \uC5D1\uC140\uC744 \uC5C5\uB85C\uB4DC\uD558\uBA74,
       \uC544\uC9C1 \uB4F1\uB85D\uB418\uC9C0 \uC54A\uC740 \uD638\uC2E4\uB9CC \uC0C8\uB85C \uC0DD\uC131\uD569\uB2C8\uB2E4. \uC774\uBBF8 \uC788\uB294 \uD638\uC2E4\uC740 \uAC74\uB4DC\uB9AC\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.
@@ -2198,6 +2195,39 @@ function downloadBulkTemplate(){
   ]), '입실자');
 
   XLSX.writeFile(wb, 'monthliv_bulk_upload_template.xlsx');
+}
+
+function downloadCurrentData(){
+  if(typeof XLSX === 'undefined'){ showAlert('엑셀 라이브러리를 불러오지 못했습니다. 네트워크 연결을 확인해주세요.'); return; }
+  const wb = XLSX.utils.book_new();
+
+  const branchRows = DB.branches.map(b=> ({
+    지점명: b.name, 주소: b.address||'', 주차가능대수: b.parkingCapacity||0, 주차메모: b.parkingNote||'', 특이사항메모: b.memo||''
+  }));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(branchRows), '지점');
+
+  const roomRows = DB.rooms.map(r=>{
+    const branch = DB.branches.find(b=>b.id===r.branchId);
+    return {
+      지점명: branch ? branch.name : '', 호실번호: r.number, 타입: r.type, 인실구분: r.occupancy,
+      판매상태: r.saleStatus, 정상입실료: r.price||0,
+      청소필요: r.needsCleaning ? 'O' : 'X', 리터치필요: r.needsRetouch ? 'O' : 'X', 호실특이사항: r.note||''
+    };
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(roomRows), '호실');
+
+  const residentRows = DB.residents.map(p=>{
+    const room = DB.rooms.find(r=>r.id===p.roomId);
+    const branch = room ? DB.branches.find(b=>b.id===room.branchId) : null;
+    return {
+      지점명: branch ? branch.name : '', 호실번호: room ? room.number : '', 순번: (p.slotIndex||0)+1,
+      이름: p.name||'', 연락처: p.phone||'', 유입채널: p.channel||'', 입실일: p.moveIn||'', 퇴실예정일: p.moveOut||'',
+      차량번호: p.carNumber||'', 메모: p.memo||''
+    };
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(residentRows), '입실자');
+
+  XLSX.writeFile(wb, `monthliv_현재데이터_${todayISO()}.xlsx`);
 }
 
 function toISODateStr(v){
@@ -2671,9 +2701,6 @@ function renderAdminView(){
   }
 
   wrap.appendChild(renderBranchRoomManagePanel());
-  wrap.appendChild(renderBranchOrderPanel());
-  wrap.appendChild(renderBulkUploadPanel());
-  wrap.appendChild(renderRoomBulkCreatePanel());
   wrap.appendChild(renderResidentResyncPanel());
   wrap.appendChild(renderChannelManagePanel());
   wrap.appendChild(renderUserManagePanel());
@@ -2682,43 +2709,57 @@ function renderAdminView(){
   return wrap;
 }
 
+const ADMIN_PANEL_TOGGLE_FLAGS = ['addingBranch','addingRoom','managingRoom','reorderingBranch','bulkUploading','bulkCreatingRooms'];
 function renderBranchRoomManagePanel(){
   const box = document.createElement('div');
   box.className = 'stat-section';
   box.innerHTML = `<h3>지점 · 호실 관리</h3>`;
 
   const btnRow = document.createElement('div');
-  btnRow.style.cssText = 'display:flex; gap:8px; margin-bottom:12px;';
-  const addBranchBtn = document.createElement('button');
-  addBranchBtn.className = 'btn primary small';
-  addBranchBtn.textContent = UI.addingBranch ? '지점 추가 취소' : '+ 지점 추가';
-  addBranchBtn.onclick = ()=>{ UI.addingBranch = !UI.addingBranch; UI.addingRoom = false; render(); };
-  const addRoomBtn = document.createElement('button');
-  addRoomBtn.className = 'btn primary small';
-  addRoomBtn.textContent = UI.addingRoom ? '호실 추가 취소' : '+ 호실 추가';
-  addRoomBtn.onclick = ()=>{ UI.addingRoom = !UI.addingRoom; UI.addingBranch = false; UI.managingRoom = false; render(); };
-  const manageRoomBtn = document.createElement('button');
-  manageRoomBtn.className = 'btn danger small';
-  manageRoomBtn.textContent = UI.managingRoom ? '호실 정보 수정 취소' : '호실 정보 수정 · 삭제';
-  manageRoomBtn.onclick = ()=>{ UI.managingRoom = !UI.managingRoom; UI.addingBranch = false; UI.addingRoom = false; render(); };
-  btnRow.appendChild(addBranchBtn); btnRow.appendChild(addRoomBtn); btnRow.appendChild(manageRoomBtn);
+  btnRow.style.cssText = 'display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;';
+
+  function toggleBtn(flag, onLabel, offLabel, variant){
+    const btn = document.createElement('button');
+    btn.className = 'btn small' + (variant ? ' '+variant : '');
+    btn.textContent = UI[flag] ? offLabel : onLabel;
+    btn.onclick = ()=>{
+      const turningOn = !UI[flag];
+      ADMIN_PANEL_TOGGLE_FLAGS.forEach(f=> UI[f] = false);
+      UI[flag] = turningOn;
+      render();
+    };
+    return btn;
+  }
+  btnRow.appendChild(toggleBtn('addingBranch', '+ 지점 추가', '지점 추가 취소', 'primary'));
+  btnRow.appendChild(toggleBtn('addingRoom', '+ 호실 추가', '호실 추가 취소', 'primary'));
+  btnRow.appendChild(toggleBtn('managingRoom', '호실 정보 수정 · 삭제', '호실 정보 수정 취소', 'danger'));
+  btnRow.appendChild(toggleBtn('reorderingBranch', '지점 노출 순서 변경', '지점 순서 변경 취소'));
+  btnRow.appendChild(toggleBtn('bulkUploading', '엑셀 일괄 업로드', '엑셀 업로드 취소'));
+  btnRow.appendChild(toggleBtn('bulkCreatingRooms', '호실 일괄 생성', '호실 일괄 생성 취소'));
+  const downloadBtn = document.createElement('button');
+  downloadBtn.className = 'btn small';
+  downloadBtn.textContent = '⬇ 현재 데이터 다운로드';
+  downloadBtn.title = '현재 등록된 지점/호실/입실자 내용을 엑셀로 다운로드';
+  downloadBtn.onclick = downloadCurrentData;
+  btnRow.appendChild(downloadBtn);
   box.appendChild(btnRow);
 
   if(UI.addingBranch) box.appendChild(renderAdminAddBranchForm());
   if(UI.addingRoom) box.appendChild(renderAdminAddRoomForm());
   if(UI.managingRoom) box.appendChild(renderAdminRoomManageForm());
-  if(!UI.addingBranch && !UI.addingRoom && !UI.managingRoom){
-    box.appendChild(el('div','empty-hint','위 버튼으로 새 지점 또는 호실을 수동으로 추가하거나, 기존 호실의 입실료를 수정·삭제할 수 있습니다.'));
+  if(UI.reorderingBranch) box.appendChild(renderBranchOrderBody());
+  if(UI.bulkUploading) box.appendChild(renderBulkUploadBody());
+  if(UI.bulkCreatingRooms) box.appendChild(renderRoomBulkCreateBody());
+  if(!ADMIN_PANEL_TOGGLE_FLAGS.some(f=>UI[f])){
+    box.appendChild(el('div','empty-hint','위 버튼으로 지점·호실을 추가/수정하거나, 지점 순서 변경, 엑셀 일괄 업로드·생성을 할 수 있습니다.'));
   }
 
   return box;
 }
 
-function renderBranchOrderPanel(){
+function renderBranchOrderBody(){
   const box = document.createElement('div');
-  box.className = 'stat-section';
-  box.innerHTML = `<h3>지점 노출 순서</h3>
-    <div style="font-size:12px;color:var(--ink-soft);margin-bottom:12px;">
+  box.innerHTML = `<div style="font-size:12px;color:var(--ink-soft);margin-bottom:12px;">
       드래그해서 순서를 바꾸면 지점 선택 목록, 지점별 현황 표 등 모든 화면에 반영됩니다.
     </div>`;
 
