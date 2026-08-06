@@ -1287,18 +1287,21 @@ function renderRoomCard(room, sectionStatus){
     if(hist.length===0){
       histBox.appendChild(el('div','history-empty','이 호실에는 아직 퇴실 이력이 없습니다.'));
     } else {
-      hist.forEach(h=>{
+      hist.forEach((h, idx)=>{
         const entry = document.createElement('div');
         entry.className = 'history-entry';
         const topRow = document.createElement('div');
         topRow.className = 'history-top';
         topRow.innerHTML = `<span class="nm">${esc(h.name)}</span><span class="ph">${esc(h.phone||'-')}</span>`;
         if(canEdit() && !roomOccupied){
-          const restoreBtn = document.createElement('button');
-          restoreBtn.className = 'btn small';
-          restoreBtn.textContent = '복원';
-          restoreBtn.title = '이 입실자 정보를 다시 입실자로 복원';
-          restoreBtn.onclick = ()=> restoreFromHistory(h);
+          if(idx === 0){
+            const restoreBtn = document.createElement('button');
+            restoreBtn.className = 'btn small';
+            restoreBtn.textContent = '복원';
+            restoreBtn.title = '이 입실자 정보를 다시 입실자로 복원';
+            restoreBtn.onclick = ()=> restoreFromHistory(h);
+            topRow.appendChild(restoreBtn);
+          }
           const delHistBtn = document.createElement('button');
           delHistBtn.className = 'iconbtn del';
           delHistBtn.innerHTML = '&times;';
@@ -1310,7 +1313,6 @@ function renderRoomCard(room, sectionStatus){
               scheduleSave(); render();
             });
           };
-          topRow.appendChild(restoreBtn);
           topRow.appendChild(delHistBtn);
         }
         entry.appendChild(topRow);
