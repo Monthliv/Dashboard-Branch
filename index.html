@@ -269,8 +269,9 @@
     font-size:10.5px; font-weight:700; padding:4px 9px; border-radius:6px;
     border:1px solid var(--line); background:#fbfaf7; color:var(--ink-soft); cursor:pointer;
   }
-  .flagchip.on.clean{ background:#FBEFD8; border-color:#E3B25C; color:#8A5F14; }
+  .flagchip.on.moveout{ background:#FBEFD8; border-color:#E3B25C; color:#8A5F14; }
   .flagchip.on.retouch{ background:#E3E8FD; border-color:#8B9FEE; color:#2E3F9E; }
+  .flagchip.on.extra{ background:#E1F5E9; border-color:#6FBF8B; color:#1F7A45; }
   .flagchip.on.presell{ background:var(--st-forsale-bg); border-color:var(--st-forsale); color:var(--st-forsale); }
   .edit-section-label{ font-size:11px; font-weight:700; color:var(--ink-soft); letter-spacing:.02em; margin:14px 0 8px; display:flex; justify-content:space-between; align-items:center; }
   .edit-section-label:first-child{ margin-top:0; }
@@ -322,8 +323,9 @@
   .overdue-stats-card{ border-color:var(--st-hold); }
   .overdue-stats-card h3{ color:var(--st-hold); }
   .overdue-cnt-badge{ background:var(--st-hold-bg) !important; color:var(--st-hold) !important; }
-  .cleaning-row{ display:flex; align-items:center; gap:10px; font-size:12.5px; padding:6px 0; border-bottom:1px dashed var(--line); }
-  .cleaning-row:last-child{ border-bottom:none; }
+  .cleaning-entry{ padding:6px 0; border-bottom:1px dashed var(--line); }
+  .cleaning-entry:last-child{ border-bottom:none; }
+  .cleaning-row{ display:flex; align-items:center; gap:10px; font-size:12.5px; }
   .cleaning-row:hover{ background:#FAF8F2; }
   .overdue-branch-group{ padding:8px 0; border-bottom:1px dashed var(--line); }
   .overdue-branch-group:last-child{ border-bottom:none; }
@@ -337,11 +339,35 @@
   .cleaning-row .kind{ margin-left:auto; display:flex; align-items:center; gap:6px; flex:none; }
   .cleaning-row .kind .mdate{ font-size:10.5px; color:var(--ink-soft); font-family:'JetBrains Mono',monospace; }
   .cleaning-empty{ font-size:12px; color:var(--ink-soft); padding:4px 0; }
-  .cleaning-memo{ font-size:11.5px; color:var(--ink-soft); padding:0 0 6px; margin-top:-4px; white-space:pre-wrap; }
+  .cleaning-memo{ font-size:11.5px; color:var(--ink-soft); padding-top:4px; white-space:pre-wrap; }
   .cleaning-branch-group{ padding:6px 0; border-bottom:1px dashed var(--line); }
   .cleaning-branch-group:last-child{ border-bottom:none; }
   .cleaning-branch-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:4px; }
   .cleaning-branch-name{ font-weight:700; font-size:13px; }
+
+  .cal-head{ display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+  .cal-title{ font-weight:800; font-size:14px; margin-right:auto; }
+  .cal-legend{ display:flex; flex-wrap:wrap; gap:14px; font-size:11px; color:var(--ink-soft); margin-bottom:12px; }
+  .cal-legend-item{ display:flex; align-items:center; gap:5px; }
+  .cal-chip{ font-size:10.5px; font-weight:700; border-radius:10px; padding:2px 8px; flex:none; white-space:nowrap; }
+  .cal-chip.moveout{ background:#FBEFD8; color:#8A5F14; }
+  .cal-chip.retouch{ background:#E3E8FD; color:#2E3F9E; }
+  .cal-chip.extra{ background:#E1F5E9; color:#1F7A45; }
+
+  .table-scroll{ overflow-x:auto; }
+  table.week-matrix{ table-layout:fixed; min-width:820px; }
+  table.week-matrix th{ text-align:center; }
+  table.week-matrix th:first-child, table.week-matrix td:first-child{ width:15%; }
+  table.week-matrix th:last-child, table.week-matrix td:last-child{ width:13%; }
+  table.week-matrix .wk-date{ font-family:'JetBrains Mono',monospace; font-weight:400; color:var(--ink-soft); }
+  table.week-matrix th.wk-today{ color:var(--accent-ink); }
+  table.week-matrix td.wk-cell{ text-align:center; }
+  table.week-matrix td.wk-cell.wk-today{ background:var(--accent-soft); }
+  table.week-matrix td.wk-cell:not(.wk-empty):hover{ background:#FAF8F2; }
+  table.week-matrix td.wk-empty{ color:var(--line); }
+  table.week-matrix td.wk-total-cell{ background:var(--accent-soft); font-weight:700; }
+  .wk-chips{ display:flex; flex-wrap:wrap; justify-content:center; gap:4px; }
+
   .channel-list{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
   .channel-chip{
     display:inline-flex; align-items:center; gap:6px; font-size:12.5px; font-weight:600;
@@ -413,6 +439,7 @@
 
   @media (max-width: 640px){
     .cleaning-cards-grid{ grid-template-columns:1fr; }
+    .cal-legend{ gap:8px; }
   }
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -462,6 +489,7 @@
       </div>
       <div style="display:flex; gap:8px; align-items:center;">
         <span class="sub" id="loggedInAs"></span>
+        <button class="btn small" id="cleaningBtn">청소 관리</button>
         <button class="btn small" id="adminBtn" style="display:none;">관리자 설정</button>
         <button class="btn small" id="changePwBtn">비밀번호 변경</button>
         <button class="btn small" id="logoutBtn">로그아웃</button>
@@ -478,7 +506,7 @@ let UI = {
   view:'stats', branchId:null, branchTab:'rooms',
   roomEditMode:{}, residentEditMode:{}, roomSnapshots:{}, residentSnapshots:{}, draftResident:{}, parkingListOpen:{},
   branchEditMode:{}, branchSnapshots:{}, historyOpen:{}, addingBranch:false, addingRoom:false, managingRoom:false,
-  tlYear:null, tlMonth:null, roomStatusFilter:'이용중'
+  tlYear:null, tlMonth:null, roomStatusFilter:'이용중', cleanWeekStart:null
 };
 
 function uid(p){ return p + '_' + Math.random().toString(36).slice(2,9); }
@@ -510,12 +538,31 @@ const ROOM_TYPE_LIST = ['블레스','그레이스','트리니티','기타'];
 const OCCUPANCY_LIST = ['1인실','2인실'];
 function occupancyCapacity(room){ return (room.occupancy === '1인실') ? 1 : 2; }
 
+/* 호실 청소 상태: 퇴실청소(자동+수동)/리터치(수동)/추가청소(수동) 중 하나만 켤 수 있다 */
+const MAINT_KIND_META = {
+  moveout: { label:'퇴실청소', bg:'#FBEFD8', fg:'#8A5F14' },
+  retouch: { label:'리터치',   bg:'#E3E8FD', fg:'#2E3F9E' },
+  extra:   { label:'추가청소', bg:'#E1F5E9', fg:'#1F7A45' },
+};
+const MAINT_KIND_FIELD = { moveout:'needsCleaning', retouch:'needsRetouch', extra:'needsExtraCleaning' };
+function roomMaintKind(room){
+  if(room.needsRetouch) return 'retouch';
+  if(room.needsExtraCleaning) return 'extra';
+  if(room.needsCleaning) return 'moveout';
+  return null;
+}
+function maintBadgeHtml(kind, suffix){
+  const m = MAINT_KIND_META[kind];
+  if(!m) return '';
+  return `<span class="badge" style="background:${m.bg};color:${m.fg};">${m.label}${suffix||''}</span>`;
+}
+
 function seedState(){
   const branchSeongsu = uid('b'), branchJamsil = uid('b'), branchDoksan = uid('b');
   const rooms = []; const residents = [];
   function addRoom(branchId, number, type, occupancy, status, cleaning, retouch, note, price){
     const r = { id: uid('r'), branchId, number, type, occupancy, saleStatus: status,
-      needsCleaning: cleaning, needsRetouch: retouch, maintenanceDate:'', preSelling:false, note: note || '', price: price||0 };
+      needsCleaning: cleaning, needsRetouch: retouch, needsExtraCleaning:false, maintenanceDate:'', preSelling:false, note: note || '', price: price||0 };
     rooms.push(r); return r;
   }
   function addResident(roomId, name, channel, resStatus, contractType, moveIn, moveOut, phone, memo, carNumber){
@@ -649,6 +696,7 @@ function render(){
   main.innerHTML = '';
   if(UI.view === 'stats'){ main.appendChild(renderStatsView()); return; }
   if(UI.view === 'admin'){ main.appendChild(renderAdminView()); return; }
+  if(UI.view === 'cleaning'){ main.appendChild(renderCleaningView()); return; }
   main.appendChild(renderBranchView());
 }
 
@@ -669,6 +717,10 @@ function renderTopNav(){
     if(!sel.value) return;
     UI.view='branch'; UI.branchId = sel.value; UI.roomStatusFilter='이용중'; render();
   };
+
+  const cleaningBtn = document.getElementById('cleaningBtn');
+  cleaningBtn.className = 'btn small' + (UI.view==='cleaning' ? ' primary' : '');
+  cleaningBtn.onclick = ()=>{ UI.view = 'cleaning'; render(); };
 
   const adminBtn = document.getElementById('adminBtn');
   adminBtn.style.display = isSuperAdmin() ? '' : 'none';
@@ -735,6 +787,50 @@ function renderOverdueBanner(branch){
   return box;
 }
 
+function renderBranchCleaningBanner(branch){
+  const rooms = DB.rooms.filter(r=> r.branchId===branch.id && roomMaintKind(r));
+  if(rooms.length===0) return null;
+
+  const today = todayISO();
+  const todayRooms = rooms.filter(r=> !r.maintenanceDate || r.maintenanceDate<=today)
+    .sort((a,b)=> a.number.localeCompare(b.number,'ko',{numeric:true}));
+  const futureRooms = rooms.filter(r=> r.maintenanceDate && r.maintenanceDate>today)
+    .sort((a,b)=> a.maintenanceDate.localeCompare(b.maintenanceDate));
+
+  function card(title, list, showDate){
+    const box = document.createElement('div');
+    box.className = 'stat-section cleaning-card';
+    box.innerHTML = `<h3>${title} <span class="cnt-badge">${list.length}</span></h3>`;
+    if(list.length===0){
+      box.appendChild(el('div','cleaning-empty','해당하는 호실이 없습니다.'));
+      return box;
+    }
+    list.forEach(room=>{
+      const entry = document.createElement('div');
+      entry.className = 'cleaning-entry';
+      const row = document.createElement('div');
+      row.className = 'cleaning-row';
+      const dateTxt = showDate && room.maintenanceDate ? `<span class="mdate">${room.maintenanceDate.slice(5)}</span>` : '';
+      row.innerHTML = `<span class="rm">${esc(room.number)}호</span><span class="kind">${maintBadgeHtml(roomMaintKind(room))}${dateTxt}</span>`;
+      row.style.cursor = 'pointer';
+      row.title = '클릭 시 호실로 이동';
+      row.onclick = ()=> scrollToRoomCard(room);
+      entry.appendChild(row);
+      if(room.maintenanceMemo){
+        entry.appendChild(el('div','cleaning-memo', room.maintenanceMemo));
+      }
+      box.appendChild(entry);
+    });
+    return box;
+  }
+
+  const wrap = document.createElement('div');
+  wrap.className = 'cleaning-cards-grid';
+  wrap.appendChild(card('오늘 청소방', todayRooms, false));
+  wrap.appendChild(card('청소 예정방', futureRooms, true));
+  return wrap;
+}
+
 function renderBranchView(){
   const wrap = document.createElement('div');
   const branch = currentBranch();
@@ -746,6 +842,9 @@ function renderBranchView(){
 
   const overdueBanner = renderOverdueBanner(branch);
   if(overdueBanner) wrap.appendChild(overdueBanner);
+
+  const cleaningBanner = renderBranchCleaningBanner(branch);
+  if(cleaningBanner) wrap.appendChild(cleaningBanner);
 
   const subnav = document.createElement('div');
   subnav.className = 'subnav';
@@ -1063,6 +1162,7 @@ function moveResidentToHistory(p, moveOutOverride){
     }
     room.needsCleaning = true;
     room.needsRetouch = false;
+    room.needsExtraCleaning = false;
     room.maintenanceDate = nextMonWedFri(todayISO());
     room.maintenanceMemo = '퇴실청소';
   }
@@ -1148,8 +1248,7 @@ function renderRoomCard(room, sectionStatus){
   const maintDateSuffix = room.maintenanceDate ? ` · ${room.maintenanceDate.slice(5)}` : '';
   const headerRight = `
     <span class="badge" style="background:${meta.bg};color:${meta.fg}">${effStatus}</span>
-    ${room.needsCleaning ? `<span class="badge" style="background:#FBEFD8;color:#8A5F14;">청소필요${maintDateSuffix}</span>` : ''}
-    ${room.needsRetouch ? `<span class="badge" style="background:#E3E8FD;color:#2E3F9E;">리터치필요${maintDateSuffix}</span>` : ''}
+    ${maintBadgeHtml(roomMaintKind(room), maintDateSuffix)}
   `;
 
   const header = document.createElement('div');
@@ -1393,52 +1492,44 @@ function renderRoomEditForm(room){
 
   const chipRow = document.createElement('div');
   chipRow.style.marginBottom = '10px';
-  chipRow.innerHTML = `<label class="field-label">청소 / 리터치</label>`;
+  chipRow.innerHTML = `<label class="field-label">퇴실청소 / 리터치 / 추가청소</label>`;
   const chips = document.createElement('div');
   chips.className = 'maint-chips';
-  const cleanChip = document.createElement('span');
-  cleanChip.className = 'flagchip clean' + (room.needsCleaning ? ' on' : '');
-  cleanChip.textContent = '청소필요';
-  cleanChip.onclick = ()=>{
-    room.needsCleaning = !room.needsCleaning;
-    if(room.needsCleaning){
-      room.needsRetouch=false;
-      if(!room.maintenanceDate) room.maintenanceDate = nextMonWedFri(todayISO());
-    } else {
-      room.maintenanceDate=''; room.maintenanceMemo='';
-    }
-    logChange(`${room.number}호 청소필요 ${room.needsCleaning?'설정':'해제'}`);
-    scheduleSave(); render();
-  };
-  const retouchChip = document.createElement('span');
-  retouchChip.className = 'flagchip retouch' + (room.needsRetouch ? ' on' : '');
-  retouchChip.textContent = '리터치필요';
-  retouchChip.onclick = ()=>{
-    room.needsRetouch = !room.needsRetouch;
-    if(room.needsRetouch){
-      room.needsCleaning=false;
-      if(!room.maintenanceDate) room.maintenanceDate = nextMonWedFri(todayISO());
-    } else {
-      room.maintenanceDate=''; room.maintenanceMemo='';
-    }
-    logChange(`${room.number}호 리터치필요 ${room.needsRetouch?'설정':'해제'}`);
-    scheduleSave(); render();
-  };
-  chips.appendChild(cleanChip); chips.appendChild(retouchChip);
+  Object.keys(MAINT_KIND_META).forEach(kind=>{
+    const field = MAINT_KIND_FIELD[kind];
+    const chip = document.createElement('span');
+    chip.className = 'flagchip ' + kind + (room[field] ? ' on' : '');
+    chip.textContent = MAINT_KIND_META[kind].label;
+    chip.onclick = ()=>{
+      const turningOn = !room[field];
+      Object.values(MAINT_KIND_FIELD).forEach(f=> room[f]=false);
+      room[field] = turningOn;
+      if(turningOn){
+        if(!room.maintenanceDate) room.maintenanceDate = nextMonWedFri(todayISO());
+      } else {
+        room.maintenanceDate=''; room.maintenanceMemo='';
+      }
+      logChange(`${room.number}호 ${MAINT_KIND_META[kind].label} ${turningOn?'설정':'해제'}`);
+      scheduleSave(); render();
+    };
+    chips.appendChild(chip);
+  });
   chipRow.appendChild(chips);
   wrap.appendChild(chipRow);
 
-  if(room.needsCleaning || room.needsRetouch){
+  const currentMaintKind = roomMaintKind(room);
+  if(currentMaintKind){
+    const kindLabel = MAINT_KIND_META[currentMaintKind].label;
     const dateWrap = document.createElement('div');
     dateWrap.style.marginBottom = '10px';
     const dateInput = document.createElement('input');
     dateInput.type = 'date';
     dateInput.value = room.maintenanceDate || '';
     dateInput.addEventListener('change', ()=>{
-      logChange(`${room.number}호 ${room.needsCleaning ? '청소' : '리터치'} 예정일 변경: ${dateInput.value || '미정'}`);
+      logChange(`${room.number}호 ${kindLabel} 예정일 변경: ${dateInput.value || '미정'}`);
       room.maintenanceDate = dateInput.value; scheduleSave(); render();
     });
-    dateWrap.appendChild(labeled(room.needsCleaning ? '청소 예정일' : '리터치 예정일', dateInput));
+    dateWrap.appendChild(labeled(`${kindLabel} 예정일`, dateInput));
     wrap.appendChild(dateWrap);
 
     const memoWrap = document.createElement('div');
@@ -1448,10 +1539,10 @@ function renderRoomEditForm(room){
     memoInput.value = room.maintenanceMemo || '';
     memoInput.placeholder = '예: 변기 물 안 내려감, 방충망 파손 등';
     memoInput.addEventListener('input', ()=>{
-      logChange(`${room.number}호 ${room.needsCleaning ? '청소' : '리터치'} 메모 수정`);
+      logChange(`${room.number}호 ${kindLabel} 메모 수정`);
       room.maintenanceMemo = memoInput.value; scheduleSave();
     });
-    memoWrap.appendChild(labeled(room.needsCleaning ? '청소 메모' : '리터치 메모', memoInput));
+    memoWrap.appendChild(labeled(`${kindLabel} 메모`, memoInput));
     wrap.appendChild(memoWrap);
   }
 
@@ -2045,7 +2136,7 @@ function handleResidentResyncFile(file){
           const occupancy = (occRaw==='2' || occRaw==='2인실') ? '2인실' : '1인실';
           const price = Number(row['정상입실료(원)']) || Number(row['정상입실료']) || 0;
           room = { id: uid('r'), branchId: branch.id, number: roomRaw, type, occupancy, saleStatus:'공실',
-            needsCleaning:false, needsRetouch:false, note:'', price };
+            needsCleaning:false, needsRetouch:false, needsExtraCleaning:false, note:'', price };
           newRooms.push(room);
           result.roomsCreated++;
         }
@@ -2135,7 +2226,7 @@ function downloadCurrentData(){
     return {
       지점명: branch ? branch.name : '', 호실번호: r.number, 타입: r.type, 인실구분: r.occupancy,
       판매상태: r.saleStatus, 정상입실료: r.price||0,
-      청소필요: r.needsCleaning ? 'O' : 'X', 리터치필요: r.needsRetouch ? 'O' : 'X', 호실특이사항: r.note||''
+      퇴실청소필요: r.needsCleaning ? 'O' : 'X', 리터치필요: r.needsRetouch ? 'O' : 'X', 추가청소필요: r.needsExtraCleaning ? 'O' : 'X', 호실특이사항: r.note||''
     };
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(roomRows), '호실');
@@ -2417,7 +2508,6 @@ function renderStatsView(){
   wrap.appendChild(renderOverdueStatsCard());
   wrap.appendChild(renderShortSaleAlertCard());
   wrap.appendChild(renderPendingMoveStatsCard());
-  wrap.appendChild(renderCleaningCards());
 
   const branchSection = document.createElement('div');
   branchSection.className = 'stat-section';
@@ -2708,7 +2798,7 @@ function renderAdminAddRoomForm(){
         type: document.getElementById('nrType').value,
         occupancy: document.getElementById('nrOccupancy').value,
         saleStatus: document.getElementById('nrStatus').value,
-        needsCleaning:false, needsRetouch:false, maintenanceDate:'', preSelling:false, note:'',
+        needsCleaning:false, needsRetouch:false, needsExtraCleaning:false, maintenanceDate:'', preSelling:false, note:'',
         price: Number(document.getElementById('nrPrice').value) || 0
       };
       DB.rooms.push(room);
@@ -2943,13 +3033,156 @@ function renderPendingMoveStatsCard(){
   return card;
 }
 
+function renderCleaningView(){
+  const wrap = document.createElement('div');
+  wrap.style.paddingTop = '18px';
+  wrap.appendChild(renderCleaningCards());
+  wrap.appendChild(renderCleaningWeekMatrix());
+  return wrap;
+}
+
+/* 퇴실청소: 계약만기일 등으로 퇴실이 확정된(scheduledToLeave) 입실자의 퇴실일과, 이미
+   퇴실청소가 필요로 표시된 호실을 날짜로 잡는다. 리터치/추가청소는 수동 관리이며
+   날짜가 직접 입력된 것만 주간표에 표시한다. */
+function collectCleaningEntries(){
+  const entries = [];
+  DB.rooms.filter(r=> r.needsCleaning || r.needsRetouch || r.needsExtraCleaning).forEach(r=>{
+    const branch = DB.branches.find(b=>b.id===r.branchId);
+    const kind = roomMaintKind(r);
+    if(kind==='moveout'){
+      entries.push({ type:kind, branch, room:r, date: r.maintenanceDate || todayISO() });
+    } else if(r.maintenanceDate){
+      entries.push({ type:kind, branch, room:r, date: r.maintenanceDate });
+    }
+  });
+  DB.residents.filter(p=> p.scheduledToLeave && p.moveOut).forEach(p=>{
+    const room = DB.rooms.find(r=>r.id===p.roomId);
+    if(!room || roomMaintKind(room)) return;
+    const branch = DB.branches.find(b=>b.id===room.branchId);
+    entries.push({ type:'moveout', branch, room, date: p.moveOut });
+  });
+  return entries;
+}
+
+function goToBranchRooms(branchId){
+  UI.view='branch'; UI.branchId = branchId; UI.branchTab='rooms'; UI.roomStatusFilter='이용중'; render();
+}
+
+function mondayOf(dateStr){
+  const d = new Date(dateStr);
+  const day = d.getDay();
+  d.setDate(d.getDate() + (day===0 ? -6 : 1-day));
+  return d.toISOString().slice(0,10);
+}
+function addDaysISO(dateStr, n){
+  const d = new Date(dateStr);
+  d.setDate(d.getDate()+n);
+  return d.toISOString().slice(0,10);
+}
+
+function renderCleaningWeekMatrix(){
+  if(!UI.cleanWeekStart) UI.cleanWeekStart = mondayOf(todayISO());
+
+  const box = document.createElement('div');
+  box.className = 'stat-section';
+
+  const weekDates = [0,1,2,3,4,5,6].map(i=> addDaysISO(UI.cleanWeekStart, i));
+  const today = todayISO();
+
+  const head = document.createElement('div');
+  head.className = 'cal-head';
+  const prevBtn = document.createElement('button'); prevBtn.className='btn small'; prevBtn.textContent='◀';
+  const nextBtn = document.createElement('button'); nextBtn.className='btn small'; nextBtn.textContent='▶';
+  const todayBtn = document.createElement('button'); todayBtn.className='btn small'; todayBtn.textContent='이번주';
+  const title = document.createElement('div');
+  title.className = 'cal-title';
+  title.textContent = `${weekDates[0].slice(0,4)}년 ${Number(weekDates[0].slice(5,7))}월 청소 필요 현황`;
+  prevBtn.onclick = ()=>{ UI.cleanWeekStart = addDaysISO(UI.cleanWeekStart, -7); render(); };
+  nextBtn.onclick = ()=>{ UI.cleanWeekStart = addDaysISO(UI.cleanWeekStart, 7); render(); };
+  todayBtn.onclick = ()=>{ UI.cleanWeekStart = mondayOf(todayISO()); render(); };
+  head.appendChild(prevBtn); head.appendChild(title); head.appendChild(nextBtn); head.appendChild(todayBtn);
+  box.appendChild(head);
+
+  const legend = document.createElement('div');
+  legend.className = 'cal-legend';
+  legend.innerHTML = `<span class="cal-legend-item">클릭 시 계약/입실관리의 해당 지점으로 이동 · 해당 없는 항목은 표시하지 않음</span>`;
+  box.appendChild(legend);
+
+  if(DB.branches.length===0){
+    box.appendChild(el('div','cleaning-empty','지점이 없습니다.'));
+    return box;
+  }
+
+  const entries = collectCleaningEntries().filter(e=> weekDates.includes(e.date));
+  const grid = new Map(); // branchId -> date -> {moveout,retouch,extra}
+  entries.forEach(e=>{
+    const bkey = e.branch ? e.branch.id : '__none__';
+    if(!grid.has(bkey)) grid.set(bkey, new Map());
+    const dmap = grid.get(bkey);
+    if(!dmap.has(e.date)) dmap.set(e.date, { moveout:0, retouch:0, extra:0 });
+    dmap.get(e.date)[e.type]++;
+  });
+
+  function chipsHtml(counts, branchName, dateLabel){
+    return Object.keys(MAINT_KIND_META).filter(k=> counts[k]).map(k=>
+      `<span class="cal-chip ${k}" title="${esc(branchName)}${dateLabel?' '+dateLabel:''} ${MAINT_KIND_META[k].label} ${counts[k]}건 · 클릭 시 이동">${MAINT_KIND_META[k].label}(${counts[k]})</span>`
+    ).join('');
+  }
+
+  const DOW = ['월','화','수','목','금','토','일'];
+  const table = document.createElement('table');
+  table.className = 'branch-table week-matrix';
+  const theadCells = weekDates.map((d,i)=> `<th${d===today?' class="wk-today"':''}>${DOW[i]}<br><span class="wk-date">${d.slice(5)}</span></th>`).join('');
+  table.innerHTML = `<thead><tr><th>지점</th>${theadCells}<th>합계</th></tr></thead>`;
+  const tbody = document.createElement('tbody');
+
+  DB.branches.forEach(branch=>{
+    const dmap = grid.get(branch.id);
+    const tr = document.createElement('tr');
+    const nameTd = document.createElement('td');
+    nameTd.innerHTML = `<a href="#" style="color:var(--accent-ink);font-weight:700;text-decoration:none;">${esc(branch.name)}</a>`;
+    nameTd.querySelector('a').onclick = (e)=>{ e.preventDefault(); goToBranchRooms(branch.id); };
+    tr.appendChild(nameTd);
+
+    const weekTotal = { moveout:0, retouch:0, extra:0 };
+    weekDates.forEach(d=>{
+      const counts = dmap ? dmap.get(d) : null;
+      const td = document.createElement('td');
+      td.className = 'wk-cell' + (d===today?' wk-today':'') + (counts ? '' : ' wk-empty');
+      td.innerHTML = counts ? `<div class="wk-chips">${chipsHtml(counts, branch.name, d.slice(5))}</div>` : '-';
+      if(counts){
+        Object.keys(weekTotal).forEach(k=> weekTotal[k]+= counts[k]||0);
+        td.style.cursor = 'pointer';
+        td.onclick = ()=> goToBranchRooms(branch.id);
+      }
+      tr.appendChild(td);
+    });
+
+    const totalTd = document.createElement('td');
+    const hasTotal = weekTotal.moveout || weekTotal.retouch || weekTotal.extra;
+    totalTd.className = 'wk-cell wk-total-cell' + (hasTotal ? '' : ' wk-empty');
+    totalTd.innerHTML = hasTotal ? `<div class="wk-chips">${chipsHtml(weekTotal, branch.name, '')}</div>` : '-';
+    if(hasTotal){ totalTd.style.cursor = 'pointer'; totalTd.onclick = ()=> goToBranchRooms(branch.id); }
+    tr.appendChild(totalTd);
+
+    tbody.appendChild(tr);
+  });
+
+  table.appendChild(tbody);
+  const scrollWrap = document.createElement('div');
+  scrollWrap.className = 'table-scroll';
+  scrollWrap.appendChild(table);
+  box.appendChild(scrollWrap);
+  return box;
+}
+
 function renderCleaningCards(){
   const wrap = document.createElement('div');
   wrap.className = 'cleaning-cards-grid';
 
   const today = todayISO();
   const maintRooms = DB.rooms
-    .filter(r=> r.needsCleaning || r.needsRetouch)
+    .filter(r=> r.needsCleaning || r.needsRetouch || r.needsExtraCleaning)
     .map(r=> ({ room:r, branch: DB.branches.find(b=>b.id===r.branchId) }));
   const todayList = maintRooms.filter(x=> !x.room.maintenanceDate || x.room.maintenanceDate<=today)
     .sort((a,b)=> (a.branch?.name||'').localeCompare(b.branch?.name||''));
@@ -2994,7 +3227,7 @@ function renderTodayCleaningCard(list){
     copyBtn.onclick = ()=>{
       const lines = [`[${group.branch ? group.branch.name : ''} 청소방]`];
       group.entries.forEach(x=>{
-        const kind = x.room.needsCleaning ? '청소필요' : '리터치필요';
+        const kind = MAINT_KIND_META[roomMaintKind(x.room)].label;
         lines.push(`${x.room.number}호 (${kind})${x.room.maintenanceMemo ? ' - ' + x.room.maintenanceMemo : ''}`);
       });
       navigator.clipboard.writeText(lines.join('\n')).then(()=>{
@@ -3009,23 +3242,23 @@ function renderTodayCleaningCard(list){
     groupWrap.appendChild(head);
 
     group.entries.forEach(x=>{
+      const entry = document.createElement('div');
+      entry.className = 'cleaning-entry';
       const row = document.createElement('div');
       row.className = 'cleaning-row';
-      const isClean = x.room.needsCleaning;
-      const kindBadge = isClean
-        ? `<span class="badge" style="background:#FBEFD8;color:#8A5F14;">청소필요</span>`
-        : `<span class="badge" style="background:#E3E8FD;color:#2E3F9E;">리터치필요</span>`;
+      const kindBadge = maintBadgeHtml(roomMaintKind(x.room));
       row.innerHTML = `<span class="rm">${esc(x.room.number)}호</span><span class="kind">${kindBadge}</span>`;
       row.style.cursor = 'pointer';
       row.title = '해당 지점으로 이동';
       row.onclick = ()=>{
         if(!x.branch) return;
-        UI.view='branch'; UI.branchId = x.branch.id; UI.branchTab='rooms'; UI.roomStatusFilter='이용중'; render();
+        goToBranchRooms(x.branch.id);
       };
-      groupWrap.appendChild(row);
+      entry.appendChild(row);
       if(x.room.maintenanceMemo){
-        groupWrap.appendChild(el('div','cleaning-memo', x.room.maintenanceMemo));
+        entry.appendChild(el('div','cleaning-memo', x.room.maintenanceMemo));
       }
+      groupWrap.appendChild(entry);
     });
 
     card.appendChild(groupWrap);
@@ -3042,12 +3275,11 @@ function renderCleaningCard(title, list, showDate){
     card.appendChild(el('div','cleaning-empty','해당하는 호실이 없습니다.'));
   } else {
     list.forEach(x=>{
+      const entry = document.createElement('div');
+      entry.className = 'cleaning-entry';
       const row = document.createElement('div');
       row.className = 'cleaning-row';
-      const isClean = x.room.needsCleaning;
-      const kindBadge = isClean
-        ? `<span class="badge" style="background:#FBEFD8;color:#8A5F14;">청소필요</span>`
-        : `<span class="badge" style="background:#E3E8FD;color:#2E3F9E;">리터치필요</span>`;
+      const kindBadge = maintBadgeHtml(roomMaintKind(x.room));
       const dateTxt = showDate && x.room.maintenanceDate ? `<span class="mdate">${x.room.maintenanceDate}</span>` : '';
       row.innerHTML = `
         <span class="br">${esc(x.branch ? x.branch.name : '-')}</span>
@@ -3058,12 +3290,13 @@ function renderCleaningCard(title, list, showDate){
       row.title = '해당 지점으로 이동';
       row.onclick = ()=>{
         if(!x.branch) return;
-        UI.view='branch'; UI.branchId = x.branch.id; UI.branchTab='rooms'; UI.roomStatusFilter='이용중'; render();
+        goToBranchRooms(x.branch.id);
       };
-      card.appendChild(row);
+      entry.appendChild(row);
       if(x.room.maintenanceMemo){
-        card.appendChild(el('div','cleaning-memo', x.room.maintenanceMemo));
+        entry.appendChild(el('div','cleaning-memo', x.room.maintenanceMemo));
       }
+      card.appendChild(entry);
     });
   }
   return card;
