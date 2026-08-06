@@ -1166,7 +1166,8 @@ function renderRoomCard(room, sectionStatus){
   card.appendChild(header);
 
   if(historyOpen){
-    const hist = DB.residentHistory.filter(h=>h.roomId===room.id).sort((a,b)=> (b.moveOut||'').localeCompare(a.moveOut||''));
+    const hist = DB.residentHistory.filter(h=>h.roomId===room.id).sort((a,b)=> (b.moveOut||'').localeCompare(a.moveOut||'')).slice(0,3);
+    const roomOccupied = roomHasActiveResident(room);
     const histBox = document.createElement('div');
     histBox.className = 'history-panel';
     if(hist.length===0){
@@ -1178,7 +1179,7 @@ function renderRoomCard(room, sectionStatus){
         const topRow = document.createElement('div');
         topRow.className = 'history-top';
         topRow.innerHTML = `<span class="nm">${esc(h.name)}</span><span class="ph">${esc(h.phone||'-')}</span>`;
-        if(canEdit()){
+        if(canEdit() && !roomOccupied){
           const restoreBtn = document.createElement('button');
           restoreBtn.className = 'btn small';
           restoreBtn.textContent = '복원';
