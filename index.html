@@ -150,6 +150,14 @@
     background:var(--panel); border:1.5px dashed var(--accent); border-radius:12px; padding:16px;
     margin-bottom:16px; display:grid; grid-template-columns:repeat(auto-fit, minmax(140px,1fr)); gap:10px; align-items:end;
   }
+  .branch-order-list{ display:flex; flex-direction:column; gap:6px; }
+  .branch-order-row{
+    display:flex; align-items:center; gap:10px; background:var(--panel); border:1px solid var(--line);
+    border-radius:8px; padding:9px 12px; cursor:grab; user-select:none;
+  }
+  .branch-order-row.dragging{ opacity:.4; }
+  .branch-order-handle{ color:var(--ink-soft); font-size:14px; }
+  .branch-order-name{ font-weight:700; font-size:13.5px; }
   .admin-add-form .fld{ display:flex; flex-direction:column; }
   .admin-add-form input, .admin-add-form select{ width:100%; }
   .admin-add-form .btn-row{ display:flex; gap:8px; }
@@ -2663,6 +2671,7 @@ function renderAdminView(){
   }
 
   wrap.appendChild(renderBranchRoomManagePanel());
+  wrap.appendChild(renderBranchOrderPanel());
   wrap.appendChild(renderBulkUploadPanel());
   wrap.appendChild(renderRoomBulkCreatePanel());
   wrap.appendChild(renderResidentResyncPanel());
@@ -2702,6 +2711,55 @@ function renderBranchRoomManagePanel(){
     box.appendChild(el('div','empty-hint','위 버튼으로 새 지점 또는 호실을 수동으로 추가하거나, 기존 호실의 입실료를 수정·삭제할 수 있습니다.'));
   }
 
+  return box;
+}
+
+function renderBranchOrderPanel(){
+  const box = document.createElement('div');
+  box.className = 'stat-section';
+  box.innerHTML = `<h3>지점 노출 순서</h3>
+    <div style="font-size:12px;color:var(--ink-soft);margin-bottom:12px;">
+      드래그해서 순서를 바꾸면 지점 선택 목록, 지점별 현황 표 등 모든 화면에 반영됩니다.
+    </div>`;
+
+  const list = document.createElement('div');
+  list.className = 'branch-order-list';
+  let dragRow = null;
+
+  DB.branches.forEach(b=>{
+    const row = document.createElement('div');
+    row.className = 'branch-order-row';
+    row.draggable = true;
+    row.dataset.id = b.id;
+    row.innerHTML = `<span class="branch-order-handle">&#9776;</span><span class="branch-order-name">${esc(b.name)}</span>`;
+
+    row.addEventListener('dragstart', ()=>{
+      dragRow = row;
+      row.classList.add('dragging');
+    });
+    row.addEventListener('dragend', ()=>{
+      row.classList.remove('dragging');
+      dragRow = null;
+    });
+    row.addEventListener('dragover', (e)=>{
+      e.preventDefault();
+      if(!dragRow || dragRow===row) return;
+      const rect = row.getBoundingClientRect();
+      const before = (e.clientY - rect.top) < rect.height/2;
+      list.insertBefore(dragRow, before ? row : row.nextSibling);
+    });
+    row.addEventListener('drop', (e)=>{
+      e.preventDefault();
+      const newOrder = [...list.children].map(el=>el.dataset.id);
+      DB.branches.sort((a,b2)=> newOrder.indexOf(a.id) - newOrder.indexOf(b2.id));
+      logChange('지점 노출 순서 변경');
+      scheduleSave(); render();
+    });
+
+    list.appendChild(row);
+  });
+
+  box.appendChild(list);
   return box;
 }
 
