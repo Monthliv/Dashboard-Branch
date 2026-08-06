@@ -23,6 +23,7 @@
     --st-leaving:#C98A2C;  --st-leaving-bg:#FBF0DD;
     --st-hold:#C0473F;     --st-hold-bg:#FBE7E5;
     --st-presell:#6C5FC7;  --st-presell-bg:#EDEBFA;
+    --st-shortsale:#C2478B; --st-shortsale-bg:#FBE7F1;
 
     --ch-indep:#5B4FCF; --ch-33m2:#B5459A; --ch-liveany:#D6673E; --ch-etc:#7A8790;
   }
@@ -482,12 +483,12 @@ function nextMonWedFri(fromDateStr){
 }
 function formatWon(n){ n = Number(n)||0; return n.toLocaleString('ko-KR') + '원'; }
 
-const STATUS_LIST = ['이용중','사전판매중','판매중','퇴실예정','공실','판매보류'];
-const STATUS_LIST_MANUAL = STATUS_LIST.filter(s => s !== '이용중' && s !== '사전판매중' && s !== '퇴실예정');
-const STATUS_LIST_STATS = STATUS_LIST.filter(s => s !== '사전판매중');
+const STATUS_LIST = ['이용중','이용중판매','단기판매','판매중','퇴실예정','공실','판매보류'];
+const STATUS_LIST_MANUAL = STATUS_LIST.filter(s => !['이용중','이용중판매','단기판매','퇴실예정'].includes(s));
+const STATUS_LIST_STATS = STATUS_LIST.filter(s => !['이용중판매','단기판매'].includes(s));
 function statsStatus(room){
   const s = effectiveRoomStatus(room);
-  return s === '사전판매중' ? '판매중' : s;
+  return (s === '이용중판매' || s === '단기판매') ? '판매중' : s;
 }
 const RESIDENT_STATUS_LIST = ['입실중','입실예정','퇴실예정'];
 const CONTRACT_TYPE_LIST = ['신규','연장'];
@@ -610,7 +611,8 @@ function statusMeta(s){
     '공실':        { fg:'var(--st-vacant)',   bg:'var(--st-vacant-bg)' },
     '판매중':      { fg:'var(--st-forsale)',  bg:'var(--st-forsale-bg)' },
     '이용중':      { fg:'var(--st-occupied)', bg:'var(--st-occupied-bg)' },
-    '사전판매중':  { fg:'var(--st-presell)',  bg:'var(--st-presell-bg)' },
+    '이용중판매':  { fg:'var(--st-presell)',  bg:'var(--st-presell-bg)' },
+    '단기판매':    { fg:'var(--st-shortsale)', bg:'var(--st-shortsale-bg)' },
     '퇴실예정':    { fg:'var(--st-leaving)',  bg:'var(--st-leaving-bg)' },
     '판매보류':    { fg:'var(--st-hold)',     bg:'var(--st-hold-bg)' },
   };
@@ -1104,10 +1106,13 @@ function branchActiveCarCount(branchId, excludeResidentId){
   ).length;
 }
 function effectiveRoomStatus(room){
-  // "이용중"/"사전판매중"은 오늘 날짜 기준 실제 거주 중인 입실자가 있는지로 자동 판정하며 수동 설정 불가.
-  // 재실 중에 관리자가 판매 상태를 "판매중"으로 지정해두면 "사전판매중"으로 표시됩니다.
+  // "이용중"/"이용중판매"/"단기판매"는 오늘 날짜 기준 재실·예약 여부로 자동 판정하며 수동 설정 불가.
+  // 재실(또는 예약) 중에 관리자가 판매 상태를 "판매중"으로 지정해두면, 지금 실제로 거주 중인
+  // 입실자가 있으면 "이용중판매", 미래 입실예정자만 있으면 "단기판매"로 표시됩니다.
   if(roomHasActiveResident(room)){
-    return room.saleStatus === '판매중' ? '사전판매중' : '이용중';
+    if(room.saleStatus !== '판매중') return '이용중';
+    const hasCurrent = DB.residents.some(p => p.roomId===room.id && isCurrentlyResiding(p));
+    return hasCurrent ? '이용중판매' : '단기판매';
   }
   return room.saleStatus;
 }
@@ -1851,12 +1856,15 @@ const TIMELINE_BAR_STATUSES = [
   { key:'정상',     fg:'var(--st-occupied)', bg:'var(--st-occupied-bg)' },
   { key:'연체',     fg:'var(--st-hold)',     bg:'var(--st-hold-bg)' },
   { key:'퇴실예정', fg:'var(--st-leaving)',  bg:'var(--st-leaving-bg)' },
-  { key:'사전판매중', fg:'var(--st-presell)', bg:'var(--st-presell-bg)' }
+  { key:'이용중판매', fg:'var(--st-presell)', bg:'var(--st-presell-bg)' }
 ];
 function residentTimelineMeta(p, room){
   if(isOverdue(p)) return TIMELINE_BAR_STATUSES[1];
   if(p.scheduledToLeave) return TIMELINE_BAR_STATUSES[2];
-  if(room && effectiveRoomStatus(room)==='사전판매중') return TIMELINE_BAR_STATUSES[3];
+  if(room){
+    const s = effectiveRoomStatus(room);
+    if(s==='이용중판매' || s==='단기판매') return TIMELINE_BAR_STATUSES[3];
+  }
   return TIMELINE_BAR_STATUSES[0];
 }
 function buildBar(p, room, monthStart, daysInMonth){
@@ -2160,7 +2168,7 @@ function downloadBulkTemplate(){
     ['4. 옵션값'],
     ['   - 타입: 블레스 / 그레이스 / 트리니티 / 기타'],
     ['   - 인실구분: 1인실 / 2인실'],
-    ['   - 판매상태: 공실 / 판매중 / 판매보류  (이용중·사전판매중·퇴실예정은 재실 입실자 상태로 자동 판정되어 직접 입력할 수 없습니다)'],
+    ['   - 판매상태: 공실 / 판매중 / 판매보류  (이용중·이용중판매·단기판매·퇴실예정은 재실 입실자 상태로 자동 판정되어 직접 입력할 수 없습니다)'],
     ['   - 청소필요 / 리터치필요: O 또는 X (둘 다 O면 청소필요가 우선 적용됩니다)'],
     ['   - 유입채널: 독립생활 / 삼삼엠투 / 리브애니 / 기타'],
     ['   - 순번: 1(주 입실자) 또는 2(2인실의 두 번째 입실자, 2인실에서만 가능하며 이름/연락처만 반영됩니다)'],
@@ -2587,6 +2595,7 @@ function renderStatsView(){
   wrap.style.paddingTop = '18px';
 
   wrap.appendChild(renderOverdueStatsCard());
+  wrap.appendChild(renderShortSaleAlertCard());
   wrap.appendChild(renderPendingMoveStatsCard());
   wrap.appendChild(renderCleaningCards());
 
@@ -2606,7 +2615,7 @@ function renderStatsView(){
     let occupied=0, forSale=0, hold=0, activeCount=0;
     rms.forEach(r=>{
       const s = effectiveRoomStatus(r);
-      if(s==='이용중' || s==='사전판매중') occupied++;
+      if(s==='이용중' || s==='이용중판매' || s==='단기판매') occupied++;
       else if(s==='판매중') forSale++;
       else if(s==='판매보류') hold++;
       if(roomHasActiveResident(r)) activeCount++;
@@ -2936,6 +2945,67 @@ function renderOverdueStatsCard(){
     }
   }
   renderPage();
+
+  return card;
+}
+
+function renderShortSaleAlertCard(){
+  const items = [];
+  DB.rooms.forEach(room=>{
+    if(effectiveRoomStatus(room) !== '단기판매') return;
+    const branch = DB.branches.find(b=>b.id===room.branchId);
+    DB.residents.filter(p=>p.roomId===room.id && isUpcoming(p)).forEach(p=>{
+      const days = Math.round((new Date(p.moveIn) - new Date(todayISO())) / 86400000);
+      if(days <= 10) items.push({ room, branch, resident:p, days });
+    });
+  });
+  if(items.length===0) return document.createDocumentFragment();
+
+  const groupMap = new Map();
+  items.forEach(item=>{
+    const key = item.branch ? item.branch.id : '__none__';
+    if(!groupMap.has(key)) groupMap.set(key, { branch: item.branch, entries: [] });
+    groupMap.get(key).entries.push(item);
+  });
+  const groups = [...groupMap.values()].sort((a,b)=> (a.branch?a.branch.name:'').localeCompare(b.branch?b.branch.name:''));
+
+  const card = document.createElement('div');
+  card.className = 'stat-section cleaning-card';
+  card.style.borderColor = 'var(--st-shortsale)';
+  card.innerHTML = `<h3 style="color:var(--st-shortsale);">단기판매 상태 변경 필요 <span class="cnt-badge" style="background:var(--st-shortsale-bg);color:var(--st-shortsale);">${items.length}</span></h3>`;
+
+  groups.forEach(group=>{
+    const groupWrap = document.createElement('div');
+    groupWrap.className = 'overdue-branch-group';
+    const branchName = document.createElement('div');
+    branchName.className = 'overdue-branch-name';
+    branchName.textContent = group.branch ? group.branch.name : '(지점 정보 없음)';
+    if(group.branch){
+      branchName.style.cursor = 'pointer';
+      branchName.title = '해당 지점으로 이동';
+      branchName.onclick = ()=>{ UI.view = 'branch'; UI.branchId = group.branch.id; render(); };
+    }
+    groupWrap.appendChild(branchName);
+
+    const chipRow = document.createElement('div');
+    chipRow.className = 'overdue-room-chips';
+    group.entries.forEach(item=>{
+      const chip = document.createElement('span');
+      chip.className = 'badge overdue-room-chip';
+      chip.style.background = 'var(--st-shortsale-bg)'; chip.style.color = 'var(--st-shortsale)';
+      chip.textContent = `${item.room.number}호 입실예정 ${item.days}일 남음 (${item.resident.moveIn})`;
+      chip.title = '해당 호실로 이동';
+      chip.onclick = ()=>{
+        if(!item.branch) return;
+        UI.view = 'branch';
+        UI.branchId = item.branch.id;
+        scrollToRoomCard(item.room);
+      };
+      chipRow.appendChild(chip);
+    });
+    groupWrap.appendChild(chipRow);
+    card.appendChild(groupWrap);
+  });
 
   return card;
 }
