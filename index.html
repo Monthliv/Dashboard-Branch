@@ -473,7 +473,7 @@ let UI = {
   view:'stats', branchId:null, branchTab:'rooms',
   roomEditMode:{}, residentEditMode:{}, roomSnapshots:{}, residentSnapshots:{}, draftResident:{}, parkingListOpen:{},
   branchEditMode:{}, branchSnapshots:{}, historyOpen:{}, addingBranch:false, addingRoom:false, managingRoom:false,
-  reorderingBranch:false, bulkUploading:false, bulkCreatingRooms:false,
+  reorderingBranch:false, bulkUploading:false,
   tlYear:null, tlMonth:null, roomStatusFilter:'이용중'
 };
 
@@ -1955,100 +1955,6 @@ const BRANCH_NAME_ALIASES = {
 function cleanKeyLoose(s){ return String(s||'').replace(/[\u200B-\u200D\uFEFF]/g,'').trim(); }
 function normalizeRoomNo(s){ const c = cleanKeyLoose(s).toLowerCase(); return /^\d+$/.test(c) ? String(parseInt(c,10)) : c; }
 
-function renderRoomBulkCreateBody(){
-  const box = document.createElement('div');
-  box.innerHTML = `
-    <div style="font-size:12px;color:var(--ink-soft);margin-bottom:12px;">
-      "\uC9C0\uC810\uBA85 / \uD638\uC2E4\uBC88\uD638 / \uD0C0\uC785 / \uC778\uC2E4\uAD6C\uBD84 / \uC815\uC0C1\uC785\uC2E4\uB8CC(\uC6D0)" \uD615\uC2DD\uC758 \uC5D1\uC140\uC744 \uC5C5\uB85C\uB4DC\uD558\uBA74,
-      \uC544\uC9C1 \uB4F1\uB85D\uB418\uC9C0 \uC54A\uC740 \uD638\uC2E4\uB9CC \uC0C8\uB85C \uC0DD\uC131\uD569\uB2C8\uB2E4. \uC774\uBBF8 \uC788\uB294 \uD638\uC2E4\uC740 \uAC74\uB4DC\uB9AC\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.
-    </div>
-  `;
-  const uploadBtn = document.createElement('button');
-  uploadBtn.className = 'btn';
-  uploadBtn.textContent = '\uD638\uC2E4 \uC815\uBCF4 \uC5D1\uC140\uB85C \uC77C\uAD04 \uC0DD\uC131';
-  const fileInput = document.createElement('input');
-  fileInput.type = 'file';
-  fileInput.accept = '.xlsx,.xls';
-  fileInput.style.display = 'none';
-  uploadBtn.onclick = ()=> fileInput.click();
-  fileInput.addEventListener('change', ()=>{
-    if(fileInput.files && fileInput.files[0]){
-      handleRoomBulkCreateFile(fileInput.files[0]);
-      fileInput.value = '';
-    }
-  });
-  box.appendChild(uploadBtn);
-  box.appendChild(fileInput);
-  return box;
-}
-
-function handleRoomBulkCreateFile(file){
-  if(typeof XLSX === 'undefined'){ showAlert('\uC5D1\uC140 \uB77C\uC774\uBE0C\uB7EC\uB9AC\uB97C \uBD88\uB7EC\uC624\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. \uB124\uD2B8\uC6CC\uD06C \uC5F0\uACB0\uC744 \uD655\uC778\uD574\uC8FC\uC138\uC694.'); return; }
-  const reader = new FileReader();
-  reader.onload = (e)=>{
-    try{
-      const wb = XLSX.read(new Uint8Array(e.target.result), { type:'array' });
-      const sheet = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(sheet, { defval:'' });
-
-      const result = { created:0, skippedExists:0, unmatchedBranch:[] };
-      const newRooms = [];
-
-      rows.forEach((row, idx)=>{
-        const branchRaw = cleanKeyLoose(row['\uC9C0\uC810\uBA85']);
-        const numberRaw = cleanKeyLoose(String(row['\uD638\uC2E4\uBC88\uD638']||'')).replace(/\uD638$/,'');
-        if(!branchRaw && !numberRaw) return; // \uBE48 \uC5EC\uBC31 \uD589
-
-        const resolvedBranchName = BRANCH_NAME_ALIASES[branchRaw] || branchRaw;
-        const branch = DB.branches.find(b=> cleanKeyLoose(b.name).toLowerCase()===resolvedBranchName.toLowerCase());
-        if(!branch){ result.unmatchedBranch.push(`[${idx+2}\uD589] \uC9C0\uC810 "${branchRaw}"\uC744(\uB97C) \uCC3E\uC744 \uC218 \uC5C6\uC74C`); return; }
-
-        const exists = DB.rooms.some(r=> r.branchId===branch.id && normalizeRoomNo(r.number)===normalizeRoomNo(numberRaw))
-          || newRooms.some(r=> r.branchId===branch.id && normalizeRoomNo(r.number)===normalizeRoomNo(numberRaw));
-        if(exists){ result.skippedExists++; return; }
-
-        const occRaw = cleanKeyLoose(String(row['\uC778\uC2E4\uAD6C\uBD84']||''));
-        const occupancy = (occRaw==='2' || occRaw==='2\uC778\uC2E4') ? '2\uC778\uC2E4' : '1\uC778\uC2E4';
-        const type = cleanKeyLoose(row['\uD0C0\uC785']) || '\uAE30\uD0C0';
-        const price = Number(row['\uC815\uC0C1\uC785\uC2E4\uB8CC(\uC6D0)']) || 0;
-
-        newRooms.push({
-          id: uid('r'), branchId: branch.id, number: numberRaw,
-          type, occupancy, saleStatus:'\uACF5\uC2E4',
-          needsCleaning:false, needsRetouch:false, maintenanceDate:'', preSelling:false, note:'',
-          price
-        });
-        result.created++;
-      });
-
-      const problems = [...result.unmatchedBranch];
-      showConfirm(
-        `\uC5D1\uC140 \uBD84\uC11D \uACB0\uACFC\n`+
-        `- \uC0C8\uB85C \uC0DD\uC131\uB420 \uD638\uC2E4: ${result.created}\uAC1C\n`+
-        `- \uC774\uBBF8 \uC874\uC7AC\uD574\uC11C \uAC74\uB108\uB700: ${result.skippedExists}\uAC1C\n`+
-        `- \uC9C0\uC810\uBA85 \uBD88\uC77C\uCE58: ${result.unmatchedBranch.length}\uAC74\n\n`+
-        `\uACC4\uC18D\uD560\uAE4C\uC694?`,
-        ()=>{
-          DB.rooms.push(...newRooms);
-          logChange(`\uD638\uC2E4 \uC77C\uAD04 \uC0DD\uC131 (${result.created}\uAC1C)`);
-          scheduleSave();
-          render();
-          if(problems.length){
-            showAlert(`\uD638\uC2E4 \uC0DD\uC131 \uC644\uB8CC (${result.created}\uAC1C). \uB2E4\uB9CC \uC544\uB798 ${problems.length}\uAC74\uC740 \uBC18\uC601\uB418\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4:\n\n` +
-              problems.slice(0,30).join('\n') + (problems.length>30 ? `\n...\uC678 ${problems.length-30}\uAC74` : ''));
-          } else {
-            showAlert(`\uD638\uC2E4 \uC0DD\uC131\uC774 \uC644\uB8CC\uB418\uC5C8\uC2B5\uB2C8\uB2E4. (${result.created}\uAC1C)`);
-          }
-        }
-      );
-    }catch(err){
-      console.error(err);
-      showAlert('\uC5D1\uC140 \uCC98\uB9AC \uC911 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4: ' + err.message);
-    }
-  };
-  reader.readAsArrayBuffer(file);
-}
-
 function renderResidentResyncPanel(){
   const box = document.createElement('div');
   box.className = 'stat-section';
@@ -2739,7 +2645,7 @@ function renderAdminView(){
   return wrap;
 }
 
-const ADMIN_PANEL_TOGGLE_FLAGS = ['addingBranch','addingRoom','managingRoom','reorderingBranch','bulkUploading','bulkCreatingRooms'];
+const ADMIN_PANEL_TOGGLE_FLAGS = ['addingBranch','addingRoom','managingRoom','reorderingBranch','bulkUploading'];
 function renderBranchRoomManagePanel(){
   const box = document.createElement('div');
   box.className = 'stat-section';
@@ -2765,7 +2671,6 @@ function renderBranchRoomManagePanel(){
   btnRow.appendChild(toggleBtn('managingRoom', '호실 정보 수정 · 삭제', '호실 정보 수정 취소', 'danger'));
   btnRow.appendChild(toggleBtn('reorderingBranch', '지점 노출 순서 변경', '지점 순서 변경 취소'));
   btnRow.appendChild(toggleBtn('bulkUploading', '엑셀 일괄 업로드', '엑셀 업로드 취소'));
-  btnRow.appendChild(toggleBtn('bulkCreatingRooms', '호실 일괄 생성', '호실 일괄 생성 취소'));
   const downloadBtn = document.createElement('button');
   downloadBtn.className = 'btn small';
   downloadBtn.textContent = '⬇ 현재 데이터 다운로드';
@@ -2779,7 +2684,6 @@ function renderBranchRoomManagePanel(){
   if(UI.managingRoom) box.appendChild(renderAdminRoomManageForm());
   if(UI.reorderingBranch) box.appendChild(renderBranchOrderBody());
   if(UI.bulkUploading) box.appendChild(renderBulkUploadBody());
-  if(UI.bulkCreatingRooms) box.appendChild(renderRoomBulkCreateBody());
   if(!ADMIN_PANEL_TOGGLE_FLAGS.some(f=>UI[f])){
     box.appendChild(el('div','empty-hint','위 버튼으로 지점·호실을 추가/수정하거나, 지점 순서 변경, 엑셀 일괄 업로드·생성을 할 수 있습니다.'));
   }
