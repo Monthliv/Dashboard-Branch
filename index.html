@@ -1042,8 +1042,13 @@ function moveResidentToHistory(p, moveOutOverride){
   // 남아있으면(과거 데이터 등) 공실로 정리합니다. 그 외에는 관리자가 이미 설정해둔 판매
   // 상태(예: 판매중)를 그대로 유지하며, 자동으로 바꾸지 않습니다.
   const room = DB.rooms.find(r=>r.id===p.roomId);
-  if(room && !roomHasActiveResident(room) && !STATUS_LIST_MANUAL.includes(room.saleStatus)){
-    room.saleStatus = '공실';
+  if(room && !roomHasActiveResident(room)){
+    if(!STATUS_LIST_MANUAL.includes(room.saleStatus)){
+      room.saleStatus = '공실';
+    }
+    room.needsCleaning = true;
+    room.needsRetouch = false;
+    room.maintenanceDate = nextMonWedFri(todayISO());
   }
 }
 function restoreFromHistory(h){
