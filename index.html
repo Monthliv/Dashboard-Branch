@@ -337,6 +337,11 @@
   .cleaning-row .kind{ margin-left:auto; display:flex; align-items:center; gap:6px; flex:none; }
   .cleaning-row .kind .mdate{ font-size:10.5px; color:var(--ink-soft); font-family:'JetBrains Mono',monospace; }
   .cleaning-empty{ font-size:12px; color:var(--ink-soft); padding:4px 0; }
+  .cleaning-memo{ font-size:11.5px; color:var(--ink-soft); padding:0 0 6px; margin-top:-4px; white-space:pre-wrap; }
+  .cleaning-branch-group{ padding:6px 0; border-bottom:1px dashed var(--line); }
+  .cleaning-branch-group:last-child{ border-bottom:none; }
+  .cleaning-branch-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:4px; }
+  .cleaning-branch-name{ font-weight:700; font-size:13px; }
   .channel-list{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
   .channel-chip{
     display:inline-flex; align-items:center; gap:6px; font-size:12.5px; font-weight:600;
@@ -1059,6 +1064,7 @@ function moveResidentToHistory(p, moveOutOverride){
     room.needsCleaning = true;
     room.needsRetouch = false;
     room.maintenanceDate = nextMonWedFri(todayISO());
+    room.maintenanceMemo = '퇴실청소';
   }
 }
 function restoreFromHistory(h){
@@ -1399,7 +1405,7 @@ function renderRoomEditForm(room){
       room.needsRetouch=false;
       if(!room.maintenanceDate) room.maintenanceDate = nextMonWedFri(todayISO());
     } else {
-      room.maintenanceDate='';
+      room.maintenanceDate=''; room.maintenanceMemo='';
     }
     logChange(`${room.number}호 청소필요 ${room.needsCleaning?'설정':'해제'}`);
     scheduleSave(); render();
@@ -1413,7 +1419,7 @@ function renderRoomEditForm(room){
       room.needsCleaning=false;
       if(!room.maintenanceDate) room.maintenanceDate = nextMonWedFri(todayISO());
     } else {
-      room.maintenanceDate='';
+      room.maintenanceDate=''; room.maintenanceMemo='';
     }
     logChange(`${room.number}호 리터치필요 ${room.needsRetouch?'설정':'해제'}`);
     scheduleSave(); render();
@@ -1434,6 +1440,19 @@ function renderRoomEditForm(room){
     });
     dateWrap.appendChild(labeled(room.needsCleaning ? '청소 예정일' : '리터치 예정일', dateInput));
     wrap.appendChild(dateWrap);
+
+    const memoWrap = document.createElement('div');
+    memoWrap.style.marginBottom = '10px';
+    const memoInput = document.createElement('textarea');
+    memoInput.rows = 2;
+    memoInput.value = room.maintenanceMemo || '';
+    memoInput.placeholder = '예: 변기 물 안 내려감, 방충망 파손 등';
+    memoInput.addEventListener('input', ()=>{
+      logChange(`${room.number}호 ${room.needsCleaning ? '청소' : '리터치'} 메모 수정`);
+      room.maintenanceMemo = memoInput.value; scheduleSave();
+    });
+    memoWrap.appendChild(labeled(room.needsCleaning ? '청소 메모' : '리터치 메모', memoInput));
+    wrap.appendChild(memoWrap);
   }
 
   const noteWrap = document.createElement('div');
@@ -2937,9 +2956,82 @@ function renderCleaningCards(){
   const futureList = maintRooms.filter(x=> x.room.maintenanceDate && x.room.maintenanceDate>today)
     .sort((a,b)=> a.room.maintenanceDate.localeCompare(b.room.maintenanceDate));
 
-  wrap.appendChild(renderCleaningCard('오늘 청소방', todayList, false));
+  wrap.appendChild(renderTodayCleaningCard(todayList));
   wrap.appendChild(renderCleaningCard('청소 예정방', futureList, true));
   return wrap;
+}
+
+function renderTodayCleaningCard(list){
+  const card = document.createElement('div');
+  card.className = 'stat-section cleaning-card';
+  card.innerHTML = `<h3>오늘 청소방 <span class="cnt-badge">${list.length}</span></h3>`;
+  if(list.length===0){
+    card.appendChild(el('div','cleaning-empty','해당하는 호실이 없습니다.'));
+    return card;
+  }
+
+  const groupMap = new Map();
+  list.forEach(x=>{
+    const key = x.branch ? x.branch.id : '__none__';
+    if(!groupMap.has(key)) groupMap.set(key, { branch: x.branch, entries: [] });
+    groupMap.get(key).entries.push(x);
+  });
+  const groups = [...groupMap.values()].sort((a,b)=> (a.branch?.name||'').localeCompare(b.branch?.name||''));
+
+  groups.forEach(group=>{
+    const groupWrap = document.createElement('div');
+    groupWrap.className = 'cleaning-branch-group';
+
+    const head = document.createElement('div');
+    head.className = 'cleaning-branch-head';
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'cleaning-branch-name';
+    nameSpan.textContent = group.branch ? group.branch.name : '(지점 정보 없음)';
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'btn small';
+    copyBtn.textContent = '복사';
+    copyBtn.title = '이 지점의 청소방·메모를 클립보드에 복사';
+    copyBtn.onclick = ()=>{
+      const lines = [`[${group.branch ? group.branch.name : ''} 청소방]`];
+      group.entries.forEach(x=>{
+        const kind = x.room.needsCleaning ? '청소필요' : '리터치필요';
+        lines.push(`${x.room.number}호 (${kind})${x.room.maintenanceMemo ? ' - ' + x.room.maintenanceMemo : ''}`);
+      });
+      navigator.clipboard.writeText(lines.join('\n')).then(()=>{
+        const orig = copyBtn.textContent;
+        copyBtn.textContent = '복사됨';
+        setTimeout(()=>{ copyBtn.textContent = orig; }, 1500);
+      }).catch(()=>{
+        showAlert('복사에 실패했습니다. 브라우저 권한을 확인해주세요.');
+      });
+    };
+    head.appendChild(nameSpan); head.appendChild(copyBtn);
+    groupWrap.appendChild(head);
+
+    group.entries.forEach(x=>{
+      const row = document.createElement('div');
+      row.className = 'cleaning-row';
+      const isClean = x.room.needsCleaning;
+      const kindBadge = isClean
+        ? `<span class="badge" style="background:#FBEFD8;color:#8A5F14;">청소필요</span>`
+        : `<span class="badge" style="background:#E3E8FD;color:#2E3F9E;">리터치필요</span>`;
+      row.innerHTML = `<span class="rm">${esc(x.room.number)}호</span><span class="kind">${kindBadge}</span>`;
+      row.style.cursor = 'pointer';
+      row.title = '해당 지점으로 이동';
+      row.onclick = ()=>{
+        if(!x.branch) return;
+        UI.view='branch'; UI.branchId = x.branch.id; UI.branchTab='rooms'; UI.roomStatusFilter='이용중'; render();
+      };
+      groupWrap.appendChild(row);
+      if(x.room.maintenanceMemo){
+        groupWrap.appendChild(el('div','cleaning-memo', x.room.maintenanceMemo));
+      }
+    });
+
+    card.appendChild(groupWrap);
+  });
+
+  return card;
 }
 
 function renderCleaningCard(title, list, showDate){
@@ -2969,6 +3061,9 @@ function renderCleaningCard(title, list, showDate){
         UI.view='branch'; UI.branchId = x.branch.id; UI.branchTab='rooms'; UI.roomStatusFilter='이용중'; render();
       };
       card.appendChild(row);
+      if(x.room.maintenanceMemo){
+        card.appendChild(el('div','cleaning-memo', x.room.maintenanceMemo));
+      }
     });
   }
   return card;
