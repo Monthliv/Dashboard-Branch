@@ -482,7 +482,7 @@ function nextMonWedFri(fromDateStr){
 function formatWon(n){ n = Number(n)||0; return n.toLocaleString('ko-KR') + '원'; }
 
 const STATUS_LIST = ['이용중','사전판매중','판매중','퇴실예정','공실','판매보류'];
-const STATUS_LIST_MANUAL = STATUS_LIST.filter(s => s !== '이용중' && s !== '사전판매중');
+const STATUS_LIST_MANUAL = STATUS_LIST.filter(s => s !== '이용중' && s !== '사전판매중' && s !== '퇴실예정');
 const STATUS_LIST_STATS = STATUS_LIST.filter(s => s !== '사전판매중');
 function statsStatus(room){
   const s = effectiveRoomStatus(room);
@@ -937,11 +937,12 @@ function renderRoomsSection(branch){
   legend.className = 'legend';
   STATUS_LIST.forEach(s=>{
     const m = statusMeta(s);
+    const cnt = (s === '퇴실예정' ? rooms.filter(roomIsLeavingSoon) : rooms.filter(r=>effectiveRoomStatus(r)===s)).length;
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'badge legend-btn' + (status === s ? ' active' : '');
     btn.style.background = m.bg; btn.style.color = m.fg;
-    btn.innerHTML = `<span class="dot" style="background:${m.fg}"></span>${s}`;
+    btn.innerHTML = `<span class="dot" style="background:${m.fg}"></span>${s}(${cnt})`;
     btn.title = `${s} 호실만 모아보기`;
     btn.onclick = ()=>{ UI.roomStatusFilter = s; render(); };
     legend.appendChild(btn);
@@ -2152,7 +2153,7 @@ function downloadBulkTemplate(){
     ['4. 옵션값'],
     ['   - 타입: 블레스 / 그레이스 / 트리니티 / 기타'],
     ['   - 인실구분: 1인실 / 2인실'],
-    ['   - 판매상태: 공실 / 판매중 / 퇴실예정 / 판매보류  (이용중은 재실 입실자 유무로 자동 판정되어 직접 입력할 수 없습니다)'],
+    ['   - 판매상태: 공실 / 판매중 / 판매보류  (이용중·사전판매중·퇴실예정은 재실 입실자 상태로 자동 판정되어 직접 입력할 수 없습니다)'],
     ['   - 청소필요 / 리터치필요: O 또는 X (둘 다 O면 청소필요가 우선 적용됩니다)'],
     ['   - 유입채널: 독립생활 / 삼삼엠투 / 리브애니 / 기타'],
     ['   - 순번: 1(주 입실자) 또는 2(2인실의 두 번째 입실자, 2인실에서만 가능하며 이름/연락처만 반영됩니다)'],
@@ -3047,14 +3048,21 @@ function showLeaveChoiceModal(p, room){
 
     const expireBtn = document.createElement('button');
     expireBtn.className = 'btn';
-    expireBtn.textContent = `만기퇴실 (퇴실예정일: ${p.moveOut || '미정'})`;
-    expireBtn.title = '계약 만료일까지 퇴실예정으로 표시하고, 만료일이 지나면 자동으로 퇴실 처리됩니다';
+    expireBtn.textContent = `만기퇴실 (계약 종료일: ${p.moveOut || '미정'})`;
+    expireBtn.title = '계약 종료일 기준으로 퇴실 처리합니다';
     expireBtn.onclick = ()=>{
       if(!p.moveOut){ showAlert('퇴실예정일이 설정되어 있지 않습니다. 먼저 입실자 정보 수정에서 퇴실예정일을 입력해주세요.'); return; }
-      p.scheduledToLeave = true;
-      logChange(`${room ? room.number + '호 ' : ''}"${p.name}" 만기퇴실 예약 (${p.moveOut})`);
-      scheduleSave();
-      close(); render();
+      showConfirm(`계약기간 종료일(${p.moveOut})로 퇴실 처리할까요?`, ()=>{
+        const today = todayISO();
+        if(p.moveOut <= today){
+          moveResidentToHistory(p, p.moveOut);
+        } else {
+          p.scheduledToLeave = true;
+          logChange(`${room ? room.number + '호 ' : ''}"${p.name}" 만기퇴실 예약 (${p.moveOut})`);
+        }
+        scheduleSave();
+        close(); render();
+      });
     };
 
     const midBtn = document.createElement('button');
