@@ -473,7 +473,6 @@ let UI = {
   view:'stats', branchId:null, branchTab:'rooms',
   roomEditMode:{}, residentEditMode:{}, roomSnapshots:{}, residentSnapshots:{}, draftResident:{}, parkingListOpen:{},
   branchEditMode:{}, branchSnapshots:{}, historyOpen:{}, addingBranch:false, addingRoom:false, managingRoom:false,
-  reorderingBranch:false, bulkUploading:false,
   tlYear:null, tlMonth:null, roomStatusFilter:'이용중'
 };
 
@@ -1904,46 +1903,6 @@ function buildBar(p, room, monthStart, daysInMonth){
 }
 
 /* ---------------- bulk upload (excel) ---------------- */
-function renderBulkUploadBody(){
-  const box = document.createElement('div');
-  box.innerHTML = `
-    <div style="font-size:12px;color:var(--ink-soft);margin-bottom:12px;">
-      양식을 다운로드해 "지점", "호실", "입실자" 시트를 채운 뒤 업로드하세요. 이미 있는 지점명/호실번호는 정보가 갱신되고, 입실자는 매번 새로 추가됩니다.
-    </div>
-  `;
-  const btnRow = document.createElement('div');
-  btnRow.style.cssText = 'display:flex; gap:10px; align-items:center;';
-  const downloadBtn = document.createElement('button');
-  downloadBtn.className = 'btn';
-  downloadBtn.textContent = '⬇ 양식 다운로드';
-  downloadBtn.onclick = downloadBulkTemplate;
-  const uploadBtn = document.createElement('button');
-  uploadBtn.className = 'btn primary';
-  uploadBtn.textContent = '⬆ 엑셀 업로드';
-  const fileInput = document.createElement('input');
-  fileInput.type = 'file';
-  fileInput.accept = '.xlsx,.xls';
-  fileInput.style.display = 'none';
-  uploadBtn.onclick = ()=> fileInput.click();
-  fileInput.addEventListener('change', ()=>{
-    if(fileInput.files && fileInput.files[0]){
-      handleBulkUploadFile(fileInput.files[0]);
-      fileInput.value = '';
-    }
-  });
-  btnRow.appendChild(downloadBtn); btnRow.appendChild(uploadBtn); btnRow.appendChild(fileInput);
-  if(lastImportSnapshot){
-    const undoBtn = document.createElement('button');
-    undoBtn.className = 'btn danger';
-    undoBtn.textContent = '↩ 업로드 되돌리기';
-    undoBtn.title = '가장 최근 엑셀 업로드 이전 상태로 되돌립니다';
-    undoBtn.onclick = undoLastImport;
-    btnRow.appendChild(undoBtn);
-  }
-  box.appendChild(btnRow);
-  return box;
-}
-
 const BRANCH_NAME_ALIASES = {
   '가산디지털 독산역': '가산독산',
   '마곡 발산역': '마곡 발산',
@@ -1959,18 +1918,28 @@ function renderResidentResyncPanel(){
   const box = document.createElement('div');
   box.className = 'stat-section';
   box.innerHTML = `
-    <h3>계약자 DB로 입실자 전체 재등록</h3>
+    <h3>엑셀 일괄 업로드</h3>
     <div style="font-size:12px;color:var(--ink-soft);margin-bottom:12px;">
-      "지점명 / 호실번호 / 이름 / 연락처 / 입실일 / 퇴실예정일" 형식의 계약자 DB 엑셀을 업로드하면,
-      현재 등록된 모든 입실자와 퇴실 이력을 지우고 이 파일 내용으로 새로 채웁니다.
-      지점명·호실번호가 아직 없으면 새로 만듭니다(이때 "타입 / 인실구분 / 정상입실료(원)" 컬럼이 있으면 반영되고,
-      없으면 기타 / 1인실 / 0원으로 생성됩니다). 이미 있는 지점·호실은 그대로 유지됩니다.
-      이름이 "-" 또는 "*"인 행은 공실로 처리됩니다.
+      "지점명 / 호실번호 / 이름 / 연락처 / 입실일 / 퇴실예정일" (+선택: 타입 / 인실구분 / 정상입실료(원)) 형식의 엑셀을 업로드하면,
+      지점명·호실번호가 아직 없는 경우 새로 만들고(타입/인실구분/가격 컬럼이 있으면 반영, 없으면 기타/1인실/0원),
+      각 행의 입실자를 해당 호실에 추가로 등록합니다. 이름이 "-" 또는 "*"인 행은 건너뜁니다.
+      기존 입실자를 모두 지우고 새로 채우려면 먼저 "초기화"를 눌러주세요.
     </div>
   `;
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px;';
+  const templateBtn = document.createElement('button');
+  templateBtn.className = 'btn';
+  templateBtn.textContent = '⬇ 양식 다운로드';
+  templateBtn.onclick = downloadResyncTemplate;
+  const downloadCurrentBtn = document.createElement('button');
+  downloadCurrentBtn.className = 'btn';
+  downloadCurrentBtn.textContent = '⬇ 현재 데이터 다운로드';
+  downloadCurrentBtn.title = '현재 등록된 지점/호실/입실자 내용을 엑셀로 다운로드';
+  downloadCurrentBtn.onclick = downloadCurrentData;
   const uploadBtn = document.createElement('button');
-  uploadBtn.className = 'btn danger';
-  uploadBtn.textContent = '⚠ 입실자 전체 초기화 후 엑셀로 재등록';
+  uploadBtn.className = 'btn primary';
+  uploadBtn.textContent = '⬆ 엑셀 업로드';
   const fileInput = document.createElement('input');
   fileInput.type = 'file';
   fileInput.accept = '.xlsx,.xls';
@@ -1982,9 +1951,43 @@ function renderResidentResyncPanel(){
       fileInput.value = '';
     }
   });
-  box.appendChild(uploadBtn);
-  box.appendChild(fileInput);
+  btnRow.appendChild(templateBtn); btnRow.appendChild(downloadCurrentBtn); btnRow.appendChild(uploadBtn); btnRow.appendChild(fileInput);
+  box.appendChild(btnRow);
+
+  const resetBtn = document.createElement('button');
+  resetBtn.className = 'btn danger';
+  resetBtn.textContent = '⚠ 입실자 전체 초기화';
+  resetBtn.title = '모든 입실자와 퇴실 이력을 삭제합니다 (지점·호실은 유지)';
+  resetBtn.onclick = ()=>{
+    showConfirm(`현재 등록된 모든 입실자(${DB.residents.length}명)와 퇴실 이력을 삭제할까요?\n지점·호실 구성은 그대로 유지됩니다.\n이 작업은 되돌릴 수 없습니다.`, ()=>{
+      DB.residents = [];
+      DB.residentHistory = [];
+      logChange('입실자 전체 초기화');
+      scheduleSave(); render();
+      showAlert('입실자와 퇴실 이력이 모두 삭제되었습니다.');
+    });
+  };
+  box.appendChild(resetBtn);
   return box;
+}
+
+function downloadResyncTemplate(){
+  if(typeof XLSX === 'undefined'){ showAlert('엑셀 라이브러리를 불러오지 못했습니다. 네트워크 연결을 확인해주세요.'); return; }
+  const wb = XLSX.utils.book_new();
+  const guideRows = [
+    ['MONTHLIV 엑셀 일괄 업로드 양식 안내'],
+    [''],
+    ['1. 지점명/호실번호가 아직 없으면 새로 만들어집니다. 이미 있으면 그 지점·호실에 입실자만 추가됩니다.'],
+    ['2. 타입 / 인실구분 / 정상입실료(원)은 호실이 새로 만들어질 때만 사용됩니다(선택 입력, 비워두면 기타/1인실/0원).'],
+    ['   - 인실구분: 1인실 / 2인실'],
+    ['3. 이름이 "-" 또는 "*"인 행은 건너뜁니다.'],
+    ['4. 날짜는 YYYY-MM-DD 형식으로 입력하세요. (예: 2026-08-01)'],
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(guideRows), '안내');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([
+    { 지점명:'먼슬리브 예시지점', 호실번호:'101', 이름:'홍길동', 연락처:'010-1234-5678', 입실일:'2026-08-01', 퇴실예정일:'2026-09-01', 타입:'그레이스', 인실구분:'1인실', '정상입실료(원)':450000 }
+  ]), 'Sheet1');
+  XLSX.writeFile(wb, 'monthliv_엑셀업로드_양식.xlsx');
 }
 
 function handleResidentResyncFile(file){
@@ -2041,8 +2044,11 @@ function handleResidentResyncFile(file){
         const nameRaw = cleanKeyLoose(row['이름']);
         if(!nameRaw || nameRaw==='-' || nameRaw==='*'){ result.vacant++; return; }
 
+        if(slotCounters[room.id] == null){
+          slotCounters[room.id] = DB.residents.filter(p=>p.roomId===room.id).length;
+        }
         const cap = occupancyCapacity(room);
-        const slot = slotCounters[room.id] || 0;
+        const slot = slotCounters[room.id];
         if(slot >= cap){
           result.overCapacity.push(`[${idx+2}행] ${branch.name} ${room.number}호 "${nameRaw}" (정원 ${cap}명 초과로 제외)`);
           return;
@@ -2069,23 +2075,22 @@ function handleResidentResyncFile(file){
         `엑셀 분석 결과\n`+
         `- 새로 생성될 지점: ${result.branchesCreated}개\n`+
         `- 새로 생성될 호실: ${result.roomsCreated}개\n`+
-        `- 등록될 입실자: ${result.matched}명\n`+
-        `- 공실 처리(이름 "-"/"*"): ${result.vacant}건\n`+
+        `- 추가로 등록될 입실자: ${result.matched}명\n`+
+        `- 건너뜀(이름 "-"/"*"): ${result.vacant}건\n`+
         `- 정원 초과 제외: ${result.overCapacity.length}건\n\n`+
-        `현재 등록된 모든 입실자(${DB.residents.length}명)와 퇴실 이력이 삭제되고 위 내용으로 교체됩니다.\n이 작업은 되돌릴 수 없습니다. 계속할까요?`,
+        `위 내용을 현재 데이터에 추가할까요? (기존 입실자는 그대로 유지됩니다)`,
         ()=>{
           DB.branches.push(...newBranches);
           DB.rooms.push(...newRooms);
-          DB.residents = newResidents;
-          DB.residentHistory = [];
-          logChange(`계약자 DB 엑셀로 지점 ${result.branchesCreated}개·호실 ${result.roomsCreated}개 생성, 입실자 ${result.matched}명 재등록`);
+          DB.residents.push(...newResidents);
+          logChange(`엑셀 일괄 업로드: 지점 ${result.branchesCreated}개·호실 ${result.roomsCreated}개 생성, 입실자 ${result.matched}명 추가`);
           scheduleSave();
           render();
           if(problems.length){
-            showAlert(`재등록 완료 (${result.matched}명). 다만 아래 ${problems.length}건은 반영되지 않았습니다:\n\n` +
+            showAlert(`업로드 완료 (${result.matched}명 추가). 다만 아래 ${problems.length}건은 반영되지 않았습니다:\n\n` +
               problems.slice(0,30).join('\n') + (problems.length>30 ? `\n...외 ${problems.length-30}건` : ''));
           } else {
-            showAlert(`입실자 재등록이 완료되었습니다. (${result.matched}명)`);
+            showAlert(`업로드가 완료되었습니다. (${result.matched}명 추가)`);
           }
         }
       );
@@ -2095,42 +2100,6 @@ function handleResidentResyncFile(file){
     }
   };
   reader.readAsArrayBuffer(file);
-}
-
-function downloadBulkTemplate(){
-  if(typeof XLSX === 'undefined'){ showAlert('엑셀 라이브러리를 불러오지 못했습니다. 네트워크 연결을 확인해주세요.'); return; }
-  const wb = XLSX.utils.book_new();
-
-  const guideRows = [
-    ['MONTHLIV 일괄 업로드 양식 안내'],
-    [''],
-    ['1. "지점", "호실", "입실자" 시트를 채워주세요. 예시 행은 지우고 실제 데이터로 바꿔주세요.'],
-    ['2. "지점명"은 지점/호실/입실자 시트에서 정확히 동일해야 서로 연결됩니다.'],
-    ['3. "호실번호"는 호실/입실자 시트에서 정확히 동일해야 서로 연결됩니다.'],
-    ['4. 옵션값'],
-    ['   - 타입: 블레스 / 그레이스 / 트리니티 / 기타'],
-    ['   - 인실구분: 1인실 / 2인실'],
-    ['   - 판매상태: 공실 / 판매중 / 판매보류  (이용중·이용중판매·단기판매·퇴실예정은 재실 입실자 상태로 자동 판정되어 직접 입력할 수 없습니다)'],
-    ['   - 청소필요 / 리터치필요: O 또는 X (둘 다 O면 청소필요가 우선 적용됩니다)'],
-    ['   - 유입채널: 독립생활 / 삼삼엠투 / 리브애니 / 기타'],
-    ['   - 순번: 1(주 입실자) 또는 2(2인실의 두 번째 입실자, 2인실에서만 가능하며 이름/연락처만 반영됩니다)'],
-    ['5. 날짜는 YYYY-MM-DD 형식으로 입력하세요. (예: 2026-08-01) 주 입실자는 입실일/퇴실예정일이 필수입니다.'],
-  ];
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(guideRows), '안내');
-
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([
-    { 지점명:'먼슬리브 예시지점', 주차가능대수:2, 주차메모:'건물 뒤 2대 가능', 특이사항메모:'' }
-  ]), '지점');
-
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([
-    { 지점명:'먼슬리브 예시지점', 호실번호:'101', 타입:'블레스', 인실구분:'2인실', 판매상태:'공실', 정상입실료:450000, 청소필요:'X', 리터치필요:'X', 호실특이사항:'' }
-  ]), '호실');
-
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([
-    { 지점명:'먼슬리브 예시지점', 호실번호:'101', 순번:1, 이름:'홍길동', 연락처:'010-1234-5678', 유입채널:'독립생활', 입실일:'2026-08-01', 퇴실예정일:'2026-09-01', 차량번호:'', 메모:'' }
-  ]), '입실자');
-
-  XLSX.writeFile(wb, 'monthliv_bulk_upload_template.xlsx');
 }
 
 function downloadCurrentData(){
@@ -2184,149 +2153,6 @@ function toISODateStr(v){
     }
   }
   return String(v).trim();
-}
-
-function sheetRows(wb, name){
-  const sheet = wb.Sheets[name];
-  if(!sheet) return [];
-  return XLSX.utils.sheet_to_json(sheet, { defval:'' });
-}
-
-let lastImportSnapshot = null;
-function handleBulkUploadFile(file){
-  const reader = new FileReader();
-  reader.onload = (e)=>{
-    try{
-      const wb = XLSX.read(new Uint8Array(e.target.result), { type:'array', cellDates:true });
-      lastImportSnapshot = JSON.parse(JSON.stringify({
-        branches: DB.branches, rooms: DB.rooms, residents: DB.residents, residentHistory: DB.residentHistory
-      }));
-      const result = importFromWorkbook(wb);
-      logChange(`엑셀 일괄 업로드: 지점 신규${result.branchesCreated}/갱신${result.branchesUpdated}, 호실 신규${result.roomsCreated}/갱신${result.roomsUpdated}, 입실자 추가${result.residentsAdded}`);
-      scheduleSave(); render();
-      showAlert(buildImportSummary(result) + '\n\n잘못 업로드했다면 이 화면의 "업로드 되돌리기" 버튼으로 방금 업로드 이전 상태로 되돌릴 수 있어요.');
-    }catch(err){
-      console.error(err);
-      showAlert('업로드 처리 중 오류가 발생했습니다: ' + err.message);
-    }
-  };
-  reader.readAsArrayBuffer(file);
-}
-function undoLastImport(){
-  if(!lastImportSnapshot) return;
-  showConfirm('가장 최근 엑셀 업로드를 취소하고, 업로드 이전 상태로 되돌릴까요?', ()=>{
-    DB.branches = lastImportSnapshot.branches;
-    DB.rooms = lastImportSnapshot.rooms;
-    DB.residents = lastImportSnapshot.residents;
-    DB.residentHistory = lastImportSnapshot.residentHistory;
-    lastImportSnapshot = null;
-    logChange('엑셀 일괄 업로드 되돌리기');
-    scheduleSave(); render();
-  });
-}
-
-function importFromWorkbook(wb){
-  const result = { branchesCreated:0, branchesUpdated:0, roomsCreated:0, roomsUpdated:0, residentsAdded:0, warnings:[] };
-  // 눈에 보이지 않는 zero-width space 등의 문자 때문에 이름이 서로 달라 보이는 문제를 막기 위해 정리합니다.
-  const cleanKey = (s)=> String(s||'').replace(/[\u200B-\u200D\uFEFF]/g,'').trim();
-  const findBranch = (name)=> DB.branches.find(b=> cleanKey(b.name).toLowerCase() === cleanKey(name).toLowerCase());
-
-  sheetRows(wb, '지점').forEach(row=>{
-    const name = cleanKey(row['지점명']);
-    if(!name) return;
-    const cap = Math.max(0, Math.min(10, parseInt(row['주차가능대수'],10) || 0));
-    let branch = findBranch(name);
-    if(branch){
-      branch.parkingCapacity = cap;
-      if(String(row['주차메모']||'').trim()) branch.parkingNote = String(row['주차메모']);
-      if(String(row['특이사항메모']||'').trim()) branch.memo = String(row['특이사항메모']);
-      result.branchesUpdated++;
-    } else {
-      DB.branches.push({ id: uid('b'), name, parkingNote: String(row['주차메모']||''), parkingCapacity: cap, memo: String(row['특이사항메모']||'') });
-      result.branchesCreated++;
-    }
-  });
-
-  sheetRows(wb, '호실').forEach((row, idx)=>{
-    const branchName = cleanKey(row['지점명']);
-    const number = cleanKey(row['호실번호']);
-    if(!branchName || !number){ result.warnings.push(`[호실 ${idx+2}행] 지점명 또는 호실번호 누락 - 건너뜀`); return; }
-    const branch = findBranch(branchName);
-    if(!branch){ result.warnings.push(`[호실 ${idx+2}행] "${branchName}" 지점을 찾을 수 없어 건너뜀`); return; }
-    const type = ROOM_TYPE_LIST.includes(row['타입']) ? row['타입'] : '기타';
-    const occupancy = OCCUPANCY_LIST.includes(row['인실구분']) ? row['인실구분'] : '2인실';
-    const rawStatus = String(row['판매상태']||'').trim();
-    const saleStatus = STATUS_LIST_MANUAL.includes(rawStatus) ? rawStatus : '공실';
-    const price = Number(row['정상입실료']) || 0;
-    const needsCleaning = String(row['청소필요']||'').trim().toUpperCase()==='O';
-    const needsRetouch = needsCleaning ? false : String(row['리터치필요']||'').trim().toUpperCase()==='O';
-    const note = String(row['호실특이사항']||'');
-    let room = DB.rooms.find(r=> r.branchId===branch.id && cleanKey(r.number).toLowerCase()===number.toLowerCase());
-    if(room){
-      Object.assign(room, { type, occupancy, saleStatus, price, needsCleaning, needsRetouch, note });
-      result.roomsUpdated++;
-    } else {
-      DB.rooms.push({ id: uid('r'), branchId: branch.id, number, type, occupancy, saleStatus, needsCleaning, needsRetouch, note, price });
-      result.roomsCreated++;
-    }
-  });
-
-  sheetRows(wb, '입실자').forEach((row, idx)=>{
-    const branchName = cleanKey(row['지점명']);
-    const number = cleanKey(row['호실번호']);
-    const name = cleanKey(row['이름']);
-    const phone = cleanKey(row['연락처']);
-    if(!branchName || !number || !name || !phone){ result.warnings.push(`[입실자 ${idx+2}행] 지점명/호실번호/이름/연락처 중 누락 - 건너뜀`); return; }
-    const branch = findBranch(branchName);
-    if(!branch){ result.warnings.push(`[입실자 ${idx+2}행] "${branchName}" 지점을 찾을 수 없어 건너뜀`); return; }
-    const room = DB.rooms.find(r=> r.branchId===branch.id && cleanKey(r.number).toLowerCase()===number.toLowerCase());
-    if(!room){ result.warnings.push(`[입실자 ${idx+2}행] "${branchName} ${number}호"를 찾을 수 없어 건너뜀`); return; }
-    const cap = occupancyCapacity(room);
-    const slotIndex = String(row['순번']).trim()==='2' ? 1 : 0;
-    if(slotIndex >= cap){ result.warnings.push(`[입실자 ${idx+2}행] ${branchName} ${number}호는 ${cap}인실이라 순번 ${slotIndex+1}을 추가할 수 없어 건너뜀`); return; }
-    if(DB.residents.some(p=>p.roomId===room.id && (p.slotIndex||0)===slotIndex)){
-      result.warnings.push(`[입실자 ${idx+2}행] ${branchName} ${number}호 순번 ${slotIndex+1}은 이미 등록되어 있어 건너뜀`); return;
-    }
-    const moveIn = toISODateStr(row['입실일']);
-    const moveOut = toISODateStr(row['퇴실예정일']);
-    if(slotIndex===0 && (!moveIn || !moveOut)){ result.warnings.push(`[입실자 ${idx+2}행] 주 입실자는 입실일/퇴실예정일이 필수입니다 - 건너뜀`); return; }
-    const channel = DB.channelList.includes(row['유입채널']) ? row['유입채널'] : '독립생활';
-    let carNumber = slotIndex===0 ? String(row['차량번호']||'').trim() : '';
-    if(carNumber && isCurrentlyResiding({ moveIn, moveOut })){
-      const cap = branch.parkingCapacity || 0;
-      const others = branchActiveCarCount(branch.id, null);
-      if(others + 1 > cap){
-        result.warnings.push(`[입실자 ${idx+2}행] ${branchName} 지점 주차 가능 대수(${cap}대) 초과로 차량번호는 비워두고 등록했습니다.`);
-        carNumber = '';
-      }
-    }
-    const p = {
-      id: uid('p'), roomId: room.id, name, phone,
-      channel: slotIndex===0 ? channel : '독립생활',
-      contractType: '신규',
-      moveIn: slotIndex===0 ? moveIn : '',
-      moveOut: slotIndex===0 ? moveOut : '',
-      originalMoveIn: slotIndex===0 ? moveIn : '',
-      scheduledToLeave: false,
-      carNumber,
-      memo: slotIndex===0 ? String(row['메모']||'') : '',
-      firstSaveDone: true, slotIndex
-    };
-    p.resStatus = computeResStatus(p);
-    DB.residents.push(p);
-    result.residentsAdded++;
-  });
-
-  return result;
-}
-
-function buildImportSummary(r){
-  let msg = `업로드 완료\n\n지점: 신규 ${r.branchesCreated}건 · 갱신 ${r.branchesUpdated}건\n호실: 신규 ${r.roomsCreated}건 · 갱신 ${r.roomsUpdated}건\n입실자: 신규 ${r.residentsAdded}건`;
-  if(r.warnings.length){
-    msg += `\n\n건너뛴 항목 (${r.warnings.length}건):\n` + r.warnings.slice(0,15).join('\n');
-    if(r.warnings.length>15) msg += `\n...외 ${r.warnings.length-15}건`;
-  }
-  return msg;
 }
 
 /* ---------------- channel list management ---------------- */
@@ -2645,7 +2471,7 @@ function renderAdminView(){
   return wrap;
 }
 
-const ADMIN_PANEL_TOGGLE_FLAGS = ['addingBranch','addingRoom','managingRoom','reorderingBranch','bulkUploading'];
+const ADMIN_PANEL_TOGGLE_FLAGS = ['addingBranch','addingRoom','managingRoom'];
 function renderBranchRoomManagePanel(){
   const box = document.createElement('div');
   box.className = 'stat-section';
@@ -2669,24 +2495,12 @@ function renderBranchRoomManagePanel(){
   btnRow.appendChild(toggleBtn('addingBranch', '+ 지점 추가', '지점 추가 취소', 'primary'));
   btnRow.appendChild(toggleBtn('addingRoom', '+ 호실 추가', '호실 추가 취소', 'primary'));
   btnRow.appendChild(toggleBtn('managingRoom', '호실 정보 수정 · 삭제', '호실 정보 수정 취소', 'danger'));
-  btnRow.appendChild(toggleBtn('reorderingBranch', '지점 노출 순서 변경', '지점 순서 변경 취소'));
-  btnRow.appendChild(toggleBtn('bulkUploading', '엑셀 일괄 업로드', '엑셀 업로드 취소'));
-  const downloadBtn = document.createElement('button');
-  downloadBtn.className = 'btn small';
-  downloadBtn.textContent = '⬇ 현재 데이터 다운로드';
-  downloadBtn.title = '현재 등록된 지점/호실/입실자 내용을 엑셀로 다운로드';
-  downloadBtn.onclick = downloadCurrentData;
-  btnRow.appendChild(downloadBtn);
   box.appendChild(btnRow);
 
   if(UI.addingBranch) box.appendChild(renderAdminAddBranchForm());
-  if(UI.addingRoom) box.appendChild(renderAdminAddRoomForm());
-  if(UI.managingRoom) box.appendChild(renderAdminRoomManageForm());
-  if(UI.reorderingBranch) box.appendChild(renderBranchOrderBody());
-  if(UI.bulkUploading) box.appendChild(renderBulkUploadBody());
-  if(!ADMIN_PANEL_TOGGLE_FLAGS.some(f=>UI[f])){
-    box.appendChild(el('div','empty-hint','위 버튼으로 지점·호실을 추가/수정하거나, 지점 순서 변경, 엑셀 일괄 업로드·생성을 할 수 있습니다.'));
-  }
+  else if(UI.addingRoom) box.appendChild(renderAdminAddRoomForm());
+  else if(UI.managingRoom) box.appendChild(renderAdminRoomManageForm());
+  else box.appendChild(renderBranchOrderBody());
 
   return box;
 }
