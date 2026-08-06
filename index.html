@@ -507,7 +507,8 @@ let UI = {
   view:'stats', branchId:null, branchTab:'rooms',
   roomEditMode:{}, residentEditMode:{}, roomSnapshots:{}, residentSnapshots:{}, draftResident:{}, parkingListOpen:{},
   branchEditMode:{}, branchSnapshots:{}, historyOpen:{}, addingBranch:false, addingRoom:false, managingRoom:false,
-  tlYear:null, tlMonth:null, roomStatusFilter:'이용중', cleanWeekStart:null, overdueTabKey:null
+  tlYear:null, tlMonth:null, roomStatusFilter:'이용중', cleanWeekStart:null, overdueTabKey:null,
+  cleanTodayPage:1, cleanFuturePage:1
 };
 
 function uid(p){ return p + '_' + Math.random().toString(36).slice(2,9); }
@@ -3009,10 +3010,11 @@ function renderCleaningView(){
 }
 
 /* 청소 관리 대시보드(상단 카드·주간표)가 공유하는 단일 데이터 소스.
-   퇴실청소: 계약만기일 등으로 퇴실이 확정된(scheduledToLeave) 입실자의 퇴실일과, 이미
-   퇴실청소가 필요로 표시된 호실을 날짜로 잡는다. 리터치/추가청소는 수동 관리이며
-   예정일을 입력하지 않았으면 date를 null로 둔다(카드 목록엔 "오늘"로 표시되지만,
-   날짜가 없어 주간표에는 올릴 수 없음 — 소비하는 쪽에서 구분해서 처리한다). */
+   퇴실청소: 계약만기일 등으로 퇴실이 확정된(scheduledToLeave) 입실자는, 청소 인력이
+   나오는 월/수/금 중 퇴실일 이후 가장 빠른 날짜를 청소일로 잡는다(예: 8/9(일) 만기 →
+   8/10(월)). 이미 퇴실청소가 필요로 표시된 호실은 그 날짜를 그대로 쓴다. 리터치/추가청소는
+   수동 관리이며 예정일을 입력하지 않았으면 date를 null로 둔다(카드 목록엔 "오늘"로
+   표시되지만, 날짜가 없어 주간표에는 올릴 수 없음 — 소비하는 쪽에서 구분해서 처리한다). */
 function collectCleaningEntries(){
   const entries = [];
   DB.rooms.filter(r=> r.needsCleaning || r.needsRetouch || r.needsExtraCleaning).forEach(r=>{
@@ -3024,7 +3026,7 @@ function collectCleaningEntries(){
     const room = DB.rooms.find(r=>r.id===p.roomId);
     if(!room || roomMaintKind(room)) return;
     const branch = DB.branches.find(b=>b.id===room.branchId);
-    entries.push({ type:'moveout', branch, room, date: p.moveOut });
+    entries.push({ type:'moveout', branch, room, date: nextMonWedFri(p.moveOut) });
   });
   return entries;
 }
@@ -3151,17 +3153,48 @@ function renderCleaningCards(){
   return wrap;
 }
 
+const CLEANING_CARD_PAGE_SIZE = 4;
+function paginateCleaningList(list, page){
+  const totalPages = Math.max(1, Math.ceil(list.length / CLEANING_CARD_PAGE_SIZE));
+  const clamped = Math.min(Math.max(page, 1), totalPages);
+  const start = (clamped - 1) * CLEANING_CARD_PAGE_SIZE;
+  return { pageList: list.slice(start, start + CLEANING_CARD_PAGE_SIZE), totalPages, page: clamped };
+}
+function appendCleaningPager(header, totalPages, currentPage, onPage){
+  if(totalPages <= 1) return;
+  const pager = document.createElement('div');
+  pager.className = 'log-pager';
+  pager.style.marginTop = '0';
+  for(let p=1; p<=totalPages; p++){
+    const pBtn = document.createElement('button');
+    pBtn.className = 'btn small' + (p===currentPage ? ' primary' : '');
+    pBtn.textContent = String(p);
+    pBtn.onclick = ()=> onPage(p);
+    pager.appendChild(pBtn);
+  }
+  header.appendChild(pager);
+}
+
 function renderTodayCleaningCard(list){
   const card = document.createElement('div');
   card.className = 'stat-section cleaning-card';
-  card.innerHTML = `<h3>오늘 청소방 <span class="cnt-badge">${list.length}</span></h3>`;
+
+  const header = document.createElement('div');
+  header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;';
+  header.innerHTML = `<h3 style="margin:0;">오늘 청소방 <span class="cnt-badge">${list.length}</span></h3>`;
+  card.appendChild(header);
+
   if(list.length===0){
     card.appendChild(el('div','cleaning-empty','해당하는 호실이 없습니다.'));
     return card;
   }
 
+  const { pageList, totalPages, page } = paginateCleaningList(list, UI.cleanTodayPage);
+  UI.cleanTodayPage = page;
+  appendCleaningPager(header, totalPages, page, (p)=>{ UI.cleanTodayPage = p; render(); });
+
   const groupMap = new Map();
-  list.forEach(x=>{
+  pageList.forEach(x=>{
     const key = x.branch ? x.branch.id : '__none__';
     if(!groupMap.has(key)) groupMap.set(key, { branch: x.branch, entries: [] });
     groupMap.get(key).entries.push(x);
@@ -3229,11 +3262,20 @@ function renderTodayCleaningCard(list){
 function renderCleaningCard(title, list, showDate){
   const card = document.createElement('div');
   card.className = 'stat-section cleaning-card';
-  card.innerHTML = `<h3>${title} <span class="cnt-badge">${list.length}</span></h3>`;
+
+  const header = document.createElement('div');
+  header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;';
+  header.innerHTML = `<h3 style="margin:0;">${title} <span class="cnt-badge">${list.length}</span></h3>`;
+  card.appendChild(header);
+
   if(list.length===0){
     card.appendChild(el('div','cleaning-empty','해당하는 호실이 없습니다.'));
   } else {
-    list.forEach(x=>{
+    const { pageList, totalPages, page } = paginateCleaningList(list, UI.cleanFuturePage);
+    UI.cleanFuturePage = page;
+    appendCleaningPager(header, totalPages, page, (p)=>{ UI.cleanFuturePage = p; render(); });
+
+    pageList.forEach(x=>{
       const entry = document.createElement('div');
       entry.className = 'cleaning-entry';
       const row = document.createElement('div');
