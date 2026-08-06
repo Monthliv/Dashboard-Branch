@@ -332,6 +332,7 @@
   .overdue-branch-name{ font-weight:700; font-size:13px; margin-bottom:6px; }
   .overdue-branch-name:hover{ text-decoration:underline; }
   .overdue-room-chips{ display:flex; flex-wrap:wrap; gap:6px; }
+  .overdue-room-chips.overdue-tab-chips{ max-height:140px; overflow-y:auto; }
   .overdue-room-chip{ cursor:pointer; }
   .overdue-room-chip:hover{ opacity:.85; }
   .cleaning-row .br{ color:var(--ink-soft); flex:none; }
@@ -345,8 +346,10 @@
   .cleaning-branch-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:4px; }
   .cleaning-branch-name{ font-weight:700; font-size:13px; }
 
-  .cal-head{ display:flex; align-items:center; gap:10px; margin-bottom:10px; }
-  .cal-title{ font-weight:800; font-size:14px; margin-right:auto; }
+  .cal-head{ display:flex; align-items:center; margin-bottom:10px; }
+  .cal-head-spacer{ width:16%; flex:none; }
+  .cal-head-nav{ flex:1; display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:10px; }
+  .cal-title{ font-weight:800; font-size:14px; text-align:center; }
   .cal-legend{ display:flex; flex-wrap:wrap; gap:14px; font-size:11px; color:var(--ink-soft); margin-bottom:12px; }
   .cal-legend-item{ display:flex; align-items:center; gap:5px; }
   .cal-chip{ font-size:10.5px; font-weight:700; border-radius:10px; padding:2px 8px; flex:none; white-space:nowrap; }
@@ -355,17 +358,15 @@
   .cal-chip.extra{ background:#E1F5E9; color:#1F7A45; }
 
   .table-scroll{ overflow-x:auto; }
-  table.week-matrix{ table-layout:fixed; min-width:820px; }
-  table.week-matrix th{ text-align:center; }
-  table.week-matrix th:first-child, table.week-matrix td:first-child{ width:15%; }
-  table.week-matrix th:last-child, table.week-matrix td:last-child{ width:13%; }
+  table.week-matrix{ table-layout:fixed; min-width:720px; }
+  table.week-matrix th{ text-align:center; background:var(--paper); }
+  table.week-matrix th:first-child, table.week-matrix td:first-child{ width:16%; background:var(--paper); }
   table.week-matrix .wk-date{ font-family:'JetBrains Mono',monospace; font-weight:400; color:var(--ink-soft); }
-  table.week-matrix th.wk-today{ color:var(--accent-ink); }
+  table.week-matrix th.wk-today{ background:var(--accent-soft); color:var(--accent-ink); }
   table.week-matrix td.wk-cell{ text-align:center; }
   table.week-matrix td.wk-cell.wk-today{ background:var(--accent-soft); }
   table.week-matrix td.wk-cell:not(.wk-empty):hover{ background:#FAF8F2; }
   table.week-matrix td.wk-empty{ color:var(--line); }
-  table.week-matrix td.wk-total-cell{ background:var(--accent-soft); font-weight:700; }
   .wk-chips{ display:flex; flex-wrap:wrap; justify-content:center; gap:4px; }
 
   .channel-list{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
@@ -506,7 +507,7 @@ let UI = {
   view:'stats', branchId:null, branchTab:'rooms',
   roomEditMode:{}, residentEditMode:{}, roomSnapshots:{}, residentSnapshots:{}, draftResident:{}, parkingListOpen:{},
   branchEditMode:{}, branchSnapshots:{}, historyOpen:{}, addingBranch:false, addingRoom:false, managingRoom:false,
-  tlYear:null, tlMonth:null, roomStatusFilter:'이용중', cleanWeekStart:null
+  tlYear:null, tlMonth:null, roomStatusFilter:'이용중', cleanWeekStart:null, overdueTabKey:null
 };
 
 function uid(p){ return p + '_' + Math.random().toString(36).slice(2,9); }
@@ -2810,7 +2811,6 @@ function renderAdminAddRoomForm(){
   return form;
 }
 
-const OVERDUE_PAGE_SIZE = 5;
 function renderOverdueStatsCard(){
   const items = [];
   DB.rooms.forEach(room=>{
@@ -2832,82 +2832,49 @@ function renderOverdueStatsCard(){
   const groupMap = new Map();
   items.forEach(item=>{
     const key = item.branch ? item.branch.id : '__none__';
-    if(!groupMap.has(key)) groupMap.set(key, { branch: item.branch, entries: [] });
+    if(!groupMap.has(key)) groupMap.set(key, { key, branch: item.branch, entries: [] });
     groupMap.get(key).entries.push(item);
   });
   const groups = [...groupMap.values()];
   groups.forEach(g=> g.entries.sort((a,b)=> a.room.number.localeCompare(b.room.number,'ko',{numeric:true})));
   groups.sort((a,b)=> (a.branch?a.branch.name:'').localeCompare(b.branch?b.branch.name:''));
 
-  const header = document.createElement('div');
-  header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;';
-  header.innerHTML = `<h3 style="margin:0;">연체 중인 호실 <span class="cnt-badge overdue-cnt-badge">${items.length}</span></h3>`;
-  card.appendChild(header);
-  const pager = document.createElement('div');
-  pager.className = 'log-pager';
-  pager.style.marginTop = '0';
-  header.appendChild(pager);
+  if(!groups.some(g=> g.key===UI.overdueTabKey)) UI.overdueTabKey = groups[0].key;
+  const activeGroup = groups.find(g=> g.key===UI.overdueTabKey);
 
-  const body = document.createElement('div');
-  card.appendChild(body);
+  card.innerHTML = `<h3>연체 중인 호실 <span class="cnt-badge overdue-cnt-badge">${items.length}</span></h3>`;
+
+  const tabs = document.createElement('div');
+  tabs.className = 'subnav';
+  tabs.style.margin = '0 0 12px';
+  groups.forEach(group=>{
+    const tab = document.createElement('button');
+    tab.type = 'button';
+    tab.className = group.key===UI.overdueTabKey ? 'active' : '';
+    tab.textContent = `${group.branch ? group.branch.name : '(지점 정보 없음)'} (${group.entries.length})`;
+    tab.onclick = ()=>{ UI.overdueTabKey = group.key; render(); };
+    tabs.appendChild(tab);
+  });
+  card.appendChild(tabs);
 
   const today = todayISO();
-  let currentPage = 1;
-
-  function renderPage(){
-    body.innerHTML = '';
-    pager.innerHTML = '';
-    const totalPages = Math.ceil(groups.length / OVERDUE_PAGE_SIZE);
-    if(currentPage > totalPages) currentPage = totalPages;
-    const start = (currentPage - 1) * OVERDUE_PAGE_SIZE;
-    groups.slice(start, start + OVERDUE_PAGE_SIZE).forEach(group=>{
-      const groupWrap = document.createElement('div');
-      groupWrap.className = 'overdue-branch-group';
-
-      const branchName = document.createElement('div');
-      branchName.className = 'overdue-branch-name';
-      branchName.textContent = group.branch ? group.branch.name : '(지점 정보 없음)';
-      if(group.branch){
-        branchName.style.cursor = 'pointer';
-        branchName.title = '해당 지점으로 이동';
-        branchName.onclick = ()=>{
-          UI.view = 'branch';
-          UI.branchId = group.branch.id;
-          render();
-        };
-      }
-      groupWrap.appendChild(branchName);
-
-      const chipRow = document.createElement('div');
-      chipRow.className = 'overdue-room-chips';
-      group.entries.forEach(item=>{
-        const days = Math.max(1, Math.round((new Date(today) - new Date(item.resident.moveOut)) / 86400000));
-        const chip = document.createElement('span');
-        chip.className = 'badge overdue-badge overdue-room-chip';
-        chip.textContent = `${item.room.number}호 ${days}일 연체`;
-        chip.title = '해당 호실로 이동';
-        chip.onclick = ()=>{
-          if(!item.branch) return;
-          UI.view = 'branch';
-          UI.branchId = item.branch.id;
-          scrollToRoomCard(item.room);
-        };
-        chipRow.appendChild(chip);
-      });
-      groupWrap.appendChild(chipRow);
-      body.appendChild(groupWrap);
-    });
-    if(groups.length > OVERDUE_PAGE_SIZE){
-      for(let p=1; p<=totalPages; p++){
-        const pBtn = document.createElement('button');
-        pBtn.className = 'btn small' + (p===currentPage ? ' primary' : '');
-        pBtn.textContent = String(p);
-        pBtn.onclick = ()=>{ currentPage = p; renderPage(); };
-        pager.appendChild(pBtn);
-      }
-    }
-  }
-  renderPage();
+  const chipRow = document.createElement('div');
+  chipRow.className = 'overdue-room-chips overdue-tab-chips';
+  activeGroup.entries.forEach(item=>{
+    const days = Math.max(1, Math.round((new Date(today) - new Date(item.resident.moveOut)) / 86400000));
+    const chip = document.createElement('span');
+    chip.className = 'badge overdue-badge overdue-room-chip';
+    chip.textContent = `${item.room.number}호 ${days}일 연체`;
+    chip.title = '해당 호실로 이동';
+    chip.onclick = ()=>{
+      if(!item.branch) return;
+      UI.view = 'branch';
+      UI.branchId = item.branch.id;
+      scrollToRoomCard(item.room);
+    };
+    chipRow.appendChild(chip);
+  });
+  card.appendChild(chipRow);
 
   return card;
 }
@@ -3041,19 +3008,17 @@ function renderCleaningView(){
   return wrap;
 }
 
-/* 퇴실청소: 계약만기일 등으로 퇴실이 확정된(scheduledToLeave) 입실자의 퇴실일과, 이미
+/* 청소 관리 대시보드(상단 카드·주간표)가 공유하는 단일 데이터 소스.
+   퇴실청소: 계약만기일 등으로 퇴실이 확정된(scheduledToLeave) 입실자의 퇴실일과, 이미
    퇴실청소가 필요로 표시된 호실을 날짜로 잡는다. 리터치/추가청소는 수동 관리이며
-   날짜가 직접 입력된 것만 주간표에 표시한다. */
+   예정일을 입력하지 않았으면 date를 null로 둔다(카드 목록엔 "오늘"로 표시되지만,
+   날짜가 없어 주간표에는 올릴 수 없음 — 소비하는 쪽에서 구분해서 처리한다). */
 function collectCleaningEntries(){
   const entries = [];
   DB.rooms.filter(r=> r.needsCleaning || r.needsRetouch || r.needsExtraCleaning).forEach(r=>{
     const branch = DB.branches.find(b=>b.id===r.branchId);
     const kind = roomMaintKind(r);
-    if(kind==='moveout'){
-      entries.push({ type:kind, branch, room:r, date: r.maintenanceDate || todayISO() });
-    } else if(r.maintenanceDate){
-      entries.push({ type:kind, branch, room:r, date: r.maintenanceDate });
-    }
+    entries.push({ type:kind, branch, room:r, date: r.maintenanceDate || (kind==='moveout' ? todayISO() : null) });
   });
   DB.residents.filter(p=> p.scheduledToLeave && p.moveOut).forEach(p=>{
     const room = DB.rooms.find(r=>r.id===p.roomId);
@@ -3091,16 +3056,19 @@ function renderCleaningWeekMatrix(){
 
   const head = document.createElement('div');
   head.className = 'cal-head';
+  const spacer = document.createElement('div');
+  spacer.className = 'cal-head-spacer';
+  const nav = document.createElement('div');
+  nav.className = 'cal-head-nav';
   const prevBtn = document.createElement('button'); prevBtn.className='btn small'; prevBtn.textContent='◀';
   const nextBtn = document.createElement('button'); nextBtn.className='btn small'; nextBtn.textContent='▶';
-  const todayBtn = document.createElement('button'); todayBtn.className='btn small'; todayBtn.textContent='이번주';
   const title = document.createElement('div');
   title.className = 'cal-title';
   title.textContent = `${weekDates[0].slice(0,4)}년 ${Number(weekDates[0].slice(5,7))}월 청소 필요 현황`;
   prevBtn.onclick = ()=>{ UI.cleanWeekStart = addDaysISO(UI.cleanWeekStart, -7); render(); };
   nextBtn.onclick = ()=>{ UI.cleanWeekStart = addDaysISO(UI.cleanWeekStart, 7); render(); };
-  todayBtn.onclick = ()=>{ UI.cleanWeekStart = mondayOf(todayISO()); render(); };
-  head.appendChild(prevBtn); head.appendChild(title); head.appendChild(nextBtn); head.appendChild(todayBtn);
+  nav.appendChild(prevBtn); nav.appendChild(title); nav.appendChild(nextBtn);
+  head.appendChild(spacer); head.appendChild(nav);
   box.appendChild(head);
 
   const legend = document.createElement('div');
@@ -3113,7 +3081,7 @@ function renderCleaningWeekMatrix(){
     return box;
   }
 
-  const entries = collectCleaningEntries().filter(e=> weekDates.includes(e.date));
+  const entries = collectCleaningEntries().filter(e=> e.date && weekDates.includes(e.date));
   const grid = new Map(); // branchId -> date -> {moveout,retouch,extra}
   entries.forEach(e=>{
     const bkey = e.branch ? e.branch.id : '__none__';
@@ -3133,7 +3101,7 @@ function renderCleaningWeekMatrix(){
   const table = document.createElement('table');
   table.className = 'branch-table week-matrix';
   const theadCells = weekDates.map((d,i)=> `<th${d===today?' class="wk-today"':''}>${DOW[i]}<br><span class="wk-date">${d.slice(5)}</span></th>`).join('');
-  table.innerHTML = `<thead><tr><th>지점</th>${theadCells}<th>합계</th></tr></thead>`;
+  table.innerHTML = `<thead><tr><th>지점</th>${theadCells}</tr></thead>`;
   const tbody = document.createElement('tbody');
 
   DB.branches.forEach(branch=>{
@@ -3144,26 +3112,17 @@ function renderCleaningWeekMatrix(){
     nameTd.querySelector('a').onclick = (e)=>{ e.preventDefault(); goToBranchRooms(branch.id); };
     tr.appendChild(nameTd);
 
-    const weekTotal = { moveout:0, retouch:0, extra:0 };
     weekDates.forEach(d=>{
       const counts = dmap ? dmap.get(d) : null;
       const td = document.createElement('td');
       td.className = 'wk-cell' + (d===today?' wk-today':'') + (counts ? '' : ' wk-empty');
       td.innerHTML = counts ? `<div class="wk-chips">${chipsHtml(counts, branch.name, d.slice(5))}</div>` : '-';
       if(counts){
-        Object.keys(weekTotal).forEach(k=> weekTotal[k]+= counts[k]||0);
         td.style.cursor = 'pointer';
         td.onclick = ()=> goToBranchRooms(branch.id);
       }
       tr.appendChild(td);
     });
-
-    const totalTd = document.createElement('td');
-    const hasTotal = weekTotal.moveout || weekTotal.retouch || weekTotal.extra;
-    totalTd.className = 'wk-cell wk-total-cell' + (hasTotal ? '' : ' wk-empty');
-    totalTd.innerHTML = hasTotal ? `<div class="wk-chips">${chipsHtml(weekTotal, branch.name, '')}</div>` : '-';
-    if(hasTotal){ totalTd.style.cursor = 'pointer'; totalTd.onclick = ()=> goToBranchRooms(branch.id); }
-    tr.appendChild(totalTd);
 
     tbody.appendChild(tr);
   });
@@ -3181,13 +3140,11 @@ function renderCleaningCards(){
   wrap.className = 'cleaning-cards-grid';
 
   const today = todayISO();
-  const maintRooms = DB.rooms
-    .filter(r=> r.needsCleaning || r.needsRetouch || r.needsExtraCleaning)
-    .map(r=> ({ room:r, branch: DB.branches.find(b=>b.id===r.branchId) }));
-  const todayList = maintRooms.filter(x=> !x.room.maintenanceDate || x.room.maintenanceDate<=today)
+  const entries = collectCleaningEntries();
+  const todayList = entries.filter(x=> !x.date || x.date<=today)
     .sort((a,b)=> (a.branch?.name||'').localeCompare(b.branch?.name||''));
-  const futureList = maintRooms.filter(x=> x.room.maintenanceDate && x.room.maintenanceDate>today)
-    .sort((a,b)=> a.room.maintenanceDate.localeCompare(b.room.maintenanceDate));
+  const futureList = entries.filter(x=> x.date && x.date>today)
+    .sort((a,b)=> a.date.localeCompare(b.date));
 
   wrap.appendChild(renderTodayCleaningCard(todayList));
   wrap.appendChild(renderCleaningCard('청소 예정방', futureList, true));
@@ -3221,19 +3178,21 @@ function renderTodayCleaningCard(list){
     nameSpan.className = 'cleaning-branch-name';
     nameSpan.textContent = group.branch ? group.branch.name : '(지점 정보 없음)';
     const copyBtn = document.createElement('button');
-    copyBtn.className = 'btn small';
-    copyBtn.textContent = '복사';
+    copyBtn.className = 'iconbtn';
+    copyBtn.innerHTML = '&#10697;';
     copyBtn.title = '이 지점의 청소방·메모를 클립보드에 복사';
     copyBtn.onclick = ()=>{
       const lines = [`[${group.branch ? group.branch.name : ''} 청소방]`];
       group.entries.forEach(x=>{
-        const kind = MAINT_KIND_META[roomMaintKind(x.room)].label;
+        const kind = MAINT_KIND_META[x.type].label;
         lines.push(`${x.room.number}호 (${kind})${x.room.maintenanceMemo ? ' - ' + x.room.maintenanceMemo : ''}`);
       });
       navigator.clipboard.writeText(lines.join('\n')).then(()=>{
-        const orig = copyBtn.textContent;
-        copyBtn.textContent = '복사됨';
-        setTimeout(()=>{ copyBtn.textContent = orig; }, 1500);
+        const origTitle = copyBtn.title;
+        copyBtn.innerHTML = '&#10003;';
+        copyBtn.classList.add('active');
+        copyBtn.title = '복사됨';
+        setTimeout(()=>{ copyBtn.innerHTML = '&#10697;'; copyBtn.classList.remove('active'); copyBtn.title = origTitle; }, 1500);
       }).catch(()=>{
         showAlert('복사에 실패했습니다. 브라우저 권한을 확인해주세요.');
       });
@@ -3246,7 +3205,7 @@ function renderTodayCleaningCard(list){
       entry.className = 'cleaning-entry';
       const row = document.createElement('div');
       row.className = 'cleaning-row';
-      const kindBadge = maintBadgeHtml(roomMaintKind(x.room));
+      const kindBadge = maintBadgeHtml(x.type);
       row.innerHTML = `<span class="rm">${esc(x.room.number)}호</span><span class="kind">${kindBadge}</span>`;
       row.style.cursor = 'pointer';
       row.title = '해당 지점으로 이동';
@@ -3279,8 +3238,8 @@ function renderCleaningCard(title, list, showDate){
       entry.className = 'cleaning-entry';
       const row = document.createElement('div');
       row.className = 'cleaning-row';
-      const kindBadge = maintBadgeHtml(roomMaintKind(x.room));
-      const dateTxt = showDate && x.room.maintenanceDate ? `<span class="mdate">${x.room.maintenanceDate}</span>` : '';
+      const kindBadge = maintBadgeHtml(x.type);
+      const dateTxt = showDate && x.date ? `<span class="mdate">${x.date}</span>` : '';
       row.innerHTML = `
         <span class="br">${esc(x.branch ? x.branch.name : '-')}</span>
         <span class="rm">${esc(x.room.number)}호</span>
