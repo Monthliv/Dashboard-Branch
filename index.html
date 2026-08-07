@@ -614,7 +614,7 @@ function seedState(){
       { id: branchJamsil, name: '먼슬리브 잠실', address: '', parkingNote: '건물 뒤 2대 가능 (297구4624, 272모3214)', parkingCapacity: 2, memo: '' },
       { id: branchDoksan, name: '먼슬리브 가산독산', address: '', parkingNote: '건물 앞 1대만 가능 (4번 자리)', parkingCapacity: 1, memo: '' }
     ],
-    rooms, residents, residentHistory: [], channelList: [...DEFAULT_CHANNEL_LIST]
+    rooms, residents, residentHistory: [], contracts: [], channelList: [...DEFAULT_CHANNEL_LIST]
   };
 }
 
@@ -1318,6 +1318,12 @@ function renderRoomCard(room, sectionStatus){
   historyBtn.title = '퇴실한 입실자 이력 보기';
   historyBtn.onclick = ()=>{ UI.historyOpen[room.id] = !historyOpen; render(); };
   header.querySelector('.rc-header-badges').prepend(historyBtn);
+  const contractBtn = document.createElement('button');
+  contractBtn.className = 'history-btn';
+  contractBtn.textContent = '계약현황';
+  contractBtn.title = '계약 이력 보기';
+  contractBtn.onclick = ()=> showContractHistoryModal(room);
+  header.querySelector('.rc-header-badges').prepend(contractBtn);
   const pencil = document.createElement('button');
   pencil.className = 'iconbtn' + (roomEditOn ? ' active' : '');
   pencil.innerHTML = roomEditOn ? '&#10003;' : '&#9998;';
@@ -1737,7 +1743,11 @@ function renderResidentEditCard(p, isSecondary, isDraft, room){
   proxyCheckbox.type = 'checkbox';
   proxyCheckbox.id = 'proxy-' + p.id;
   proxyCheckbox.checked = !!p.paymentProxy;
-  proxyCheckbox.addEventListener('change', ()=>{ p.paymentProxy = proxyCheckbox.checked; maybeSave(); render(); });
+  proxyCheckbox.addEventListener('change', ()=>{
+    p.paymentProxy = proxyCheckbox.checked;
+    if(proxyCheckbox.checked) UI.residentFieldEdit[p.id] = true;
+    maybeSave(); render();
+  });
   const proxyLabel = document.createElement('label');
   proxyLabel.htmlFor = proxyCheckbox.id;
   proxyLabel.textContent = '대리결제';
@@ -2350,6 +2360,212 @@ function downloadCurrentData(){
   XLSX.writeFile(wb, `monthliv_현재데이터_${todayISO()}.xlsx`);
 }
 
+/* ---------------- 계약관리: 스프레드시트에서 복사한 표를 붙여넣어 호실별 계약 이력으로 저장 ---------------- */
+const CONTRACT_FIELD_BY_HEADER = {
+  '계약일':'contractDate', '계약기간':'contractPeriod', '지역구':'district', '고시원명':'branchName', '방이름':'roomName',
+  '계약자':'contractor', '입실자':'resident', '입실료':'rent', '결제금액':'paymentAmount', '계약상태':'contractStatus',
+  '계약유형':'contractType', '계약구분':'contractCategory', '결제구분':'paymentCategory', '보증금':'deposit',
+  '보증금안내':'depositNote', '계약내용':'contractContent'
+};
+function renderContractManagePanel(){
+  const box = document.createElement('div');
+  box.className = 'stat-section';
+  box.innerHTML = `<h3>계약관리</h3>
+    <div style="font-size:12px;color:var(--ink-soft);margin-bottom:12px;">
+      계약일 / 계약기간 / 지역구 / 고시원 명 / 방이름 / 계약자 / 입실자 / 입실료 / 결제금액 / 계약상태 / 계약유형 / 계약구분 / 결제구분 / 보증금 / 보증금 안내 / 계약내용
+      순서의 표를 헤더 행 포함해서 복사한 뒤 붙여넣으면, 고시원 명·방이름으로 지점·호실을 찾아 계약 이력으로 저장합니다.
+      각 호실 카드의 "계약현황" 버튼에서 확인할 수 있습니다.
+    </div>`;
+  const openBtn = document.createElement('button');
+  openBtn.className = 'btn primary';
+  openBtn.textContent = '계약 데이터 붙여넣기';
+  openBtn.onclick = showContractPasteModal;
+  box.appendChild(openBtn);
+  box.appendChild(el('div', null, `현재 저장된 계약 이력: ${DB.contracts.length}건`, 'font-size:11.5px;color:var(--ink-soft);margin-top:8px;'));
+  return box;
+}
+
+function showContractPasteModal(){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  const box = document.createElement('div');
+  box.className = 'modal-box';
+  box.style.maxWidth = '640px';
+  const close = ()=> overlay.remove();
+
+  box.innerHTML = `
+    <div class="modal-msg" style="margin-bottom:10px;font-weight:700;">계약 데이터 붙여넣기</div>
+    <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:10px;line-height:1.6;">
+      스프레드시트에서 헤더 행을 포함해 복사한 표를 아래에 붙여넣어주세요.<br>
+      (계약일, 계약기간, 지역구, 고시원 명, 방이름, 계약자, 입실자, 입실료, 결제금액, 계약상태, 계약유형, 계약구분, 결제구분, 보증금, 보증금 안내, 계약내용)
+    </div>
+  `;
+  const textarea = document.createElement('textarea');
+  textarea.rows = 10;
+  textarea.style.cssText = 'width:100%;font-family:monospace;font-size:11.5px;';
+  textarea.placeholder = '계약일\t계약기간\t지역구\t고시원 명\t방이름\t계약자\t입실자\t...';
+  box.appendChild(textarea);
+
+  const btnRow = document.createElement('div');
+  btnRow.className = 'modal-btn-row';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'btn'; cancelBtn.textContent = '취소'; cancelBtn.onclick = close;
+  const importBtn = document.createElement('button');
+  importBtn.className = 'btn primary'; importBtn.textContent = '가져오기';
+  importBtn.onclick = ()=> parseAndImportContracts(textarea.value, close);
+  btnRow.appendChild(cancelBtn); btnRow.appendChild(importBtn);
+  box.appendChild(btnRow);
+
+  overlay.addEventListener('click', (e)=>{ if(e.target===overlay) close(); });
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+  setTimeout(()=> textarea.focus(), 0);
+}
+
+function parseAndImportContracts(text, onImported){
+  const lines = text.replace(/\r/g,'').split('\n').filter(l=> l.trim()!=='');
+  if(lines.length < 2){
+    showAlert('헤더 행과 데이터 행이 포함된 표를 붙여넣어주세요.');
+    return;
+  }
+  const idx = {};
+  lines[0].split('\t').forEach((h, i)=>{
+    const key = CONTRACT_FIELD_BY_HEADER[cleanKeyLoose(h).replace(/\s+/g,'')];
+    if(key) idx[key] = i;
+  });
+  if(idx.branchName==null || idx.roomName==null){
+    showAlert('헤더 행에서 "고시원 명"과 "방이름" 열을 찾을 수 없습니다. 첫 줄이 헤더인지 확인해주세요.');
+    return;
+  }
+
+  const newContracts = [];
+  const unmatched = [];
+  for(let i=1; i<lines.length; i++){
+    const cells = lines[i].split('\t');
+    const get = (key)=> idx[key]!=null ? (cells[idx[key]]||'').trim() : '';
+    const branchRaw = cleanKeyLoose(get('branchName'));
+    const roomRaw = cleanKeyLoose(get('roomName')).replace(/호$/,'');
+    if(!branchRaw && !roomRaw) continue;
+
+    const resolvedBranchName = BRANCH_NAME_ALIASES[branchRaw] || branchRaw;
+    const branch = DB.branches.find(b=> cleanKeyLoose(b.name).toLowerCase()===resolvedBranchName.toLowerCase());
+    const room = branch ? DB.rooms.find(r=> r.branchId===branch.id && normalizeRoomNo(r.number)===normalizeRoomNo(roomRaw)) : null;
+    if(!room){
+      unmatched.push(`[${i+1}행] ${branchRaw} ${roomRaw}호 (${!branch ? '지점' : '호실'} 못 찾음)`);
+      continue;
+    }
+
+    newContracts.push({
+      id: uid('ct'), roomId: room.id,
+      contractDate: get('contractDate'), contractPeriod: get('contractPeriod'), district: get('district'),
+      branchName: branchRaw, roomName: roomRaw, contractor: get('contractor'), resident: get('resident'),
+      rent: get('rent'), paymentAmount: get('paymentAmount'), contractStatus: get('contractStatus'),
+      contractType: get('contractType'), contractCategory: get('contractCategory'), paymentCategory: get('paymentCategory'),
+      deposit: get('deposit'), depositNote: get('depositNote'), contractContent: get('contractContent')
+    });
+  }
+
+  if(newContracts.length===0){
+    showAlert(`가져올 수 있는 계약 데이터가 없습니다.` + (unmatched.length ? `\n\n${unmatched.slice(0,20).join('\n')}` : ''));
+    return;
+  }
+
+  showConfirm(
+    `계약 데이터 ${newContracts.length}건을 가져올까요?` + (unmatched.length ? `\n(호실을 찾지 못한 ${unmatched.length}건은 제외됩니다)` : ''),
+    ()=>{
+      DB.contracts.push(...newContracts);
+      logChange(`계약 데이터 붙여넣기: ${newContracts.length}건 추가${unmatched.length ? ` (미매칭 ${unmatched.length}건)` : ''}`);
+      scheduleSave(); render();
+      onImported();
+      showAlert(`${newContracts.length}건을 가져왔습니다.` + (unmatched.length ? `\n\n호실을 찾지 못한 항목:\n${unmatched.slice(0,20).join('\n')}${unmatched.length>20 ? `\n...외 ${unmatched.length-20}건` : ''}` : ''));
+    }
+  );
+}
+
+const CONTRACT_HISTORY_PAGE_SIZE = 10;
+function showContractHistoryModal(room){
+  const contracts = DB.contracts.filter(c=>c.roomId===room.id)
+    .slice()
+    .sort((a,b)=> (b.contractDate||'').localeCompare(a.contractDate||''));
+  const totalPages = Math.max(1, Math.ceil(contracts.length / CONTRACT_HISTORY_PAGE_SIZE));
+  let page = 1;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  const box = document.createElement('div');
+  box.className = 'modal-box';
+  box.style.maxWidth = '720px';
+  const close = ()=> overlay.remove();
+
+  function renderBody(){
+    box.innerHTML = '';
+    const title = el('div', 'modal-msg', `${room.number}호 계약현황 (${contracts.length}건)`, 'margin-bottom:10px;font-weight:700;');
+    box.appendChild(title);
+
+    if(contracts.length===0){
+      box.appendChild(el('div', null, '등록된 계약 이력이 없습니다.', 'font-size:12.5px;color:var(--ink-soft);padding:12px 0;'));
+    } else {
+      const tableWrap = document.createElement('div');
+      tableWrap.style.cssText = 'overflow-x:auto;';
+      const table = document.createElement('table');
+      table.className = 'contract-table';
+      table.style.cssText = 'width:100%;border-collapse:collapse;font-size:12px;';
+      table.innerHTML = `
+        <thead><tr>
+          <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);">계약일</th>
+          <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);">계약기간</th>
+          <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);">계약자</th>
+          <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);">입실료</th>
+          <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);">결제금액</th>
+          <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);">계약구분</th>
+        </tr></thead>
+      `;
+      const tbody = document.createElement('tbody');
+      const start = (page-1)*CONTRACT_HISTORY_PAGE_SIZE;
+      contracts.slice(start, start+CONTRACT_HISTORY_PAGE_SIZE).forEach(c=>{
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td style="padding:6px 8px;border-bottom:1px solid var(--line);">${esc(c.contractDate||'-')}</td>
+          <td style="padding:6px 8px;border-bottom:1px solid var(--line);">${esc(c.contractPeriod||'-')}</td>
+          <td style="padding:6px 8px;border-bottom:1px solid var(--line);">${esc(c.contractor||'-')}</td>
+          <td style="padding:6px 8px;border-bottom:1px solid var(--line);">${esc(c.rent||'-')}</td>
+          <td style="padding:6px 8px;border-bottom:1px solid var(--line);">${esc(c.paymentAmount||'-')}</td>
+          <td style="padding:6px 8px;border-bottom:1px solid var(--line);">${esc(c.contractCategory||'-')}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      tableWrap.appendChild(table);
+      box.appendChild(tableWrap);
+
+      if(totalPages > 1){
+        const pager = document.createElement('div');
+        pager.className = 'log-pager';
+        for(let p=1; p<=totalPages; p++){
+          const pBtn = document.createElement('button');
+          pBtn.className = 'btn small' + (p===page ? ' primary' : '');
+          pBtn.textContent = String(p);
+          pBtn.onclick = ()=>{ page = p; renderBody(); };
+          pager.appendChild(pBtn);
+        }
+        box.appendChild(pager);
+      }
+    }
+
+    const btnRow = document.createElement('div');
+    btnRow.className = 'modal-btn-row';
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'btn'; closeBtn.textContent = '닫기'; closeBtn.onclick = close;
+    btnRow.appendChild(closeBtn);
+    box.appendChild(btnRow);
+  }
+  renderBody();
+
+  overlay.addEventListener('click', (e)=>{ if(e.target===overlay) close(); });
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+}
+
 function toISODateStr(v){
   if(v == null || v==='') return '';
   if(v instanceof Date){
@@ -2726,6 +2942,7 @@ function renderAdminView(){
 
   wrap.appendChild(renderBranchRoomManagePanel());
   wrap.appendChild(renderResidentResyncPanel());
+  wrap.appendChild(renderContractManagePanel());
   wrap.appendChild(renderChannelManagePanel());
   wrap.appendChild(renderUserManagePanel());
   wrap.appendChild(renderChangeLogPanel());
@@ -3789,6 +4006,7 @@ async function initApp(user){
 
   DB = await loadState();
   DB.residentHistory = DB.residentHistory || [];
+  DB.contracts = DB.contracts || [];
   DB.channelList = (DB.channelList && DB.channelList.length) ? DB.channelList : [...DEFAULT_CHANNEL_LIST];
   // 과거 버전에서 "완료" 없이 새로고침 등으로 남겨졌을 수 있는 미확정 입실자(이름 미입력 등) 정리
   const beforeCount = DB.residents.length;
