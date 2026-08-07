@@ -2778,7 +2778,7 @@ function renderUserManagePanel(){
         cb.type = 'checkbox'; cb.value = b.id;
         cb.checked = Array.isArray(u.branchIds) && u.branchIds.includes(b.id);
         lbl.appendChild(cb);
-        lbl.appendChild(document.createTextNode(b.name));
+        lbl.appendChild(document.createTextNode(branchLabel(b)));
         branchChecks.appendChild(lbl);
         return cb;
       });
