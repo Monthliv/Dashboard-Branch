@@ -116,7 +116,11 @@
   .branch-bar .namewrap input:focus{ outline:none; border-bottom:1px solid var(--accent); }
   .parking-cap-row select{ width:100px; }
   .parking-cap-row{ margin-bottom:8px; }
-  .facility-grid{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .branch-info-table{ width:100%; border-collapse:collapse; table-layout:fixed; }
+  .branch-info-table td{ padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; font-size:13px; }
+  .branch-info-table td.bi-label{ width:88px; color:var(--ink-soft); font-weight:700; font-size:11.5px; white-space:nowrap; }
+  .branch-info-table tr:last-child td{ border-bottom:none; }
+  .branch-info-table input, .branch-info-table select, .branch-info-table textarea{ width:100%; font-size:13px; }
   .parking-summary{ font-size:12.5px; color:var(--ink-soft); margin-bottom:6px; }
   .parking-summary.parking-unavailable{ font-size:14px; font-weight:800; color:var(--st-hold); margin-bottom:0; }
   .parking-active-toggle{ color:var(--accent-ink); font-weight:700; text-decoration:underline; cursor:pointer; }
@@ -927,7 +931,7 @@ function renderBranchInfoBar(branch){
   if(canEdit()) bar.appendChild(pencil);
 
   // ---- 지점명 ----
-  const col1 = document.createElement('div'); col1.className = 'col';
+  const titleCol = document.createElement('div'); titleCol.className = 'col';
   if(editOn){
     const shortNameInput = document.createElement('input');
     shortNameInput.type = 'text'; shortNameInput.placeholder = '지점단축명 (대시보드·지점 이동 시 표시)'; shortNameInput.value = branch.shortName || '';
@@ -937,7 +941,7 @@ function renderBranchInfoBar(branch){
       branch.shortName = shortNameInput.value; scheduleSave();
       syncBranchSelectOption(branch);
     });
-    col1.appendChild(shortNameInput);
+    titleCol.appendChild(shortNameInput);
     const namewrap = document.createElement('div'); namewrap.className = 'namewrap';
     const nameInput = document.createElement('input');
     nameInput.type = 'text'; nameInput.value = branch.name;
@@ -947,149 +951,163 @@ function renderBranchInfoBar(branch){
       syncBranchSelectOption(branch);
     });
     namewrap.appendChild(nameInput);
-    col1.appendChild(namewrap);
-    const addressInput = document.createElement('input');
-    addressInput.type = 'text'; addressInput.placeholder = '주소 (예: 서울시 성동구 ...)'; addressInput.value = branch.address || '';
-    addressInput.style.marginTop = '6px';
-    addressInput.addEventListener('input', ()=>{
-      logChange(`"${branch.name}" 주소 수정`);
-      branch.address = addressInput.value; scheduleSave();
-    });
-    col1.appendChild(addressInput);
+    titleCol.appendChild(namewrap);
   } else {
-    const titleDiv = document.createElement('div'); titleDiv.className = 'branch-view-text title';
-    titleDiv.textContent = branch.name;
-    if(branch.address){
-      const addrSpan = document.createElement('span');
-      addrSpan.className = 'branch-address';
-      addrSpan.textContent = branch.address;
-      titleDiv.appendChild(addrSpan);
-    }
-    col1.appendChild(titleDiv);
-    col1.appendChild(el('div', 'branch-view-text small', `단축명: ${branch.shortName || '미설정'}`, 'margin-top:2px;'));
+    titleCol.appendChild(el('div', 'branch-view-text title', branch.name));
   }
-  bar.appendChild(col1);
+  bar.appendChild(titleCol);
 
-  // ---- 주차 ----
-  const col2 = document.createElement('div'); col2.className = 'col';
-  col2.appendChild(el('h3', null, '주차 정보'));
-  if(editOn){
+  // ---- 정보 표 (주소·주차·시설 정보를 2열 표로 압축 배치) ----
+  function parkingView(){
+    const div = document.createElement('div');
+    const activeList = branchActiveCarResidents(branch.id);
+    const cap = branch.parkingCapacity || 0;
+    const summary = document.createElement('div');
+    if(cap===0){
+      summary.className = 'parking-summary parking-unavailable';
+      summary.textContent = '⚠ 주차 불가';
+    } else {
+      summary.className = 'parking-summary';
+      summary.innerHTML = `전체 ${cap}대 / 이용중 <span class="parking-active-toggle">${activeList.length}대</span>`;
+      summary.querySelector('.parking-active-toggle').onclick = ()=>{ UI.parkingListOpen[branch.id] = !UI.parkingListOpen[branch.id]; render(); };
+    }
+    div.appendChild(summary);
+    if(UI.parkingListOpen[branch.id] && cap!==0){
+      const list = document.createElement('div');
+      list.className = 'parking-list';
+      if(activeList.length===0){
+        list.appendChild(el('div','parking-list-empty','현재 차량이 등록된 이용중 입실자가 없습니다.'));
+      } else {
+        activeList.forEach(item=>{
+          const row = document.createElement('div');
+          row.className = 'parking-list-row';
+          row.innerHTML = `<span class="rm">${esc(item.roomNumber)}호</span><span class="nm">${esc(item.name)}</span><span class="car">${esc(item.carNumber)}</span>`;
+          list.appendChild(row);
+        });
+      }
+      div.appendChild(list);
+    }
+    if(branch.parkingNote){
+      const pnDiv = el('div', 'branch-view-text small', branch.parkingNote, 'margin-top:4px;');
+      pnDiv.style.color = MEMO_COLORS[branch.parkingNoteColor] || MEMO_COLORS.black;
+      if(branch.parkingNoteBold) pnDiv.style.fontWeight = '700';
+      div.appendChild(pnDiv);
+    }
+    return div;
+  }
+  function parkingEdit(){
+    const div = document.createElement('div');
     const capSel = document.createElement('select');
     for(let i=0;i<=10;i++){ const o=document.createElement('option'); o.value=i; o.textContent=`${i}대`; o.selected=(branch.parkingCapacity||0)===i; capSel.appendChild(o); }
     capSel.addEventListener('change', ()=>{
       logChange(`"${branch.name}" 주차 가능 대수 변경: ${branch.parkingCapacity||0}대 → ${capSel.value}대`);
       branch.parkingCapacity = Number(capSel.value); scheduleSave(); render();
     });
-    col2.appendChild(labeled('주차 가능 대수', capSel));
-  }
-  const activeList = branchActiveCarResidents(branch.id);
-  const summary = document.createElement('div');
-  const cap = branch.parkingCapacity || 0;
-  if(!editOn && cap===0){
-    summary.className = 'parking-summary parking-unavailable';
-    summary.textContent = '⚠ 주차 불가';
-  } else {
+    div.appendChild(capSel);
+    const activeList = branchActiveCarResidents(branch.id);
+    const summary = document.createElement('div');
     summary.className = 'parking-summary';
-    summary.style.marginTop = editOn ? '8px' : '0';
-    summary.innerHTML = `전체 ${cap}대 / 이용중 <span class="parking-active-toggle">${activeList.length}대</span>`;
+    summary.style.marginTop = '8px';
+    summary.innerHTML = `전체 ${branch.parkingCapacity||0}대 / 이용중 <span class="parking-active-toggle">${activeList.length}대</span>`;
     summary.querySelector('.parking-active-toggle').onclick = ()=>{ UI.parkingListOpen[branch.id] = !UI.parkingListOpen[branch.id]; render(); };
-  }
-  col2.appendChild(summary);
-  if(UI.parkingListOpen[branch.id] && !(!editOn && cap===0)){
-    const list = document.createElement('div');
-    list.className = 'parking-list';
-    if(activeList.length===0){
-      list.appendChild(el('div','parking-list-empty','현재 차량이 등록된 이용중 입실자가 없습니다.'));
-    } else {
-      activeList.forEach(item=>{
-        const row = document.createElement('div');
-        row.className = 'parking-list-row';
-        row.innerHTML = `<span class="rm">${esc(item.roomNumber)}호</span><span class="nm">${esc(item.name)}</span><span class="car">${esc(item.carNumber)}</span>`;
-        list.appendChild(row);
-      });
+    div.appendChild(summary);
+    if(UI.parkingListOpen[branch.id]){
+      const list = document.createElement('div');
+      list.className = 'parking-list';
+      if(activeList.length===0){
+        list.appendChild(el('div','parking-list-empty','현재 차량이 등록된 이용중 입실자가 없습니다.'));
+      } else {
+        activeList.forEach(item=>{
+          const row = document.createElement('div');
+          row.className = 'parking-list-row';
+          row.innerHTML = `<span class="rm">${esc(item.roomNumber)}호</span><span class="nm">${esc(item.name)}</span><span class="car">${esc(item.carNumber)}</span>`;
+          list.appendChild(row);
+        });
+      }
+      div.appendChild(list);
     }
-    col2.appendChild(list);
-  }
-  if(editOn){
     const parkingNote = document.createElement('textarea');
     parkingNote.placeholder = '예: 건물 뒤 2대 가능';
     parkingNote.value = branch.parkingNote;
     parkingNote.style.marginTop = '8px';
     parkingNote.addEventListener('input', ()=>{ logChange(`"${branch.name}" 주차 메모 수정`); branch.parkingNote = parkingNote.value; scheduleSave(); });
-    col2.appendChild(parkingNote);
-    col2.appendChild(renderMemoStyleControls(branch, 'parkingNoteColor', 'parkingNoteBold'));
-  } else if(branch.parkingNote){
-    const pnDiv = el('div', 'branch-view-text small', branch.parkingNote, 'margin-top:6px;');
-    pnDiv.style.color = MEMO_COLORS[branch.parkingNoteColor] || MEMO_COLORS.black;
-    if(branch.parkingNoteBold) pnDiv.style.fontWeight = '700';
-    col2.appendChild(pnDiv);
+    div.appendChild(parkingNote);
+    div.appendChild(renderMemoStyleControls(branch, 'parkingNoteColor', 'parkingNoteBold'));
+    return div;
   }
-  bar.appendChild(col2);
+  function textField(field, placeholder, logLabel){
+    return {
+      view: ()=> document.createTextNode(branch[field] || '-'),
+      edit: ()=>{
+        const input = document.createElement('input');
+        input.type = 'text'; input.placeholder = placeholder; input.value = branch[field] || '';
+        input.addEventListener('input', ()=>{ logChange(`"${branch.name}" ${logLabel} 수정`); branch[field] = input.value; scheduleSave(); });
+        return input;
+      }
+    };
+  }
+  function feeField(field, placeholder, logLabel){
+    return {
+      view: ()=> document.createTextNode(branch[field] ? formatWon(branch[field]) : '-'),
+      edit: ()=>{
+        const input = document.createElement('input');
+        input.type = 'number'; input.min = '0'; input.step = '1000'; input.placeholder = placeholder; input.value = branch[field] || 0;
+        input.addEventListener('input', ()=>{ logChange(`"${branch.name}" ${logLabel} 수정`); branch[field] = Number(input.value) || 0; scheduleSave(); });
+        return input;
+      }
+    };
+  }
 
-  // ---- 특이사항 ----
-  const col3 = document.createElement('div'); col3.className = 'col';
-  col3.appendChild(el('h3', null, '특이사항 메모'));
+  const infoRows = [
+    { label:'주소', ...textField('address', '예: 서울시 성동구 ...', '주소') },
+    { label:'주차', view: parkingView, edit: parkingEdit },
+    { label:'엘리베이터', ...textField('elevator', '예: 있음', '엘리베이터 정보') },
+    { label:'난방방식', ...textField('heatingType', '예: 개별난방', '난방방식') },
+    { label:'헤어드라이기', ...textField('hairDryer', '예: 있음', '헤어드라이기 정보') },
+    { label:'청소비', ...feeField('cleaningFee', '예: 50000', '청소비') },
+    { label:'2인 추가금', ...feeField('doubleOccupancyFee', '예: 100000', '2인 추가금') }
+  ];
+
+  const infoCol = document.createElement('div'); infoCol.className = 'col';
+  const table = document.createElement('table');
+  table.className = 'branch-info-table';
+  const tbody = document.createElement('tbody');
+  for(let i=0; i<infoRows.length; i+=2){
+    const tr = document.createElement('tr');
+    [infoRows[i], infoRows[i+1]].forEach(row=>{
+      const th = document.createElement('td'); th.className = 'bi-label';
+      const td = document.createElement('td'); td.className = 'bi-value';
+      if(row){
+        th.textContent = row.label;
+        td.appendChild(editOn ? row.edit() : row.view());
+      }
+      tr.appendChild(th); tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  infoCol.appendChild(table);
+  bar.appendChild(infoCol);
+
+  // ---- 특이사항 메모 (맨 하단) ----
+  const memoCol = document.createElement('div'); memoCol.className = 'col';
+  memoCol.appendChild(el('h3', null, '특이사항 메모'));
   if(editOn){
     const memoArea = document.createElement('textarea');
     memoArea.placeholder = '지점 전체 공지/특이사항';
     memoArea.value = branch.memo;
     memoArea.addEventListener('input', ()=>{ logChange(`"${branch.name}" 특이사항 메모 수정`); branch.memo = memoArea.value; scheduleSave(); });
-    col3.appendChild(memoArea);
-    col3.appendChild(renderMemoStyleControls(branch, 'memoColor', 'memoBold'));
+    memoCol.appendChild(memoArea);
+    memoCol.appendChild(renderMemoStyleControls(branch, 'memoColor', 'memoBold'));
   } else {
     const memoDiv = el('div', 'branch-view-text', branch.memo || '-');
     if(branch.memo){
       memoDiv.style.color = MEMO_COLORS[branch.memoColor] || MEMO_COLORS.black;
       if(branch.memoBold) memoDiv.style.fontWeight = '700';
     }
-    col3.appendChild(memoDiv);
+    memoCol.appendChild(memoDiv);
   }
-  bar.appendChild(col3);
-
-  // ---- 시설 정보 ----
-  const col4 = document.createElement('div'); col4.className = 'col';
-  col4.appendChild(el('h3', null, '시설 정보'));
-  if(editOn){
-    const facilityGrid = document.createElement('div');
-    facilityGrid.className = 'facility-grid';
-    const elevatorInput = document.createElement('input');
-    elevatorInput.type = 'text'; elevatorInput.placeholder = '예: 있음'; elevatorInput.value = branch.elevator || '';
-    elevatorInput.addEventListener('input', ()=>{ logChange(`"${branch.name}" 엘리베이터 정보 수정`); branch.elevator = elevatorInput.value; scheduleSave(); });
-    facilityGrid.appendChild(labeled('엘리베이터', elevatorInput));
-
-    const heatingInput = document.createElement('input');
-    heatingInput.type = 'text'; heatingInput.placeholder = '예: 개별난방'; heatingInput.value = branch.heatingType || '';
-    heatingInput.addEventListener('input', ()=>{ logChange(`"${branch.name}" 난방방식 수정`); branch.heatingType = heatingInput.value; scheduleSave(); });
-    facilityGrid.appendChild(labeled('난방방식', heatingInput));
-
-    const dryerInput = document.createElement('input');
-    dryerInput.type = 'text'; dryerInput.placeholder = '예: 있음'; dryerInput.value = branch.hairDryer || '';
-    dryerInput.addEventListener('input', ()=>{ logChange(`"${branch.name}" 헤어드라이기 정보 수정`); branch.hairDryer = dryerInput.value; scheduleSave(); });
-    facilityGrid.appendChild(labeled('헤어드라이기', dryerInput));
-
-    const feeInput = document.createElement('input');
-    feeInput.type = 'number'; feeInput.min = '0'; feeInput.step = '1000'; feeInput.placeholder = '예: 50000'; feeInput.value = branch.cleaningFee || 0;
-    feeInput.addEventListener('input', ()=>{ logChange(`"${branch.name}" 청소비 수정`); branch.cleaningFee = Number(feeInput.value) || 0; scheduleSave(); });
-    facilityGrid.appendChild(labeled('청소비(원)', feeInput));
-
-    const doubleFeeInput = document.createElement('input');
-    doubleFeeInput.type = 'number'; doubleFeeInput.min = '0'; doubleFeeInput.step = '1000'; doubleFeeInput.placeholder = '예: 100000'; doubleFeeInput.value = branch.doubleOccupancyFee || 0;
-    doubleFeeInput.addEventListener('input', ()=>{ logChange(`"${branch.name}" 2인 추가금 수정`); branch.doubleOccupancyFee = Number(doubleFeeInput.value) || 0; scheduleSave(); });
-    facilityGrid.appendChild(labeled('2인 추가금(원)', doubleFeeInput));
-
-    col4.appendChild(facilityGrid);
-  } else {
-    [
-      ['엘리베이터', branch.elevator],
-      ['난방방식', branch.heatingType],
-      ['헤어드라이기', branch.hairDryer],
-      ['청소비', branch.cleaningFee ? formatWon(branch.cleaningFee) : ''],
-      ['2인 추가금', branch.doubleOccupancyFee ? formatWon(branch.doubleOccupancyFee) : '']
-    ].forEach(([label, val])=>{
-      col4.appendChild(el('div', 'branch-view-text small', `${label}: ${val || '-'}`));
-    });
-  }
-  bar.appendChild(col4);
+  bar.appendChild(memoCol);
 
   wrap.appendChild(bar);
 
