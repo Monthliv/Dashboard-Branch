@@ -24,6 +24,7 @@
     --st-hold:#C0473F;     --st-hold-bg:#FBE7E5;
     --st-presell:#6C5FC7;  --st-presell-bg:#EDEBFA;
     --st-shortsale:#C2478B; --st-shortsale-bg:#FBE7F1;
+    --st-proxy:#2E8B57;    --st-proxy-bg:#E4F3EA;
 
     --ch-indep:#5B4FCF; --ch-33m2:#B5459A; --ch-liveany:#D6673E; --ch-etc:#7A8790;
   }
@@ -284,6 +285,9 @@
   .resident-edit-card input[type=text], .resident-edit-card input[type=tel]{ width:100%; }
   .resident-edit-card .redit-grid2{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px; }
   .resident-edit-card .redit-grid2 select, .resident-edit-card .redit-grid2 input{ width:100%; }
+  .resident-edit-card .redit-proxy-row{ grid-column:1 / -1; display:flex; align-items:center; gap:6px; }
+  .resident-edit-card .redit-proxy-row input[type=checkbox]{ width:auto; flex:none; }
+  .resident-edit-card .redit-proxy-row label{ font-size:12.5px; font-weight:600; color:var(--ink); cursor:pointer; }
   .resident-edit-card .redit-readonly-text{ font-size:12.5px; font-weight:600; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:6px 0; }
   .resident-edit-card .redit-readonly-text.empty{ color:var(--st-hold); font-weight:400; }
   .resident-edit-card .redit-inline-row{ display:flex; gap:8px; align-items:flex-end; margin-bottom:8px; }
@@ -709,6 +713,7 @@ function statusMeta(s){
     '단기판매':    { fg:'var(--st-shortsale)', bg:'var(--st-shortsale-bg)' },
     '퇴실예정':    { fg:'var(--st-leaving)',  bg:'var(--st-leaving-bg)' },
     '판매보류':    { fg:'var(--st-hold)',     bg:'var(--st-hold-bg)' },
+    '대리결제':    { fg:'var(--st-proxy)',    bg:'var(--st-proxy-bg)' },
   };
   return m[s] || m['공실'];
 }
@@ -1074,6 +1079,15 @@ function roomHasScheduledLeaveResident(room){
 function roomIsLeavingSoon(room){
   return roomHasScheduledLeaveResident(room) || effectiveRoomStatus(room)==='퇴실예정';
 }
+function roomHasPaymentProxy(room){
+  return DB.residents.some(p=> p.roomId===room.id && p.paymentProxy);
+}
+const ROOM_TAB_LIST = [...STATUS_LIST_STATS, '대리결제'];
+function roomsInFilterTab(rooms, s){
+  if(s === '퇴실예정') return rooms.filter(roomIsLeavingSoon);
+  if(s === '대리결제') return rooms.filter(roomHasPaymentProxy);
+  return rooms.filter(r=> roomTabs(r).includes(s));
+}
 function renderRoomsSection(branch){
   const wrap = document.createElement('div');
   const rooms = DB.rooms.filter(r=>r.branchId===branch.id);
@@ -1085,9 +1099,9 @@ function renderRoomsSection(branch){
   toolbar.className = 'room-toolbar';
   const legend = document.createElement('div');
   legend.className = 'legend';
-  STATUS_LIST_STATS.forEach(s=>{
+  ROOM_TAB_LIST.forEach(s=>{
     const m = statusMeta(s);
-    const cnt = (s === '퇴실예정' ? rooms.filter(roomIsLeavingSoon) : rooms.filter(r=>roomTabs(r).includes(s))).length;
+    const cnt = roomsInFilterTab(rooms, s).length;
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'badge legend-btn' + (status === s ? ' active' : '');
@@ -1105,7 +1119,7 @@ function renderRoomsSection(branch){
     return wrap;
   }
 
-  const inStatus = (status === '퇴실예정' ? rooms.filter(roomIsLeavingSoon) : rooms.filter(r=>roomTabs(r).includes(status)))
+  const inStatus = roomsInFilterTab(rooms, status)
     .sort((a,b)=> a.number.localeCompare(b.number,'ko',{numeric:true}));
 
   const section = document.createElement('div');
@@ -1142,7 +1156,8 @@ function addResidentToRoom(room){
     return;
   }
   const p = { id: uid('p'), roomId: room.id, name:'', channel:'독립생활', resStatus:'', contractType:'신규',
-    moveIn: todayISO(), moveOut:'', originalMoveIn:'', scheduledToLeave:false, phone:'', memo:'', carNumber:'', firstSaveDone:false, slotIndex: confirmedCount };
+    moveIn: todayISO(), moveOut:'', originalMoveIn:'', scheduledToLeave:false, phone:'', memo:'', carNumber:'', firstSaveDone:false, slotIndex: confirmedCount,
+    paymentProxy:false, actualResidentName:'', actualResidentPhone:'' };
   p.resStatus = computeResStatus(p);
   // 최초 입력 중에는 DB에 반영하지 않고 화면(초안) 상태로만 유지합니다.
   // "완료"를 눌러야 실제로 저장되고, 취소/새로고침 시 남지 않습니다.
@@ -1715,6 +1730,34 @@ function renderResidentEditCard(p, isSecondary, isDraft, room){
     phoneInput.addEventListener('input', ()=>{ p.phone = phoneInput.value; maybeSave(); phoneInput.classList.toggle('invalid', !phoneInput.value.trim()); });
     return phoneInput;
   });
+
+  const proxyRow = document.createElement('div');
+  proxyRow.className = 'redit-proxy-row';
+  const proxyCheckbox = document.createElement('input');
+  proxyCheckbox.type = 'checkbox';
+  proxyCheckbox.id = 'proxy-' + p.id;
+  proxyCheckbox.checked = !!p.paymentProxy;
+  proxyCheckbox.addEventListener('change', ()=>{ p.paymentProxy = proxyCheckbox.checked; maybeSave(); render(); });
+  const proxyLabel = document.createElement('label');
+  proxyLabel.htmlFor = proxyCheckbox.id;
+  proxyLabel.textContent = '대리결제';
+  proxyRow.appendChild(proxyCheckbox); proxyRow.appendChild(proxyLabel);
+  identityGrid.appendChild(proxyRow);
+
+  if(p.paymentProxy){
+    identityCell('실입실자 이름', false, p.actualResidentName, ()=>{
+      const input = document.createElement('input');
+      input.type = 'text'; input.placeholder = '홍길동'; input.value = p.actualResidentName || '';
+      input.addEventListener('input', ()=>{ p.actualResidentName = input.value; maybeSave(); });
+      return input;
+    });
+    identityCell('실입실자 연락처', false, p.actualResidentPhone, ()=>{
+      const input = document.createElement('input');
+      input.type = 'tel'; input.placeholder = '010-0000-0000'; input.value = p.actualResidentPhone || '';
+      input.addEventListener('input', ()=>{ p.actualResidentPhone = input.value; maybeSave(); });
+      return input;
+    });
+  }
 
   if(isSecondary){
     card.appendChild(identityGrid);
