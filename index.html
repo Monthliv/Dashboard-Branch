@@ -116,6 +116,7 @@
   .branch-bar .namewrap input:focus{ outline:none; border-bottom:1px solid var(--accent); }
   .parking-cap-row select{ width:100px; }
   .parking-cap-row{ margin-bottom:8px; }
+  .facility-grid{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
   .parking-summary{ font-size:12.5px; color:var(--ink-soft); margin-bottom:6px; }
   .parking-summary.parking-unavailable{ font-size:14px; font-weight:800; color:var(--st-hold); margin-bottom:0; }
   .parking-active-toggle{ color:var(--accent-ink); font-weight:700; text-decoration:underline; cursor:pointer; }
@@ -158,9 +159,9 @@
   }
   .branch-order-row.dragging{ opacity:.4; }
   .branch-order-handle{ color:var(--ink-soft); font-size:14px; }
-  .branch-order-name{ font-weight:700; font-size:13.5px; }
+  .branch-order-name{ font-weight:700; font-size:13.5px; flex:1; }
   .admin-add-form .fld{ display:flex; flex-direction:column; }
-  .admin-add-form input, .admin-add-form select{ width:100%; }
+  .admin-add-form input, .admin-add-form select, .admin-add-form textarea{ width:100%; }
   .admin-add-form .btn-row{ display:flex; gap:8px; }
   .branch-address{ font-size:13px; font-weight:400; color:var(--ink-soft); margin-left:10px; }
 
@@ -517,7 +518,7 @@ let DB = null;
 let UI = {
   view:'stats', branchId:null, branchTab:'rooms',
   roomEditMode:{}, residentEditMode:{}, roomSnapshots:{}, residentSnapshots:{}, draftResident:{}, parkingListOpen:{}, residentFieldEdit:{},
-  branchEditMode:{}, branchSnapshots:{}, historyOpen:{}, addingBranch:false, addingRoom:false, managingRoom:false,
+  branchEditMode:{}, branchSnapshots:{}, historyOpen:{}, addingBranch:false, addingRoom:false, managingRoom:false, editingBranchId:null,
   tlYear:null, tlMonth:null, roomStatusFilter:'이용중', cleanWeekStart:null, overdueTabKey:null,
   cleanTodayPage:1, cleanFuturePage:1
 };
@@ -535,6 +536,11 @@ function nextMonWedFri(fromDateStr){
   return d.toISOString().slice(0,10);
 }
 function formatWon(n){ n = Number(n)||0; return n.toLocaleString('ko-KR') + '원'; }
+function branchLabel(branch){ return (branch && branch.shortName && branch.shortName.trim()) ? branch.shortName : (branch ? branch.name : ''); }
+function syncBranchSelectOption(branch){
+  const opt = document.querySelector(`#branchSelect option[value="${branch.id}"]`);
+  if(opt) opt.textContent = branchLabel(branch);
+}
 
 const STATUS_LIST = ['이용중','이용중판매','단기판매','판매중','퇴실예정','공실','판매보류'];
 const STATUS_LIST_MANUAL = STATUS_LIST.filter(s => !['이용중','이용중판매','단기판매','퇴실예정'].includes(s));
@@ -748,7 +754,7 @@ function renderTopNav(){
   sel.appendChild(placeholder);
   allowedBranches().forEach(br=>{
     const o = document.createElement('option');
-    o.value = br.id; o.textContent = br.name;
+    o.value = br.id; o.textContent = branchLabel(br);
     o.selected = UI.view === 'branch' && UI.branchId===br.id;
     sel.appendChild(o);
   });
@@ -923,13 +929,22 @@ function renderBranchInfoBar(branch){
   // ---- 지점명 ----
   const col1 = document.createElement('div'); col1.className = 'col';
   if(editOn){
+    const shortNameInput = document.createElement('input');
+    shortNameInput.type = 'text'; shortNameInput.placeholder = '지점단축명 (대시보드·지점 이동 시 표시)'; shortNameInput.value = branch.shortName || '';
+    shortNameInput.style.marginBottom = '6px';
+    shortNameInput.addEventListener('input', ()=>{
+      logChange(`"${branch.name}" 지점단축명 수정`);
+      branch.shortName = shortNameInput.value; scheduleSave();
+      syncBranchSelectOption(branch);
+    });
+    col1.appendChild(shortNameInput);
     const namewrap = document.createElement('div'); namewrap.className = 'namewrap';
     const nameInput = document.createElement('input');
     nameInput.type = 'text'; nameInput.value = branch.name;
     nameInput.addEventListener('input', ()=>{
       logChange(`지점명 수정: "${branch.name}" → "${nameInput.value}"`);
       branch.name = nameInput.value; scheduleSave();
-      const opt = document.querySelector(`#branchSelect option[value="${branch.id}"]`); if(opt) opt.textContent = nameInput.value;
+      syncBranchSelectOption(branch);
     });
     namewrap.appendChild(nameInput);
     col1.appendChild(namewrap);
@@ -951,6 +966,7 @@ function renderBranchInfoBar(branch){
       titleDiv.appendChild(addrSpan);
     }
     col1.appendChild(titleDiv);
+    col1.appendChild(el('div', 'branch-view-text small', `단축명: ${branch.shortName || '미설정'}`, 'margin-top:2px;'));
   }
   bar.appendChild(col1);
 
@@ -1029,6 +1045,51 @@ function renderBranchInfoBar(branch){
     col3.appendChild(memoDiv);
   }
   bar.appendChild(col3);
+
+  // ---- 시설 정보 ----
+  const col4 = document.createElement('div'); col4.className = 'col';
+  col4.appendChild(el('h3', null, '시설 정보'));
+  if(editOn){
+    const facilityGrid = document.createElement('div');
+    facilityGrid.className = 'facility-grid';
+    const elevatorInput = document.createElement('input');
+    elevatorInput.type = 'text'; elevatorInput.placeholder = '예: 있음'; elevatorInput.value = branch.elevator || '';
+    elevatorInput.addEventListener('input', ()=>{ logChange(`"${branch.name}" 엘리베이터 정보 수정`); branch.elevator = elevatorInput.value; scheduleSave(); });
+    facilityGrid.appendChild(labeled('엘리베이터', elevatorInput));
+
+    const heatingInput = document.createElement('input');
+    heatingInput.type = 'text'; heatingInput.placeholder = '예: 개별난방'; heatingInput.value = branch.heatingType || '';
+    heatingInput.addEventListener('input', ()=>{ logChange(`"${branch.name}" 난방방식 수정`); branch.heatingType = heatingInput.value; scheduleSave(); });
+    facilityGrid.appendChild(labeled('난방방식', heatingInput));
+
+    const dryerInput = document.createElement('input');
+    dryerInput.type = 'text'; dryerInput.placeholder = '예: 있음'; dryerInput.value = branch.hairDryer || '';
+    dryerInput.addEventListener('input', ()=>{ logChange(`"${branch.name}" 헤어드라이기 정보 수정`); branch.hairDryer = dryerInput.value; scheduleSave(); });
+    facilityGrid.appendChild(labeled('헤어드라이기', dryerInput));
+
+    const feeInput = document.createElement('input');
+    feeInput.type = 'number'; feeInput.min = '0'; feeInput.step = '1000'; feeInput.placeholder = '예: 50000'; feeInput.value = branch.cleaningFee || 0;
+    feeInput.addEventListener('input', ()=>{ logChange(`"${branch.name}" 청소비 수정`); branch.cleaningFee = Number(feeInput.value) || 0; scheduleSave(); });
+    facilityGrid.appendChild(labeled('청소비(원)', feeInput));
+
+    const doubleFeeInput = document.createElement('input');
+    doubleFeeInput.type = 'number'; doubleFeeInput.min = '0'; doubleFeeInput.step = '1000'; doubleFeeInput.placeholder = '예: 100000'; doubleFeeInput.value = branch.doubleOccupancyFee || 0;
+    doubleFeeInput.addEventListener('input', ()=>{ logChange(`"${branch.name}" 2인 추가금 수정`); branch.doubleOccupancyFee = Number(doubleFeeInput.value) || 0; scheduleSave(); });
+    facilityGrid.appendChild(labeled('2인 추가금(원)', doubleFeeInput));
+
+    col4.appendChild(facilityGrid);
+  } else {
+    [
+      ['엘리베이터', branch.elevator],
+      ['난방방식', branch.heatingType],
+      ['헤어드라이기', branch.hairDryer],
+      ['청소비', branch.cleaningFee ? formatWon(branch.cleaningFee) : ''],
+      ['2인 추가금', branch.doubleOccupancyFee ? formatWon(branch.doubleOccupancyFee) : '']
+    ].forEach(([label, val])=>{
+      col4.appendChild(el('div', 'branch-view-text small', `${label}: ${val || '-'}`));
+    });
+  }
+  bar.appendChild(col4);
 
   wrap.appendChild(bar);
 
@@ -2909,7 +2970,7 @@ function renderStatsView(){
       ? holdRooms.map(r=> esc(r.note ? `${r.number}: ${r.note}` : `${r.number}`)).join('<br>')
       : '-';
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td><a href="#" data-goto="${b.id}" style="color:var(--accent-ink);font-weight:700;text-decoration:none;">${esc(b.name)}</a></td>
+    tr.innerHTML = `<td><a href="#" data-goto="${b.id}" style="color:var(--accent-ink);font-weight:700;text-decoration:none;">${esc(branchLabel(b))}</a></td>
       <td>${total}</td><td>${occupied}</td><td>${forSale}</td><td style="color:${occColor};font-weight:700;">${occRate}%</td><td>${reserved}</td><td>${holdText}</td>`;
     tbody.appendChild(tr);
   });
@@ -2966,6 +3027,7 @@ function renderBranchRoomManagePanel(){
     btn.onclick = ()=>{
       const turningOn = !UI[flag];
       ADMIN_PANEL_TOGGLE_FLAGS.forEach(f=> UI[f] = false);
+      UI.editingBranchId = null;
       UI[flag] = turningOn;
       render();
     };
@@ -2979,6 +3041,7 @@ function renderBranchRoomManagePanel(){
   if(UI.addingBranch) box.appendChild(renderAdminAddBranchForm());
   else if(UI.addingRoom) box.appendChild(renderAdminAddRoomForm());
   else if(UI.managingRoom) box.appendChild(renderAdminRoomManageForm());
+  else if(UI.editingBranchId) box.appendChild(renderAdminEditBranchForm(DB.branches.find(b=>b.id===UI.editingBranchId)));
   else box.appendChild(renderBranchOrderBody());
 
   return box;
@@ -2999,7 +3062,13 @@ function renderBranchOrderBody(){
     row.className = 'branch-order-row';
     row.draggable = true;
     row.dataset.id = b.id;
-    row.innerHTML = `<span class="branch-order-handle">&#9776;</span><span class="branch-order-name">${esc(b.name)}</span>`;
+    row.innerHTML = `<span class="branch-order-handle">&#9776;</span><span class="branch-order-name">${b.shortName ? esc(b.shortName)+' · ' : ''}${esc(b.name)}</span>`;
+    const editBtn = document.createElement('button');
+    editBtn.className = 'btn small';
+    editBtn.textContent = '수정';
+    editBtn.draggable = false;
+    editBtn.onclick = ()=>{ UI.editingBranchId = b.id; UI.addingBranch=false; UI.addingRoom=false; UI.managingRoom=false; render(); };
+    row.appendChild(editBtn);
 
     row.addEventListener('dragstart', ()=>{
       dragRow = row;
@@ -3095,14 +3164,24 @@ function renderAdminRoomManageForm(){
   return form;
 }
 
+const BRANCH_FORM_FIELDS_HTML = (prefix, v)=> `
+    <div class="fld"><label class="field-label">지점단축명</label><input type="text" id="${prefix}ShortName" placeholder="예: 성수" value="${esc(v.shortName||'')}"></div>
+    <div class="fld"><label class="field-label">지점명 *</label><input type="text" id="${prefix}Name" placeholder="예: 먼슬리브 신규지점" value="${esc(v.name||'')}"></div>
+    <div class="fld"><label class="field-label">주소</label><input type="text" id="${prefix}Address" placeholder="예: 서울시 성동구 ..." value="${esc(v.address||'')}"></div>
+    <div class="fld"><label class="field-label">엘리베이터</label><input type="text" id="${prefix}Elevator" placeholder="예: 있음" value="${esc(v.elevator||'')}"></div>
+    <div class="fld"><label class="field-label">난방방식</label><input type="text" id="${prefix}Heating" placeholder="예: 개별난방" value="${esc(v.heatingType||'')}"></div>
+    <div class="fld"><label class="field-label">헤어드라이기</label><input type="text" id="${prefix}Dryer" placeholder="예: 있음" value="${esc(v.hairDryer||'')}"></div>
+    <div class="fld"><label class="field-label">청소비(원)</label><input type="number" id="${prefix}Fee" min="0" step="1000" value="${v.cleaningFee||0}"></div>
+    <div class="fld"><label class="field-label">2인 추가금(원)</label><input type="number" id="${prefix}DoubleFee" min="0" step="1000" value="${v.doubleOccupancyFee||0}"></div>
+    <div class="fld"><label class="field-label">주차 가능 대수</label>
+      <select id="${prefix}Cap">${Array.from({length:11},(_,i)=>`<option value="${i}" ${((v.parkingCapacity||0)===i)?'selected':''}>${i}대</option>`).join('')}</select></div>
+    <div class="fld" style="grid-column:1/-1;"><label class="field-label">특이사항 메모</label><textarea id="${prefix}Memo">${esc(v.memo||'')}</textarea></div>
+  `;
+
 function renderAdminAddBranchForm(){
   const form = document.createElement('div');
   form.className = 'admin-add-form';
-  form.innerHTML = `
-    <div class="fld"><label class="field-label">지점명 *</label><input type="text" id="nbName" placeholder="예: 먼슬리브 신규지점"></div>
-    <div class="fld"><label class="field-label">주소</label><input type="text" id="nbAddress" placeholder="예: 서울시 성동구 ..."></div>
-    <div class="fld"><label class="field-label">주차 가능 대수</label>
-      <select id="nbCap">${Array.from({length:11},(_,i)=>`<option value="${i}">${i}대</option>`).join('')}</select></div>
+  form.innerHTML = BRANCH_FORM_FIELDS_HTML('nb', {}) + `
     <div class="btn-row">
       <button class="btn primary" id="nbSubmit">추가</button>
       <button class="btn" id="nbCancel">취소</button>
@@ -3115,12 +3194,56 @@ function renderAdminAddBranchForm(){
       const nameEl = document.getElementById('nbName');
       const name = nameEl.value.trim();
       if(!name){ showAlert('지점명을 입력해주세요.'); nameEl.focus(); return; }
-      const address = document.getElementById('nbAddress').value.trim();
-      const cap = Number(document.getElementById('nbCap').value) || 0;
-      const nb = { id: uid('b'), name, address, parkingNote:'', parkingCapacity: cap, memo:'' };
+      const nb = {
+        id: uid('b'), name,
+        shortName: document.getElementById('nbShortName').value.trim(),
+        address: document.getElementById('nbAddress').value.trim(),
+        elevator: document.getElementById('nbElevator').value.trim(),
+        heatingType: document.getElementById('nbHeating').value.trim(),
+        hairDryer: document.getElementById('nbDryer').value.trim(),
+        cleaningFee: Number(document.getElementById('nbFee').value) || 0,
+        doubleOccupancyFee: Number(document.getElementById('nbDoubleFee').value) || 0,
+        parkingNote:'', parkingCapacity: Number(document.getElementById('nbCap').value) || 0,
+        memo: document.getElementById('nbMemo').value
+      };
       DB.branches.push(nb);
       logChange(`"${name}" 지점 신규 등록`);
       UI.addingBranch = false;
+      scheduleSave(); render();
+    };
+  },0);
+  return form;
+}
+
+function renderAdminEditBranchForm(branch){
+  const form = document.createElement('div');
+  form.className = 'admin-add-form';
+  if(!branch){ form.innerHTML = `<div class="fld">지점을 찾을 수 없습니다.</div>`; return form; }
+  form.innerHTML = BRANCH_FORM_FIELDS_HTML('eb', branch) + `
+    <div class="btn-row">
+      <button class="btn primary" id="ebSubmit">저장</button>
+      <button class="btn" id="ebCancel">취소</button>
+    </div>
+  `;
+  setTimeout(()=>{
+    document.getElementById('ebCancel').onclick = ()=>{ UI.editingBranchId=null; render(); };
+    document.getElementById('ebSubmit').onclick = ()=>{
+      const nameEl = document.getElementById('ebName');
+      const name = nameEl.value.trim();
+      if(!name){ showAlert('지점명을 입력해주세요.'); nameEl.focus(); return; }
+      branch.name = name;
+      branch.shortName = document.getElementById('ebShortName').value.trim();
+      branch.address = document.getElementById('ebAddress').value.trim();
+      branch.elevator = document.getElementById('ebElevator').value.trim();
+      branch.heatingType = document.getElementById('ebHeating').value.trim();
+      branch.hairDryer = document.getElementById('ebDryer').value.trim();
+      branch.cleaningFee = Number(document.getElementById('ebFee').value) || 0;
+      branch.doubleOccupancyFee = Number(document.getElementById('ebDoubleFee').value) || 0;
+      branch.parkingCapacity = Number(document.getElementById('ebCap').value) || 0;
+      branch.memo = document.getElementById('ebMemo').value;
+      logChange(`"${branch.name}" 지점 정보 수정`);
+      UI.editingBranchId = null;
+      syncBranchSelectOption(branch);
       scheduleSave(); render();
     };
   },0);
@@ -3206,7 +3329,7 @@ function renderOverdueStatsCard(){
   });
   const groups = [...groupMap.values()];
   groups.forEach(g=> g.entries.sort((a,b)=> a.room.number.localeCompare(b.room.number,'ko',{numeric:true})));
-  groups.sort((a,b)=> (a.branch?a.branch.name:'').localeCompare(b.branch?b.branch.name:''));
+  groups.sort((a,b)=> (a.branch?branchLabel(a.branch):'').localeCompare(b.branch?branchLabel(b.branch):''));
 
   if(!groups.some(g=> g.key===UI.overdueTabKey)) UI.overdueTabKey = groups[0].key;
   const activeGroup = groups.find(g=> g.key===UI.overdueTabKey);
@@ -3220,7 +3343,7 @@ function renderOverdueStatsCard(){
     const tab = document.createElement('button');
     tab.type = 'button';
     tab.className = group.key===UI.overdueTabKey ? 'active' : '';
-    tab.textContent = `${group.branch ? group.branch.name : '(지점 정보 없음)'} (${group.entries.length})`;
+    tab.textContent = `${group.branch ? branchLabel(group.branch) : '(지점 정보 없음)'} (${group.entries.length})`;
     tab.onclick = ()=>{ UI.overdueTabKey = group.key; render(); };
     tabs.appendChild(tab);
   });
@@ -3266,7 +3389,7 @@ function renderPendingMoveStatsCard(){
     if(!groupMap.has(key)) groupMap.set(key, { branch: item.branch, entries: [] });
     groupMap.get(key).entries.push(item);
   });
-  const groups = [...groupMap.values()].sort((a,b)=> (a.branch?a.branch.name:'').localeCompare(b.branch?b.branch.name:''));
+  const groups = [...groupMap.values()].sort((a,b)=> (a.branch?branchLabel(a.branch):'').localeCompare(b.branch?branchLabel(b.branch):''));
 
   const card = document.createElement('div');
   card.className = 'stat-section cleaning-card';
@@ -3278,7 +3401,7 @@ function renderPendingMoveStatsCard(){
     groupWrap.className = 'overdue-branch-group';
     const branchName = document.createElement('div');
     branchName.className = 'overdue-branch-name';
-    branchName.textContent = group.branch ? group.branch.name : '(지점 정보 없음)';
+    branchName.textContent = group.branch ? branchLabel(group.branch) : '(지점 정보 없음)';
     if(group.branch){
       branchName.style.cursor = 'pointer';
       branchName.title = '해당 지점으로 이동';
@@ -3419,7 +3542,7 @@ function renderCleaningWeekMatrix(){
     const dmap = grid.get(branch.id);
     const tr = document.createElement('tr');
     const nameTd = document.createElement('td');
-    nameTd.innerHTML = `<a href="#" style="color:var(--accent-ink);font-weight:700;text-decoration:none;">${esc(branch.name)}</a>`;
+    nameTd.innerHTML = `<a href="#" style="color:var(--accent-ink);font-weight:700;text-decoration:none;">${esc(branchLabel(branch))}</a>`;
     nameTd.querySelector('a').onclick = (e)=>{ e.preventDefault(); goToBranchRooms(branch.id); };
     tr.appendChild(nameTd);
 
@@ -3427,7 +3550,7 @@ function renderCleaningWeekMatrix(){
       const counts = dmap ? dmap.get(d) : null;
       const td = document.createElement('td');
       td.className = 'wk-cell' + (d===today?' wk-today':'') + (counts ? '' : ' wk-empty');
-      td.innerHTML = counts ? `<div class="wk-chips">${chipsHtml(counts, branch.name, d.slice(5))}</div>` : '-';
+      td.innerHTML = counts ? `<div class="wk-chips">${chipsHtml(counts, branchLabel(branch), d.slice(5))}</div>` : '-';
       if(counts){
         td.style.cursor = 'pointer';
         td.onclick = ()=> goToBranchRooms(branch.id);
@@ -3454,7 +3577,7 @@ function renderCleaningCards(){
   const weekAhead = addDaysISO(today, 7);
   const entries = collectCleaningEntries();
   const todayList = entries.filter(x=> !x.date || x.date<=today)
-    .sort((a,b)=> (a.branch?.name||'').localeCompare(b.branch?.name||''));
+    .sort((a,b)=> (a.branch?branchLabel(a.branch):'').localeCompare(b.branch?branchLabel(b.branch):''));
   const futureList = entries.filter(x=> x.date && x.date>today && x.date<=weekAhead)
     .sort((a,b)=> a.date.localeCompare(b.date));
 
@@ -3509,7 +3632,7 @@ function renderTodayCleaningCard(list){
     if(!groupMap.has(key)) groupMap.set(key, { branch: x.branch, entries: [] });
     groupMap.get(key).entries.push(x);
   });
-  const groups = [...groupMap.values()].sort((a,b)=> (a.branch?.name||'').localeCompare(b.branch?.name||''));
+  const groups = [...groupMap.values()].sort((a,b)=> (a.branch?branchLabel(a.branch):'').localeCompare(b.branch?branchLabel(b.branch):''));
 
   groups.forEach(group=>{
     const groupWrap = document.createElement('div');
@@ -3519,13 +3642,13 @@ function renderTodayCleaningCard(list){
     head.className = 'cleaning-branch-head';
     const nameSpan = document.createElement('span');
     nameSpan.className = 'cleaning-branch-name';
-    nameSpan.textContent = group.branch ? group.branch.name : '(지점 정보 없음)';
+    nameSpan.textContent = group.branch ? branchLabel(group.branch) : '(지점 정보 없음)';
     const copyBtn = document.createElement('button');
     copyBtn.className = 'iconbtn';
     copyBtn.innerHTML = '&#10697;';
     copyBtn.title = '이 지점의 청소방·메모를 클립보드에 복사';
     copyBtn.onclick = ()=>{
-      const lines = [`[${group.branch ? group.branch.name : ''} 청소방]`];
+      const lines = [`[${group.branch ? branchLabel(group.branch) : ''} 청소방]`];
       group.entries.forEach(x=>{
         const kind = MAINT_KIND_META[x.type].label;
         lines.push(`${x.room.number}호 (${kind})${x.room.maintenanceMemo ? ' - ' + x.room.maintenanceMemo : ''}`);
@@ -3593,7 +3716,7 @@ function renderCleaningCard(title, list, showDate){
       const kindBadge = maintBadgeHtml(x.type);
       const dateTxt = showDate && x.date ? `<span class="mdate">${x.date}</span>` : '';
       row.innerHTML = `
-        <span class="br">${esc(x.branch ? x.branch.name : '-')}</span>
+        <span class="br">${esc(x.branch ? branchLabel(x.branch) : '-')}</span>
         <span class="rm">${esc(x.room.number)}호</span>
         <span class="kind">${kindBadge}${dateTxt}</span>
       `;
