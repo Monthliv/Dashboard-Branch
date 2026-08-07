@@ -244,6 +244,8 @@
   .resident-flags{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
   .resident-name-row{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:5px; }
   .resident-name-row .nm{ font-weight:700; font-size:13.5px; }
+  .resident-name-row .nm.nm-clickable{ cursor:pointer; }
+  .resident-name-row .nm.nm-clickable:hover{ color:var(--accent-ink); text-decoration:underline; }
   .resident-name-row .acts{ display:flex; gap:5px; flex:none; }
   .badge.tag-new{ background:#F1EFE8; color:var(--ink-soft); border:1px solid var(--line); }
   .badge.tag-ext{ background:#FBF0DD; color:#8A5F14; border:1px solid #E3B25C; }
@@ -282,6 +284,10 @@
   .resident-edit-card input[type=text], .resident-edit-card input[type=tel]{ width:100%; }
   .resident-edit-card .redit-grid2{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px; }
   .resident-edit-card .redit-grid2 select, .resident-edit-card .redit-grid2 input{ width:100%; }
+  .resident-edit-card .redit-field-value{ display:flex; align-items:center; gap:6px; }
+  .resident-edit-card .redit-field-value input, .resident-edit-card .redit-field-value select{ flex:1; width:auto; min-width:0; }
+  .resident-edit-card .redit-readonly-text{ flex:1; min-width:0; font-size:12.5px; font-weight:600; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:6px 0; }
+  .resident-edit-card .redit-readonly-text.empty{ color:var(--st-hold); font-weight:400; }
   .resident-edit-card .redit-inline-row{ display:flex; gap:8px; align-items:flex-end; margin-bottom:8px; }
   .resident-edit-card .redit-inline-row > div:first-child{ flex:1; min-width:0; }
   .resident-edit-card .redit-inline-row input{ width:100%; }
@@ -508,7 +514,7 @@ const STORE_KEY = 'monthliv-state';
 let DB = null;
 let UI = {
   view:'stats', branchId:null, branchTab:'rooms',
-  roomEditMode:{}, residentEditMode:{}, roomSnapshots:{}, residentSnapshots:{}, draftResident:{}, parkingListOpen:{},
+  roomEditMode:{}, residentEditMode:{}, roomSnapshots:{}, residentSnapshots:{}, draftResident:{}, parkingListOpen:{}, residentFieldEdit:{},
   branchEditMode:{}, branchSnapshots:{}, historyOpen:{}, addingBranch:false, addingRoom:false, managingRoom:false,
   tlYear:null, tlMonth:null, roomStatusFilter:'이용중', cleanWeekStart:null, overdueTabKey:null,
   cleanTodayPage:1, cleanFuturePage:1
@@ -1431,18 +1437,15 @@ function renderResidentView(p, room, isSecondary){
   const nm = document.createElement('span');
   nm.className = 'nm';
   nm.textContent = maskViewerName(p.name) || '(이름 미입력)';
-  nameWrap.appendChild(nm);
   if(canEdit()){
-    const editBtn = document.createElement('button');
-    editBtn.className = 'iconbtn';
-    editBtn.innerHTML = '&#9998;';
-    editBtn.title = '입실자 정보 수정';
-    editBtn.onclick = ()=>{
+    nm.classList.add('nm-clickable');
+    nm.title = '클릭하여 입실자 정보 보기/수정';
+    nm.onclick = ()=>{
       UI.residentSnapshots[p.id] = Object.assign({}, p);
       UI.residentEditMode[p.id] = true; render();
     };
-    nameWrap.appendChild(editBtn);
   }
+  nameWrap.appendChild(nm);
   const acts = document.createElement('div');
   acts.className = 'acts';
   if(!isSecondary && p.firstSaveDone && canEdit()){
@@ -1628,9 +1631,11 @@ function renderResidentEditCard(p, isSecondary, isDraft, room){
       p.originalMoveIn = p.moveIn;
       DB.residents.push(p);
       delete UI.draftResident[p.roomId];
+      delete UI.residentFieldEdit[p.id];
       logChange(`${room ? room.number + '호 ' : ''}"${p.name}" 입실자 신규 등록`);
     } else {
       delete UI.residentSnapshots[p.id];
+      delete UI.residentFieldEdit[p.id];
       UI.residentEditMode[p.id] = false;
       logChange(`${room ? room.number + '호 ' : ''}"${p.name}" 입실자 정보 수정`);
     }
@@ -1642,12 +1647,14 @@ function renderResidentEditCard(p, isSecondary, isDraft, room){
     if(isDraft){
       // 아직 저장된 적 없는 초안이므로 그냥 버립니다 (DB에는 존재하지 않음)
       delete UI.draftResident[p.roomId];
+      delete UI.residentFieldEdit[p.id];
       render();
       return;
     }
     const snap = UI.residentSnapshots[p.id];
     if(snap) Object.assign(p, snap);
     delete UI.residentSnapshots[p.id];
+    delete UI.residentFieldEdit[p.id];
     UI.residentEditMode[p.id] = false;
     scheduleSave(); render();
   };
@@ -1656,11 +1663,13 @@ function renderResidentEditCard(p, isSecondary, isDraft, room){
   delBtn.onclick = ()=>{
     if(isDraft){
       delete UI.draftResident[p.roomId];
+      delete UI.residentFieldEdit[p.id];
       render();
       return;
     }
     showConfirm(`${p.name || '이 입실자'} 정보를 삭제할까요?`, ()=>{
       delete UI.residentSnapshots[p.id];
+      delete UI.residentFieldEdit[p.id];
       DB.residents = DB.residents.filter(x=>x.id!==p.id); scheduleSave(); render();
     });
   };
@@ -1668,50 +1677,62 @@ function renderResidentEditCard(p, isSecondary, isDraft, room){
   top.appendChild(acts);
   card.appendChild(top);
 
-  const nameInput = document.createElement('input');
-  nameInput.type = 'text'; nameInput.placeholder = '홍길동'; nameInput.value = p.name;
-  if(!p.name || !p.name.trim()) nameInput.classList.add('invalid');
-  nameInput.addEventListener('input', ()=>{ p.name = nameInput.value; maybeSave(); nameInput.classList.toggle('invalid', !nameInput.value.trim()); });
-  card.appendChild(fullRow(labeledReq('이름', nameInput)));
+  const fieldEdit = UI.residentFieldEdit[p.id] || (UI.residentFieldEdit[p.id] = {
+    name: !p.firstSaveDone, phone: !p.firstSaveDone, channel: !p.firstSaveDone, carNumber: !p.firstSaveDone
+  });
 
-  const phoneInput = document.createElement('input');
-  phoneInput.type = 'tel'; phoneInput.placeholder = '010-0000-0000'; phoneInput.value = p.phone;
-  if(!p.phone || !p.phone.trim()) phoneInput.classList.add('invalid');
-  phoneInput.addEventListener('input', ()=>{ p.phone = phoneInput.value; maybeSave(); phoneInput.classList.toggle('invalid', !phoneInput.value.trim()); });
-  card.appendChild(fullRow(labeledReq('연락처', phoneInput)));
+  card.appendChild(residentFieldRow(fieldEdit, 'name', '이름', true, p.name, ()=>{
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text'; nameInput.placeholder = '홍길동'; nameInput.value = p.name;
+    if(!p.name || !p.name.trim()) nameInput.classList.add('invalid');
+    nameInput.addEventListener('input', ()=>{ p.name = nameInput.value; maybeSave(); nameInput.classList.toggle('invalid', !nameInput.value.trim()); });
+    setTimeout(()=> nameInput.focus(), 0);
+    return nameInput;
+  }));
+
+  card.appendChild(residentFieldRow(fieldEdit, 'phone', '연락처', true, p.phone, ()=>{
+    const phoneInput = document.createElement('input');
+    phoneInput.type = 'tel'; phoneInput.placeholder = '010-0000-0000'; phoneInput.value = p.phone;
+    if(!p.phone || !p.phone.trim()) phoneInput.classList.add('invalid');
+    phoneInput.addEventListener('input', ()=>{ p.phone = phoneInput.value; maybeSave(); phoneInput.classList.toggle('invalid', !phoneInput.value.trim()); });
+    return phoneInput;
+  }));
 
   if(isSecondary){
-    setTimeout(()=>{ if(!p.name) nameInput.focus(); }, 0);
     return card;
   }
 
-  const chSel = document.createElement('select');
-  DB.channelList.forEach(c=>{ const o=document.createElement('option'); o.textContent=c; o.selected=c===p.channel; chSel.appendChild(o); });
-  chSel.addEventListener('change', ()=>{ p.channel = chSel.value; maybeSave(); render(); });
-  card.appendChild(fullRow(labeled('유입채널', chSel)));
+  card.appendChild(residentFieldRow(fieldEdit, 'channel', '유입채널', false, p.channel, ()=>{
+    const chSel = document.createElement('select');
+    DB.channelList.forEach(c=>{ const o=document.createElement('option'); o.textContent=c; o.selected=c===p.channel; chSel.appendChild(o); });
+    chSel.addEventListener('change', ()=>{ p.channel = chSel.value; maybeSave(); render(); });
+    return chSel;
+  }));
 
   const branchForCar = room ? DB.branches.find(b=>b.id===room.branchId) : null;
   const parkingAvailable = !branchForCar || (branchForCar.parkingCapacity||0) > 0;
   if(parkingAvailable){
-    const carInput = document.createElement('input');
-    carInput.type = 'text'; carInput.placeholder = '12가3456'; carInput.value = p.carNumber || '';
-    carInput.addEventListener('change', ()=>{
-      const newVal = carInput.value.trim();
-      const branch = branchForCar;
-      if(newVal && branch && isCurrentlyResiding(p)){
-        const cap = branch.parkingCapacity || 0;
-        const others = branchActiveCarCount(branch.id, p.id);
-        const projected = others + 1;
-        if(projected > cap){
-          showAlert(`"${branch.name}" 지점의 주차 가능 대수(${cap}대)를 초과합니다.\n(현재 이용중 ${others}대 + 이 입실자 1대 = ${projected}대)\n\n차량번호를 비우거나, 지점 정보에서 주차 가능 대수를 먼저 늘려주세요.`);
-          carInput.value = p.carNumber || '';
-          return;
+    card.appendChild(residentFieldRow(fieldEdit, 'carNumber', '차량 번호 (선택)', false, p.carNumber, ()=>{
+      const carInput = document.createElement('input');
+      carInput.type = 'text'; carInput.placeholder = '12가3456'; carInput.value = p.carNumber || '';
+      carInput.addEventListener('change', ()=>{
+        const newVal = carInput.value.trim();
+        const branch = branchForCar;
+        if(newVal && branch && isCurrentlyResiding(p)){
+          const cap = branch.parkingCapacity || 0;
+          const others = branchActiveCarCount(branch.id, p.id);
+          const projected = others + 1;
+          if(projected > cap){
+            showAlert(`"${branch.name}" 지점의 주차 가능 대수(${cap}대)를 초과합니다.\n(현재 이용중 ${others}대 + 이 입실자 1대 = ${projected}대)\n\n차량번호를 비우거나, 지점 정보에서 주차 가능 대수를 먼저 늘려주세요.`);
+            carInput.value = p.carNumber || '';
+            return;
+          }
         }
-      }
-      p.carNumber = carInput.value;
-      maybeSave();
-    });
-    card.appendChild(fullRow(labeled('차량 번호 (선택)', carInput)));
+        p.carNumber = carInput.value;
+        maybeSave();
+      });
+      return carInput;
+    }));
   }
 
   const inDateRow = document.createElement('div');
@@ -1807,7 +1828,6 @@ function renderResidentEditCard(p, isSecondary, isDraft, room){
     }
   }
 
-  setTimeout(()=>{ if(!p.name) nameInput.focus(); }, 0);
   return card;
 }
 
@@ -1853,6 +1873,36 @@ function fullRow(elm){
   wrap.style.marginBottom = '8px';
   wrap.appendChild(elm);
   return wrap;
+}
+/* 읽기전용 텍스트 + 수정 아이콘 <-> 실제 입력요소를 토글하는 필드 행.
+   fieldEdit[key]가 true면 buildInput()이 만든 입력요소를, 아니면 읽기전용 텍스트를 보여준다. */
+function residentFieldRow(fieldEdit, key, label, required, valueText, buildInput){
+  const content = document.createElement('div');
+  content.className = 'redit-field-value';
+  if(fieldEdit[key]){
+    const input = buildInput();
+    content.appendChild(input);
+    const doneBtn = document.createElement('button');
+    doneBtn.type = 'button';
+    doneBtn.className = 'iconbtn active';
+    doneBtn.innerHTML = '&#10003;';
+    doneBtn.title = '완료';
+    doneBtn.onclick = ()=>{ fieldEdit[key] = false; render(); };
+    content.appendChild(doneBtn);
+  } else {
+    const text = document.createElement('span');
+    text.className = 'redit-readonly-text' + (valueText ? '' : ' empty');
+    text.textContent = valueText || '미입력';
+    content.appendChild(text);
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'iconbtn';
+    editBtn.innerHTML = '&#9998;';
+    editBtn.title = `${label} 수정`;
+    editBtn.onclick = ()=>{ fieldEdit[key] = true; render(); };
+    content.appendChild(editBtn);
+  }
+  return fullRow((required ? labeledReq : labeled)(label, content));
 }
 function residentMissingFields(p, isSecondary){
   const missing = [];
