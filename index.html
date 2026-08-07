@@ -952,8 +952,24 @@ function renderBranchInfoBar(branch){
     });
     namewrap.appendChild(nameInput);
     titleCol.appendChild(namewrap);
+    const addressInput = document.createElement('input');
+    addressInput.type = 'text'; addressInput.placeholder = '주소 (예: 서울시 성동구 ...)'; addressInput.value = branch.address || '';
+    addressInput.style.marginTop = '6px';
+    addressInput.addEventListener('input', ()=>{
+      logChange(`"${branch.name}" 주소 수정`);
+      branch.address = addressInput.value; scheduleSave();
+    });
+    titleCol.appendChild(addressInput);
   } else {
-    titleCol.appendChild(el('div', 'branch-view-text title', branch.name));
+    const titleDiv = document.createElement('div'); titleDiv.className = 'branch-view-text title';
+    titleDiv.textContent = branch.name;
+    if(branch.address){
+      const addrSpan = document.createElement('span');
+      addrSpan.className = 'branch-address';
+      addrSpan.textContent = branch.address;
+      titleDiv.appendChild(addrSpan);
+    }
+    titleCol.appendChild(titleDiv);
   }
   bar.appendChild(titleCol);
 
@@ -1059,7 +1075,6 @@ function renderBranchInfoBar(branch){
   }
 
   const infoRows = [
-    { label:'주소', ...textField('address', '예: 서울시 성동구 ...', '주소') },
     { label:'주차', view: parkingView, edit: parkingEdit },
     { label:'엘리베이터', ...textField('elevator', '예: 있음', '엘리베이터 정보') },
     { label:'난방방식', ...textField('heatingType', '예: 개별난방', '난방방식') },
@@ -2217,6 +2232,7 @@ const BRANCH_NAME_ALIASES = {
 };
 function cleanKeyLoose(s){ return String(s||'').replace(/[\u200B-\u200D\uFEFF]/g,'').trim(); }
 function normalizeRoomNo(s){ const c = cleanKeyLoose(s).toLowerCase(); return /^\d+$/.test(c) ? String(parseInt(c,10)) : c; }
+function roomNumberPrefix(s){ const m = cleanKeyLoose(s).match(/^\d+/); return m ? String(parseInt(m[0],10)) : null; }
 
 function renderResidentResyncPanel(){
   const box = document.createElement('div');
@@ -2528,7 +2544,12 @@ function parseAndImportContracts(text, onImported){
 
     const resolvedBranchName = BRANCH_NAME_ALIASES[branchRaw] || branchRaw;
     const branch = DB.branches.find(b=> cleanKeyLoose(b.name).toLowerCase()===resolvedBranchName.toLowerCase());
-    const room = branch ? DB.rooms.find(r=> r.branchId===branch.id && normalizeRoomNo(r.number)===normalizeRoomNo(roomRaw)) : null;
+    let room = branch ? DB.rooms.find(r=> r.branchId===branch.id && normalizeRoomNo(r.number)===normalizeRoomNo(roomRaw)) : null;
+    if(!room && branch){
+      // 방이름에 호실번호 외의 상세 명칭이 붙어 있어도(예: "304 그레이스"), 지점명과 호실번호 앞자리 숫자만 일치하면 매칭
+      const prefix = roomNumberPrefix(roomRaw);
+      if(prefix) room = DB.rooms.find(r=> r.branchId===branch.id && roomNumberPrefix(r.number)===prefix);
+    }
     if(!room){
       unmatched.push(`[${i+1}행] ${branchRaw} ${roomRaw}호 (${!branch ? '지점' : '호실'} 못 찾음)`);
       continue;
