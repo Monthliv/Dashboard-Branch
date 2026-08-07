@@ -284,9 +284,7 @@
   .resident-edit-card input[type=text], .resident-edit-card input[type=tel]{ width:100%; }
   .resident-edit-card .redit-grid2{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px; }
   .resident-edit-card .redit-grid2 select, .resident-edit-card .redit-grid2 input{ width:100%; }
-  .resident-edit-card .redit-field-value{ display:flex; align-items:center; gap:6px; }
-  .resident-edit-card .redit-field-value input, .resident-edit-card .redit-field-value select{ flex:1; width:auto; min-width:0; }
-  .resident-edit-card .redit-readonly-text{ flex:1; min-width:0; font-size:12.5px; font-weight:600; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:6px 0; }
+  .resident-edit-card .redit-readonly-text{ font-size:12.5px; font-weight:600; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:6px 0; }
   .resident-edit-card .redit-readonly-text.empty{ color:var(--st-hold); font-weight:400; }
   .resident-edit-card .redit-inline-row{ display:flex; gap:8px; align-items:flex-end; margin-bottom:8px; }
   .resident-edit-card .redit-inline-row > div:first-child{ flex:1; min-width:0; }
@@ -1608,9 +1606,25 @@ function renderResidentEditCard(p, isSecondary, isDraft, room){
   card.className = 'resident-edit-card';
   const maybeSave = ()=>{ if(!isDraft) scheduleSave(); };
 
+  if(UI.residentFieldEdit[p.id] === undefined) UI.residentFieldEdit[p.id] = !p.firstSaveDone;
+  const identityOpen = UI.residentFieldEdit[p.id];
+
   const top = document.createElement('div');
   top.className = 'redit-top';
-  top.innerHTML = `<span class="redit-title">${isSecondary ? '2번째 입실자' : '입실자 정보'}</span>`;
+  const titleWrap = document.createElement('div');
+  titleWrap.style.cssText = 'display:flex; align-items:center; gap:6px;';
+  const titleSpan = document.createElement('span');
+  titleSpan.className = 'redit-title';
+  titleSpan.textContent = isSecondary ? '2번째 입실자' : '입실자 정보';
+  titleWrap.appendChild(titleSpan);
+  const infoEditBtn = document.createElement('button');
+  infoEditBtn.type = 'button';
+  infoEditBtn.className = 'iconbtn' + (identityOpen ? ' active' : '');
+  infoEditBtn.innerHTML = identityOpen ? '&#10003;' : '&#9998;';
+  infoEditBtn.title = identityOpen ? '기본 정보 입력 완료' : '기본 정보 수정';
+  infoEditBtn.onclick = ()=>{ UI.residentFieldEdit[p.id] = !identityOpen; render(); };
+  titleWrap.appendChild(infoEditBtn);
+  top.appendChild(titleWrap);
   const acts = document.createElement('div');
   acts.style.cssText = 'display:flex;gap:5px;';
   const doneBtn = document.createElement('button');
@@ -1677,42 +1691,47 @@ function renderResidentEditCard(p, isSecondary, isDraft, room){
   top.appendChild(acts);
   card.appendChild(top);
 
-  const fieldEdit = UI.residentFieldEdit[p.id] || (UI.residentFieldEdit[p.id] = {
-    name: !p.firstSaveDone, phone: !p.firstSaveDone, channel: !p.firstSaveDone, carNumber: !p.firstSaveDone
-  });
+  const identityGrid = document.createElement('div');
+  identityGrid.className = 'redit-grid2';
 
-  card.appendChild(residentFieldRow(fieldEdit, 'name', '이름', true, p.name, ()=>{
+  function identityCell(label, required, valueText, buildInput){
+    const content = identityOpen ? buildInput() : el('div', 'redit-readonly-text' + (valueText ? '' : ' empty'), valueText || '미입력');
+    identityGrid.appendChild((required ? labeledReq : labeled)(label, content));
+  }
+
+  identityCell('이름', true, p.name, ()=>{
     const nameInput = document.createElement('input');
     nameInput.type = 'text'; nameInput.placeholder = '홍길동'; nameInput.value = p.name;
     if(!p.name || !p.name.trim()) nameInput.classList.add('invalid');
     nameInput.addEventListener('input', ()=>{ p.name = nameInput.value; maybeSave(); nameInput.classList.toggle('invalid', !nameInput.value.trim()); });
-    setTimeout(()=> nameInput.focus(), 0);
+    if(!p.name) setTimeout(()=> nameInput.focus(), 0);
     return nameInput;
-  }));
+  });
 
-  card.appendChild(residentFieldRow(fieldEdit, 'phone', '연락처', true, p.phone, ()=>{
+  identityCell('연락처', true, p.phone, ()=>{
     const phoneInput = document.createElement('input');
     phoneInput.type = 'tel'; phoneInput.placeholder = '010-0000-0000'; phoneInput.value = p.phone;
     if(!p.phone || !p.phone.trim()) phoneInput.classList.add('invalid');
     phoneInput.addEventListener('input', ()=>{ p.phone = phoneInput.value; maybeSave(); phoneInput.classList.toggle('invalid', !phoneInput.value.trim()); });
     return phoneInput;
-  }));
+  });
 
   if(isSecondary){
+    card.appendChild(identityGrid);
     return card;
   }
 
-  card.appendChild(residentFieldRow(fieldEdit, 'channel', '유입채널', false, p.channel, ()=>{
+  identityCell('유입채널', false, p.channel, ()=>{
     const chSel = document.createElement('select');
     DB.channelList.forEach(c=>{ const o=document.createElement('option'); o.textContent=c; o.selected=c===p.channel; chSel.appendChild(o); });
     chSel.addEventListener('change', ()=>{ p.channel = chSel.value; maybeSave(); render(); });
     return chSel;
-  }));
+  });
 
   const branchForCar = room ? DB.branches.find(b=>b.id===room.branchId) : null;
   const parkingAvailable = !branchForCar || (branchForCar.parkingCapacity||0) > 0;
   if(parkingAvailable){
-    card.appendChild(residentFieldRow(fieldEdit, 'carNumber', '차량 번호 (선택)', false, p.carNumber, ()=>{
+    identityCell('차량 번호 (선택)', false, p.carNumber, ()=>{
       const carInput = document.createElement('input');
       carInput.type = 'text'; carInput.placeholder = '12가3456'; carInput.value = p.carNumber || '';
       carInput.addEventListener('change', ()=>{
@@ -1732,8 +1751,10 @@ function renderResidentEditCard(p, isSecondary, isDraft, room){
         maybeSave();
       });
       return carInput;
-    }));
+    });
   }
+
+  card.appendChild(identityGrid);
 
   const inDateRow = document.createElement('div');
   inDateRow.className = 'redit-inline-row';
@@ -1873,36 +1894,6 @@ function fullRow(elm){
   wrap.style.marginBottom = '8px';
   wrap.appendChild(elm);
   return wrap;
-}
-/* 읽기전용 텍스트 + 수정 아이콘 <-> 실제 입력요소를 토글하는 필드 행.
-   fieldEdit[key]가 true면 buildInput()이 만든 입력요소를, 아니면 읽기전용 텍스트를 보여준다. */
-function residentFieldRow(fieldEdit, key, label, required, valueText, buildInput){
-  const content = document.createElement('div');
-  content.className = 'redit-field-value';
-  if(fieldEdit[key]){
-    const input = buildInput();
-    content.appendChild(input);
-    const doneBtn = document.createElement('button');
-    doneBtn.type = 'button';
-    doneBtn.className = 'iconbtn active';
-    doneBtn.innerHTML = '&#10003;';
-    doneBtn.title = '완료';
-    doneBtn.onclick = ()=>{ fieldEdit[key] = false; render(); };
-    content.appendChild(doneBtn);
-  } else {
-    const text = document.createElement('span');
-    text.className = 'redit-readonly-text' + (valueText ? '' : ' empty');
-    text.textContent = valueText || '미입력';
-    content.appendChild(text);
-    const editBtn = document.createElement('button');
-    editBtn.type = 'button';
-    editBtn.className = 'iconbtn';
-    editBtn.innerHTML = '&#9998;';
-    editBtn.title = `${label} 수정`;
-    editBtn.onclick = ()=>{ fieldEdit[key] = true; render(); };
-    content.appendChild(editBtn);
-  }
-  return fullRow((required ? labeledReq : labeled)(label, content));
 }
 function residentMissingFields(p, isSecondary){
   const missing = [];
