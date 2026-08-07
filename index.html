@@ -2533,8 +2533,15 @@ function parseAndImportContracts(text, onImported){
     return;
   }
 
+  const contractSignature = (c)=> [
+    c.roomId, c.contractDate, c.contractPeriod, c.contractor, c.resident, c.rent, c.paymentAmount,
+    c.contractStatus, c.contractType, c.contractCategory, c.paymentCategory, c.deposit, c.depositNote, c.contractContent
+  ].join('|');
+  const existingSigs = new Set(DB.contracts.map(contractSignature));
+
   const newContracts = [];
   const unmatched = [];
+  let duplicateCount = 0;
   for(let i=1; i<lines.length; i++){
     const cells = lines[i].split('\t');
     const get = (key)=> idx[key]!=null ? (cells[idx[key]]||'').trim() : '';
@@ -2555,29 +2562,39 @@ function parseAndImportContracts(text, onImported){
       continue;
     }
 
-    newContracts.push({
+    const candidate = {
       id: uid('ct'), roomId: room.id,
       contractDate: get('contractDate'), contractPeriod: get('contractPeriod'), district: get('district'),
       branchName: branchRaw, roomName: roomRaw, contractor: get('contractor'), resident: get('resident'),
       rent: get('rent'), paymentAmount: get('paymentAmount'), contractStatus: get('contractStatus'),
       contractType: get('contractType'), contractCategory: get('contractCategory'), paymentCategory: get('paymentCategory'),
       deposit: get('deposit'), depositNote: get('depositNote'), contractContent: get('contractContent')
-    });
+    };
+    const sig = contractSignature(candidate);
+    if(existingSigs.has(sig)){ duplicateCount++; continue; }
+    existingSigs.add(sig);
+    newContracts.push(candidate);
   }
 
   if(newContracts.length===0){
-    showAlert(`가져올 수 있는 계약 데이터가 없습니다.` + (unmatched.length ? `\n\n${unmatched.slice(0,20).join('\n')}` : ''));
+    showAlert(`가져올 수 있는 계약 데이터가 없습니다.`
+      + (duplicateCount ? `\n(이미 등록된 중복 데이터 ${duplicateCount}건 제외)` : '')
+      + (unmatched.length ? `\n\n${unmatched.slice(0,20).join('\n')}` : ''));
     return;
   }
 
   showConfirm(
-    `계약 데이터 ${newContracts.length}건을 가져올까요?` + (unmatched.length ? `\n(호실을 찾지 못한 ${unmatched.length}건은 제외됩니다)` : ''),
+    `계약 데이터 ${newContracts.length}건을 가져올까요?`
+      + (duplicateCount ? `\n(이미 등록된 중복 ${duplicateCount}건은 제외됩니다)` : '')
+      + (unmatched.length ? `\n(호실을 찾지 못한 ${unmatched.length}건은 제외됩니다)` : ''),
     ()=>{
       DB.contracts.push(...newContracts);
-      logChange(`계약 데이터 붙여넣기: ${newContracts.length}건 추가${unmatched.length ? ` (미매칭 ${unmatched.length}건)` : ''}`);
+      logChange(`계약 데이터 붙여넣기: ${newContracts.length}건 추가${duplicateCount ? ` (중복 ${duplicateCount}건 제외)` : ''}${unmatched.length ? ` (미매칭 ${unmatched.length}건)` : ''}`);
       scheduleSave(); render();
       onImported();
-      showAlert(`${newContracts.length}건을 가져왔습니다.` + (unmatched.length ? `\n\n호실을 찾지 못한 항목:\n${unmatched.slice(0,20).join('\n')}${unmatched.length>20 ? `\n...외 ${unmatched.length-20}건` : ''}` : ''));
+      showAlert(`${newContracts.length}건을 가져왔습니다.`
+        + (duplicateCount ? `\n이미 등록되어 제외된 중복 데이터: ${duplicateCount}건` : '')
+        + (unmatched.length ? `\n\n호실을 찾지 못한 항목:\n${unmatched.slice(0,20).join('\n')}${unmatched.length>20 ? `\n...외 ${unmatched.length-20}건` : ''}` : ''));
     }
   );
 }
