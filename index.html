@@ -58,6 +58,23 @@
     background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><path d='M0 0l5 6 5-6z' fill='%235B6B72'/></svg>");
     background-repeat:no-repeat; background-position:right 12px center;
   }
+  .header-search{ position:relative; flex:1 1 260px; max-width:360px; }
+  .header-search input{
+    width:100%; padding:9px 12px; font-family:inherit; font-size:13px;
+    border:1px solid var(--line); border-radius:10px; background:#fff; color:var(--ink);
+  }
+  .header-search input:focus{ outline:none; border-color:var(--accent); }
+  .header-search-results{
+    position:absolute; top:calc(100% + 6px); left:0; right:0; background:#fff;
+    border:1px solid var(--line); border-radius:10px; box-shadow:0 8px 24px rgba(0,0,0,.12);
+    max-height:360px; overflow-y:auto; z-index:30;
+  }
+  .header-search-item{ display:flex; flex-direction:column; gap:2px; padding:9px 12px; cursor:pointer; border-bottom:1px solid var(--line); }
+  .header-search-item:last-child{ border-bottom:none; }
+  .header-search-item:hover{ background:var(--paper); }
+  .header-search-item .hs-top{ display:flex; justify-content:space-between; align-items:center; gap:8px; font-size:13px; font-weight:700; }
+  .header-search-item .hs-sub{ font-size:11.5px; color:var(--ink-soft); }
+  .header-search-empty{ padding:12px; font-size:12.5px; color:var(--ink-soft); text-align:center; }
   .btn{
     font-family:inherit; font-size:12.5px; font-weight:600; cursor:pointer;
     border-radius:8px; padding:7px 12px; border:1px solid var(--line); background:var(--panel); color:var(--ink);
@@ -504,6 +521,10 @@
       <div class="branch-picker">
         <select id="branchSelect"></select>
       </div>
+      <div class="header-search" id="headerSearchWrap">
+        <input type="text" id="globalSearchInput" placeholder="이름·연락처·차량번호·호실·지점 검색" autocomplete="off">
+        <div class="header-search-results" id="globalSearchResults" style="display:none;"></div>
+      </div>
       <div style="display:flex; gap:8px; align-items:center;">
         <span class="sub" id="loggedInAs"></span>
         <button class="btn small" id="cleaningBtn">청소 관리</button>
@@ -797,6 +818,64 @@ function scrollToRoomCard(room){
     el.classList.add('flash-highlight');
     setTimeout(()=> el.classList.remove('flash-highlight'), 2200);
   }, 60);
+}
+
+/* ---------------- 상단 통합 검색 ---------------- */
+function buildGlobalSearchIndex(){
+  return DB.residents.map(p=>{
+    const room = DB.rooms.find(r=>r.id===p.roomId);
+    if(!room) return null;
+    const branch = DB.branches.find(b=>b.id===room.branchId);
+    if(!branch || !hasBranchAccess(branch.id)) return null;
+    return { p, room, branch };
+  }).filter(Boolean);
+}
+function globalSearchHaystack(item){
+  const { p, room, branch } = item;
+  const phoneDigits = (p.phone||'').replace(/\D/g,'');
+  return [p.name, p.phone, phoneDigits, p.carNumber, room.number, branch.name, branch.shortName]
+    .filter(Boolean).join(' ').toLowerCase();
+}
+function runGlobalSearch(query){
+  const q = query.trim().toLowerCase();
+  if(!q) return [];
+  return buildGlobalSearchIndex().filter(item=> globalSearchHaystack(item).includes(q)).slice(0, 20);
+}
+function renderGlobalSearchResults(query){
+  const box = document.getElementById('globalSearchResults');
+  if(!box) return;
+  const q = query.trim();
+  if(!q){ box.style.display = 'none'; box.innerHTML = ''; return; }
+
+  const results = runGlobalSearch(q);
+  box.innerHTML = '';
+  if(results.length===0){
+    box.appendChild(el('div', 'header-search-empty', '검색 결과가 없습니다.'));
+  } else {
+    results.forEach(({ p, room, branch })=>{
+      const row = document.createElement('div');
+      row.className = 'header-search-item';
+
+      const top = document.createElement('div'); top.className = 'hs-top';
+      top.appendChild(el('span', null, maskViewerName(p.name) || '이름 미입력'));
+      const isUpcoming = computeResStatus(p) === '입실예정';
+      top.appendChild(el('span', 'badge' + (isUpcoming ? ' muted' : ''), isUpcoming ? '입실예정' : '입실중'));
+      row.appendChild(top);
+
+      row.appendChild(el('div', 'hs-sub', `${p.phone || '연락처 미입력'} · ${branchLabel(branch)} ${room.number}호`));
+
+      row.addEventListener('click', ()=>{
+        UI.view = 'branch';
+        UI.branchId = branch.id;
+        scrollToRoomCard(room);
+        const input = document.getElementById('globalSearchInput');
+        if(input) input.value = '';
+        box.style.display = 'none'; box.innerHTML = '';
+      });
+      box.appendChild(row);
+    });
+  }
+  box.style.display = '';
 }
 
 function renderOverdueBanner(branch){
@@ -4362,6 +4441,23 @@ document.getElementById('logoutBtn').addEventListener('click', ()=>{
 });
 document.getElementById('changePwBtn').addEventListener('click', showChangePasswordModal);
 document.getElementById('homeLink').addEventListener('click', ()=>{ UI.view = 'stats'; render(); });
+
+(function(){
+  const searchInput = document.getElementById('globalSearchInput');
+  const searchWrap = document.getElementById('headerSearchWrap');
+  searchInput.addEventListener('input', ()=> renderGlobalSearchResults(searchInput.value));
+  searchInput.addEventListener('focus', ()=>{ if(searchInput.value.trim()) renderGlobalSearchResults(searchInput.value); });
+  searchInput.addEventListener('keydown', (e)=>{
+    if(e.key === 'Escape'){
+      searchInput.value = '';
+      document.getElementById('globalSearchResults').style.display = 'none';
+      searchInput.blur();
+    }
+  });
+  document.addEventListener('click', (e)=>{
+    if(!searchWrap.contains(e.target)) document.getElementById('globalSearchResults').style.display = 'none';
+  });
+})();
 
 function showChangePasswordModal(){
   const overlay = document.createElement('div');
