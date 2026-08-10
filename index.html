@@ -180,7 +180,8 @@
   }
   .branch-order-row.dragging{ opacity:.4; }
   .branch-order-handle{ color:var(--ink-soft); font-size:14px; }
-  .branch-order-name{ font-weight:700; font-size:13.5px; flex:1; }
+  .branch-order-name{ font-weight:700; font-size:13.5px; flex:1; cursor:pointer; }
+  .branch-order-name:hover{ color:var(--accent-ink); text-decoration:underline; }
   .admin-add-form .fld{ display:flex; flex-direction:column; }
   .admin-add-form input, .admin-add-form select, .admin-add-form textarea{ width:100%; }
   .admin-add-form .btn-row{ display:flex; gap:8px; }
@@ -243,6 +244,7 @@
     background:#fff; color:var(--ink-soft); cursor:pointer; white-space:nowrap; flex:none;
   }
   .history-btn:hover, .history-btn.active{ border-color:var(--accent); color:var(--accent-ink); background:var(--accent-soft); }
+  .history-btn.contract-mismatch{ border-color:var(--st-hold); color:var(--st-hold); background:var(--st-hold-bg); animation:overduePulse 1.8s ease-in-out infinite; }
   .history-panel{ margin:0 14px 10px; background:#F4F1E9; border-radius:8px; padding:8px 10px; }
   .history-entry{ padding:6px 0; border-bottom:1px dashed #E1DCCF; }
   .history-entry:last-child{ border-bottom:none; }
@@ -337,7 +339,7 @@
   .tl-daycell{ border-right:1px solid #EFEBE0; }
   .tl-headrow .tl-daycell{ display:flex; align-items:center; justify-content:center; font-size:10px; color:var(--ink-soft); font-family:'JetBrains Mono',monospace; }
   .tl-daycell.weekend{ background:#FBF8F1; }
-  .tl-bar{ position:absolute; top:8px; height:28px; border-radius:7px; display:flex; align-items:center; padding:0 8px; font-size:11px; font-weight:700; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tl-bar{ position:absolute; top:8px; height:28px; border-radius:7px; display:flex; align-items:center; padding:0 8px; font-size:11px; font-weight:700; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; border-left:2px solid var(--paper); }
   .tl-bar .tl-bar-name{ font-weight:700; flex:none; }
   .tl-bar .tl-bar-memo{ font-weight:400; opacity:.9; margin-left:5px; overflow:hidden; text-overflow:ellipsis; }
 
@@ -348,6 +350,8 @@
   .stat-section{ background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px; margin-bottom:16px; }
   .stat-section h3{ margin:0 0 12px; font-size:13px; }
   .cleaning-cards-grid{ display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
+  .upcoming-cards-grid{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; margin-bottom:16px; }
+  .cleaning-row .upcoming-name{ font-size:11.5px; font-weight:600; color:var(--ink); }
   .cleaning-card h3{ display:flex; align-items:center; gap:8px; }
   .cleaning-card .cnt-badge{ font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:700; background:var(--accent-soft); color:var(--accent-ink); padding:2px 8px; border-radius:20px; }
   .overdue-stats-card{ border-color:var(--st-hold); }
@@ -473,6 +477,7 @@
 
   @media (max-width: 640px){
     .cleaning-cards-grid{ grid-template-columns:1fr; }
+    .upcoming-cards-grid{ grid-template-columns:1fr; }
     .cal-legend{ gap:8px; }
   }
 </style>
@@ -916,47 +921,62 @@ function renderOverdueBanner(branch){
   return box;
 }
 
-function renderBranchCleaningBanner(branch){
-  const rooms = DB.rooms.filter(r=> r.branchId===branch.id && roomMaintKind(r));
-  if(rooms.length===0) return null;
-
+const UPCOMING_SOON_DAYS = 5;
+function renderBranchUpcomingCards(branch){
   const today = todayISO();
-  const todayRooms = rooms.filter(r=> !r.maintenanceDate || r.maintenanceDate<=today)
-    .sort((a,b)=> a.number.localeCompare(b.number,'ko',{numeric:true}));
-  const futureRooms = rooms.filter(r=> r.maintenanceDate && r.maintenanceDate>today)
-    .sort((a,b)=> a.maintenanceDate.localeCompare(b.maintenanceDate));
+  const soonEnd = addDaysISO(today, UPCOMING_SOON_DAYS);
+  const rooms = DB.rooms.filter(r=>r.branchId===branch.id);
+  const roomIds = new Set(rooms.map(r=>r.id));
 
-  function card(title, list, showDate){
+  const moveInItems = DB.residents
+    .filter(p=> roomIds.has(p.roomId) && computeResStatus(p)==='입실예정' && p.moveIn && p.moveIn<=soonEnd)
+    .map(p=> ({ room: rooms.find(r=>r.id===p.roomId), date: p.moveIn, name: maskViewerName(p.name) || '이름 미입력' }))
+    .sort((a,b)=> a.date.localeCompare(b.date));
+
+  const moveOutItems = DB.residents
+    .filter(p=> roomIds.has(p.roomId) && p.moveOut && p.moveOut>=today && p.moveOut<=soonEnd)
+    .map(p=> ({ room: rooms.find(r=>r.id===p.roomId), date: p.moveOut, name: maskViewerName(p.name) || '이름 미입력' }))
+    .sort((a,b)=> a.date.localeCompare(b.date));
+
+  const contractEndItems = [];
+  rooms.forEach(room=>{
+    const segments = roomContractSegments(room);
+    if(segments.length===0) return;
+    const latest = segments[segments.length-1];
+    if(latest.end>=today && latest.end<=soonEnd){
+      contractEndItems.push({ room, date: latest.end, name: maskViewerName(latest.contract.contractor || latest.contract.resident) || '계약자 미입력' });
+    }
+  });
+  contractEndItems.sort((a,b)=> a.date.localeCompare(b.date));
+
+  function card(title, items){
     const box = document.createElement('div');
     box.className = 'stat-section cleaning-card';
-    box.innerHTML = `<h3>${title} <span class="cnt-badge">${list.length}</span></h3>`;
-    if(list.length===0){
+    box.innerHTML = `<h3>${title} <span class="cnt-badge">${items.length}</span></h3>`;
+    if(items.length===0){
       box.appendChild(el('div','cleaning-empty','해당하는 호실이 없습니다.'));
       return box;
     }
-    list.forEach(room=>{
+    items.forEach(item=>{
       const entry = document.createElement('div');
       entry.className = 'cleaning-entry';
       const row = document.createElement('div');
       row.className = 'cleaning-row';
-      const dateTxt = showDate && room.maintenanceDate ? `<span class="mdate">${room.maintenanceDate.slice(5)}</span>` : '';
-      row.innerHTML = `<span class="rm">${esc(room.number)}호</span><span class="kind">${maintBadgeHtml(roomMaintKind(room))}${dateTxt}</span>`;
+      row.innerHTML = `<span class="rm">${esc(item.room.number)}호</span><span class="kind"><span class="upcoming-name">${esc(item.name)}</span><span class="mdate">${esc(item.date.slice(5))}</span></span>`;
       row.style.cursor = 'pointer';
       row.title = '클릭 시 호실로 이동';
-      row.onclick = ()=> scrollToRoomCard(room);
+      row.onclick = ()=> scrollToRoomCard(item.room);
       entry.appendChild(row);
-      if(room.maintenanceMemo){
-        entry.appendChild(el('div','cleaning-memo', room.maintenanceMemo));
-      }
       box.appendChild(entry);
     });
     return box;
   }
 
   const wrap = document.createElement('div');
-  wrap.className = 'cleaning-cards-grid';
-  wrap.appendChild(card('오늘 청소방', todayRooms, false));
-  wrap.appendChild(card('청소 예정방', futureRooms, true));
+  wrap.className = 'upcoming-cards-grid';
+  wrap.appendChild(card(`입실예정 (${UPCOMING_SOON_DAYS}일 이내)`, moveInItems));
+  wrap.appendChild(card(`계약만료 (${UPCOMING_SOON_DAYS}일 이내)`, contractEndItems));
+  wrap.appendChild(card(`퇴실예정 (${UPCOMING_SOON_DAYS}일 이내)`, moveOutItems));
   return wrap;
 }
 
@@ -972,8 +992,7 @@ function renderBranchView(){
   const overdueBanner = renderOverdueBanner(branch);
   if(overdueBanner) wrap.appendChild(overdueBanner);
 
-  const cleaningBanner = renderBranchCleaningBanner(branch);
-  if(cleaningBanner) wrap.appendChild(cleaningBanner);
+  wrap.appendChild(renderBranchUpcomingCards(branch));
 
   const subnav = document.createElement('div');
   subnav.className = 'subnav';
@@ -1159,7 +1178,9 @@ function renderBranchInfoBar(branch){
     { label:'난방방식', ...textField('heatingType', '예: 개별난방', '난방방식') },
     { label:'헤어드라이기', ...textField('hairDryer', '예: 있음', '헤어드라이기 정보') },
     { label:'청소비', ...feeField('cleaningFee', '예: 50000', '청소비') },
-    { label:'2인 추가금', ...feeField('doubleOccupancyFee', '예: 100000', '2인 추가금') }
+    { label:'2인 추가금', ...feeField('doubleOccupancyFee', '예: 100000', '2인 추가금') },
+    { label:'공용 주방 위치', ...textField('sharedKitchenLocation', '예: 2층 복도 끝', '공용 주방 위치') },
+    { label:'종량제봉투 보관위치', ...textField('trashBagLocation', '예: 1층 관리실', '종량제봉투 보관위치') }
   ];
 
   const infoCol = document.createElement('div'); infoCol.className = 'col';
@@ -1492,9 +1513,12 @@ function renderRoomCard(room, sectionStatus){
   historyBtn.onclick = ()=>{ UI.historyOpen[room.id] = !historyOpen; render(); };
   header.querySelector('.rc-header-badges').prepend(historyBtn);
   const contractBtn = document.createElement('button');
-  contractBtn.className = 'history-btn';
+  const contractMismatch = contractEndDateMismatch(room);
+  contractBtn.className = 'history-btn' + (contractMismatch ? ' contract-mismatch' : '');
   contractBtn.textContent = '계약현황';
-  contractBtn.title = '계약 이력 보기';
+  contractBtn.title = contractMismatch
+    ? '최근 계약의 계약종료일과 입실자의 퇴실예정일이 달라요. 계약 정보를 확인해주세요.'
+    : '계약 이력 보기';
   contractBtn.onclick = ()=> showContractHistoryModal(room);
   header.querySelector('.rc-header-badges').prepend(contractBtn);
   const pencil = document.createElement('button');
@@ -2153,7 +2177,7 @@ function renderTimelineSection(branch){
       <div class="m-label">${UI.tlYear}년 ${UI.tlMonth+1}월</div>
       <button class="btn small" id="tlNext">▶</button>
     </div>
-    <div class="sub" style="font-size:11.5px;color:var(--ink-soft);">막대 = 입실기간 · 라벨만 있는 행은 현재 입실자 없음</div>
+    <div class="sub" style="font-size:11.5px;color:var(--ink-soft);">막대 = 계약현황 등록 시 계약기간, 미등록 시 입실기간 · 회색 막대는 이전 계약(퇴실) · 라벨만 있는 행은 현재 입실자 없음</div>
   `;
   wrap.appendChild(toolbar);
 
@@ -2161,7 +2185,7 @@ function renderTimelineSection(branch){
   tlLegend.className = 'tl-legend';
   tlLegend.innerHTML = TIMELINE_BAR_STATUSES.map(m=>
     `<span class="badge" style="background:${m.bg};color:${m.fg}"><span class="dot" style="background:${m.fg}"></span>${m.key}</span>`
-  ).join('');
+  ).join('') + `<span class="badge" style="background:var(--st-vacant-bg);color:var(--st-vacant);"><span class="dot" style="background:var(--st-vacant);"></span>퇴실(과거 계약)</span>`;
   wrap.appendChild(tlLegend);
 
   const monthStart = new Date(UI.tlYear, UI.tlMonth, 1);
@@ -2201,13 +2225,57 @@ function renderTimelineSection(branch){
     gridWrap.appendChild(none);
   }
 
+  function buildDayCells(){
+    const days = document.createElement('div');
+    days.className = 'tl-days';
+    days.style.gridTemplateColumns = `repeat(${daysInMonth}, minmax(24px,1fr))`;
+    for(let d=1; d<=daysInMonth; d++){
+      const dow = new Date(UI.tlYear, UI.tlMonth, d).getDay();
+      const cell = document.createElement('div');
+      cell.className = 'tl-daycell' + ((dow===0||dow===6) ? ' weekend' : '');
+      days.appendChild(cell);
+    }
+    return days;
+  }
+
   rooms.forEach(room=>{
-    const residents = DB.residents.filter(p=>p.roomId===room.id);
-    const rowsData = residents.length ? residents : [null];
     const effStatus = effectiveRoomStatus(room);
     const roomOverdue = roomHasOverdueResident(room);
     const rowStatusLabel = roomOverdue ? '연체중' : effStatus;
     const rowMeta = roomOverdue ? { fg:'var(--st-hold)', bg:'var(--st-hold-bg)' } : statusMeta(effStatus);
+    const contractSegments = roomContractSegments(room);
+
+    if(contractSegments.length > 0){
+      // 계약현황(계약기간) 기준: 한 행에 계약별로 막대를 나눠 표시. 가장 최근 계약만 "이용중" 색상,
+      // 이전 계약들은 이용자가 같더라도(연속 기간이어도) 회색 "퇴실"로 구분해 계약 경계를 드러낸다.
+      const latestSeg = contractSegments[contractSegments.length - 1];
+      const latestName = maskViewerName(latestSeg.contract.contractor || latestSeg.contract.resident) || '계약자 미입력';
+
+      const row = document.createElement('div');
+      row.className = 'tl-row';
+      const lbl = document.createElement('div');
+      lbl.className = 'tl-label';
+      lbl.style.borderLeft = `4px solid ${rowMeta.fg}`;
+      lbl.style.background = rowMeta.bg;
+      lbl.innerHTML = `<span class="rm">${esc(room.number)}</span>
+         <span class="nm"><span class="tl-status-dot" style="background:${rowMeta.fg}"></span>${esc(latestName)}${contractSegments.length>1 ? ` · 계약 ${contractSegments.length}건` : ''}</span>`;
+      lbl.style.cursor = 'pointer';
+      lbl.title = `${latestName} · 최근 계약기간 ${latestSeg.start} ~ ${latestSeg.end} (클릭 시 호실로 이동)`;
+      lbl.onclick = ()=> scrollToRoomCard(room);
+      row.appendChild(lbl);
+
+      const days = buildDayCells();
+      contractSegments.forEach(seg=>{
+        const bar = buildContractBar(seg, seg===latestSeg, rowMeta, room, monthStart, daysInMonth);
+        if(bar) days.appendChild(bar);
+      });
+      row.appendChild(days);
+      gridWrap.appendChild(row);
+      return;
+    }
+
+    const residents = DB.residents.filter(p=>p.roomId===room.id);
+    const rowsData = residents.length ? residents : [null];
     rowsData.forEach(p=>{
       const row = document.createElement('div');
       row.className = 'tl-row';
@@ -2228,15 +2296,7 @@ function renderTimelineSection(branch){
       }
       row.appendChild(lbl);
 
-      const days = document.createElement('div');
-      days.className = 'tl-days';
-      days.style.gridTemplateColumns = `repeat(${daysInMonth}, minmax(24px,1fr))`;
-      for(let d=1; d<=daysInMonth; d++){
-        const dow = new Date(UI.tlYear, UI.tlMonth, d).getDay();
-        const cell = document.createElement('div');
-        cell.className = 'tl-daycell' + ((dow===0||dow===6) ? ' weekend' : '');
-        days.appendChild(cell);
-      }
+      const days = buildDayCells();
       if(p && p.moveIn){
         const bar = buildBar(p, room, monthStart, daysInMonth);
         if(bar) days.appendChild(bar);
@@ -2295,6 +2355,68 @@ function buildBar(p, room, monthStart, daysInMonth){
   const memoText = p.memo ? ` <span class="tl-bar-memo">${esc(p.memo)}</span>` : '';
   bar.innerHTML = `<span class="tl-bar-name">${nameText}</span>${memoText}`;
   bar.title = `${maskViewerName(p.name) || '이름 미입력'} · ${meta.key} · ${p.channel} · ${p.moveIn} ~ ${p.moveOut || '미정'}${p.memo ? ' · ' + p.memo : ''} (클릭 시 호실로 이동)`;
+  bar.style.cursor = 'pointer';
+  bar.onclick = ()=> scrollToRoomCard(room);
+  return bar;
+}
+
+function normalizeFlexDate(s){
+  const c = String(s||'').trim().replace(/[./]/g,'-');
+  const m = c.match(/^(\d{2,4})-(\d{1,2})-(\d{1,2})$/);
+  if(!m) return null;
+  let [, y, mo, d] = m;
+  if(y.length===2) y = '20'+y;
+  return `${y.padStart(4,'0')}-${mo.padStart(2,'0')}-${d.padStart(2,'0')}`;
+}
+function parseContractPeriodRange(periodStr){
+  const raw = String(periodStr||'').trim();
+  if(!raw) return null;
+  const parts = raw.split(/[~–—]|\s+to\s+/i).map(s=>s.trim()).filter(Boolean);
+  if(parts.length < 2) return null;
+  const start = normalizeFlexDate(parts[0]);
+  const end = normalizeFlexDate(parts[1]);
+  if(!start || !end) return null;
+  return { start, end };
+}
+function roomContractSegments(room){
+  const segments = [];
+  DB.contracts.filter(c=>c.roomId===room.id).forEach(c=>{
+    const range = parseContractPeriodRange(c.contractPeriod);
+    if(!range) return;
+    segments.push({ start: range.start, end: range.end, contract: c });
+  });
+  segments.sort((a,b)=> a.start.localeCompare(b.start) || (a.contract.contractDate||'').localeCompare(b.contract.contractDate||''));
+  return segments;
+}
+function contractEndDateMismatch(room){
+  const segments = roomContractSegments(room);
+  if(segments.length === 0) return false;
+  const latestSeg = segments[segments.length - 1];
+  const residents = DB.residents.filter(p=>p.roomId===room.id);
+  if(residents.length === 0) return false;
+  return !residents.some(p=> p.moveOut === latestSeg.end);
+}
+function buildContractBar(seg, isLatest, rowMeta, room, monthStart, daysInMonth){
+  const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth(), daysInMonth);
+  const inD = new Date(seg.start);
+  const outD = new Date(seg.end);
+  if(outD < monthStart || inD > monthEnd) return null;
+  const clampIn = inD < monthStart ? monthStart : inD;
+  const clampOut = outD > monthEnd ? monthEnd : outD;
+  const startDay = clampIn.getDate();
+  const endDay = clampOut.getDate();
+  const leftPct = ((startDay-1)/daysInMonth)*100;
+  const widthPct = Math.max(((endDay-startDay+1)/daysInMonth)*100, (1/daysInMonth)*100);
+  const bar = document.createElement('div');
+  bar.className = 'tl-bar';
+  bar.style.left = leftPct + '%';
+  bar.style.width = widthPct + '%';
+  const meta = isLatest ? rowMeta : { fg:'var(--st-vacant)', bg:'var(--st-vacant-bg)' };
+  bar.style.background = meta.fg;
+  const c = seg.contract;
+  const displayName = maskViewerName(c.contractor || c.resident) || '계약자 미입력';
+  bar.innerHTML = `<span class="tl-bar-name">${esc(displayName)}</span>`;
+  bar.title = `${displayName} · ${isLatest ? '이용중' : '퇴실'} · ${seg.start} ~ ${seg.end} (클릭 시 호실로 이동)`;
   bar.style.cursor = 'pointer';
   bar.onclick = ()=> scrollToRoomCard(room);
   return bar;
@@ -2547,14 +2669,39 @@ function renderContractManagePanel(){
   box.innerHTML = `<h3>계약관리</h3>
     <div style="font-size:12px;color:var(--ink-soft);margin-bottom:12px;">
       계약일 / 계약기간 / 지역구 / 고시원 명 / 방이름 / 계약자 / 입실자 / 입실료 / 결제금액 / 계약상태 / 계약유형 / 계약구분 / 결제구분 / 보증금 / 보증금 안내 / 계약내용
-      순서의 표를 헤더 행 포함해서 복사한 뒤 붙여넣으면, 고시원 명·방이름으로 지점·호실을 찾아 계약 이력으로 저장합니다.
+      순서의 표를 텍스트로 붙여넣거나, 같은 형식의 엑셀 파일을 업로드하면 고시원 명·방이름으로 지점·호실을 찾아 계약 이력으로 저장합니다.
       각 호실 카드의 "계약현황" 버튼에서 확인할 수 있습니다.
     </div>`;
-  const openBtn = document.createElement('button');
-  openBtn.className = 'btn primary';
-  openBtn.textContent = '계약 데이터 붙여넣기';
-  openBtn.onclick = showContractPasteModal;
-  box.appendChild(openBtn);
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex; gap:8px; align-items:center; flex-wrap:wrap;';
+
+  const pasteBtn = document.createElement('button');
+  pasteBtn.className = 'btn primary';
+  pasteBtn.textContent = '계약 데이터 붙여넣기';
+  pasteBtn.onclick = showContractPasteModal;
+
+  const templateBtn = document.createElement('button');
+  templateBtn.className = 'btn';
+  templateBtn.textContent = '⬇ 양식 다운로드';
+  templateBtn.onclick = downloadContractTemplate;
+
+  const uploadBtn = document.createElement('button');
+  uploadBtn.className = 'btn';
+  uploadBtn.textContent = '⬆ 엑셀 업로드';
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = '.xlsx,.xls';
+  fileInput.style.display = 'none';
+  uploadBtn.onclick = ()=> fileInput.click();
+  fileInput.addEventListener('change', ()=>{
+    if(fileInput.files && fileInput.files[0]){
+      handleContractExcelFile(fileInput.files[0]);
+      fileInput.value = '';
+    }
+  });
+
+  btnRow.appendChild(pasteBtn); btnRow.appendChild(templateBtn); btnRow.appendChild(uploadBtn); btnRow.appendChild(fileInput);
+  box.appendChild(btnRow);
   box.appendChild(el('div', null, `현재 저장된 계약 이력: ${DB.contracts.length}건`, 'font-size:11.5px;color:var(--ink-soft);margin-top:8px;'));
   return box;
 }
@@ -2602,8 +2749,38 @@ function parseAndImportContracts(text, onImported){
     showAlert('헤더 행과 데이터 행이 포함된 표를 붙여넣어주세요.');
     return;
   }
+  const headerCells = lines[0].split('\t');
+  const dataRows = lines.slice(1).map(l=> l.split('\t'));
+  importContractGrid(headerCells, dataRows, onImported);
+}
+
+function handleContractExcelFile(file, onImported){
+  if(typeof XLSX === 'undefined'){ showAlert('엑셀 라이브러리를 불러오지 못했습니다. 네트워크 연결을 확인해주세요.'); return; }
+  const reader = new FileReader();
+  reader.onload = (e)=>{
+    let grid;
+    try{
+      const wb = XLSX.read(new Uint8Array(e.target.result), { type:'array' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      grid = XLSX.utils.sheet_to_json(sheet, { header:1, defval:'' });
+    }catch(err){
+      showAlert('엑셀 파일을 읽는 중 오류가 발생했습니다: ' + err.message);
+      return;
+    }
+    if(!grid || grid.length < 2){
+      showAlert('헤더 행과 데이터 행이 포함된 엑셀 파일을 업로드해주세요.');
+      return;
+    }
+    const headerCells = grid[0].map(v=> v==null ? '' : String(v));
+    const dataRows = grid.slice(1).map(row=> row.map(v=> v==null ? '' : v));
+    importContractGrid(headerCells, dataRows, onImported);
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function importContractGrid(headerCells, dataRows, onImported){
   const idx = {};
-  lines[0].split('\t').forEach((h, i)=>{
+  headerCells.forEach((h, i)=>{
     const key = CONTRACT_FIELD_BY_HEADER[cleanKeyLoose(h).replace(/\s+/g,'')];
     if(key) idx[key] = i;
   });
@@ -2621,12 +2798,11 @@ function parseAndImportContracts(text, onImported){
   const newContracts = [];
   const unmatched = [];
   let duplicateCount = 0;
-  for(let i=1; i<lines.length; i++){
-    const cells = lines[i].split('\t');
-    const get = (key)=> idx[key]!=null ? (cells[idx[key]]||'').trim() : '';
+  dataRows.forEach((cells, i)=>{
+    const get = (key)=> idx[key]!=null ? String(cells[idx[key]]==null ? '' : cells[idx[key]]).trim() : '';
     const branchRaw = cleanKeyLoose(get('branchName'));
     const roomRaw = cleanKeyLoose(get('roomName')).replace(/호$/,'');
-    if(!branchRaw && !roomRaw) continue;
+    if(!branchRaw && !roomRaw) return;
 
     const resolvedBranchName = BRANCH_NAME_ALIASES[branchRaw] || branchRaw;
     const branch = DB.branches.find(b=> cleanKeyLoose(b.name).toLowerCase()===resolvedBranchName.toLowerCase());
@@ -2637,8 +2813,8 @@ function parseAndImportContracts(text, onImported){
       if(prefix) room = DB.rooms.find(r=> r.branchId===branch.id && roomNumberPrefix(r.number)===prefix);
     }
     if(!room){
-      unmatched.push(`[${i+1}행] ${branchRaw} ${roomRaw}호 (${!branch ? '지점' : '호실'} 못 찾음)`);
-      continue;
+      unmatched.push(`[${i+2}행] ${branchRaw} ${roomRaw}호 (${!branch ? '지점' : '호실'} 못 찾음)`);
+      return;
     }
 
     const candidate = {
@@ -2650,10 +2826,10 @@ function parseAndImportContracts(text, onImported){
       deposit: get('deposit'), depositNote: get('depositNote'), contractContent: get('contractContent')
     };
     const sig = contractSignature(candidate);
-    if(existingSigs.has(sig)){ duplicateCount++; continue; }
+    if(existingSigs.has(sig)){ duplicateCount++; return; }
     existingSigs.add(sig);
     newContracts.push(candidate);
-  }
+  });
 
   if(newContracts.length===0){
     showAlert(`가져올 수 있는 계약 데이터가 없습니다.`
@@ -2668,14 +2844,27 @@ function parseAndImportContracts(text, onImported){
       + (unmatched.length ? `\n(호실을 찾지 못한 ${unmatched.length}건은 제외됩니다)` : ''),
     ()=>{
       DB.contracts.push(...newContracts);
-      logChange(`계약 데이터 붙여넣기: ${newContracts.length}건 추가${duplicateCount ? ` (중복 ${duplicateCount}건 제외)` : ''}${unmatched.length ? ` (미매칭 ${unmatched.length}건)` : ''}`);
+      logChange(`계약 데이터 가져오기: ${newContracts.length}건 추가${duplicateCount ? ` (중복 ${duplicateCount}건 제외)` : ''}${unmatched.length ? ` (미매칭 ${unmatched.length}건)` : ''}`);
       scheduleSave(); render();
-      onImported();
+      if(typeof onImported === 'function') onImported();
       showAlert(`${newContracts.length}건을 가져왔습니다.`
         + (duplicateCount ? `\n이미 등록되어 제외된 중복 데이터: ${duplicateCount}건` : '')
         + (unmatched.length ? `\n\n호실을 찾지 못한 항목:\n${unmatched.slice(0,20).join('\n')}${unmatched.length>20 ? `\n...외 ${unmatched.length-20}건` : ''}` : ''));
     }
   );
+}
+
+function downloadContractTemplate(){
+  if(typeof XLSX === 'undefined'){ showAlert('엑셀 라이브러리를 불러오지 못했습니다. 네트워크 연결을 확인해주세요.'); return; }
+  const wb = XLSX.utils.book_new();
+  const headers = ['계약일','계약기간','지역구','고시원 명','방이름','계약자','입실자','입실료','결제금액','계약상태','계약유형','계약구분','결제구분','보증금','보증금 안내','계약내용'];
+  const example = {
+    계약일:'2026-01-15', 계약기간:'2026-01-15~2027-01-14', 지역구:'성동구', '고시원 명':'먼슬리브 성수', 방이름:'304',
+    계약자:'홍길동', 입실자:'홍길동', 입실료:450000, 결제금액:450000, 계약상태:'계약완료', 계약유형:'신규', 계약구분:'일반',
+    결제구분:'카드', 보증금:0, '보증금 안내':'', 계약내용:''
+  };
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([example], { header: headers }), 'Sheet1');
+  XLSX.writeFile(wb, 'monthliv_계약데이터_양식.xlsx');
 }
 
 const CONTRACT_HISTORY_PAGE_SIZE = 10;
@@ -3197,7 +3386,10 @@ function renderBranchOrderBody(){
     row.className = 'branch-order-row';
     row.draggable = true;
     row.dataset.id = b.id;
-    row.innerHTML = `<span class="branch-order-handle">&#9776;</span><span class="branch-order-name">${b.shortName ? esc(b.shortName)+' · ' : ''}${esc(b.name)}</span>`;
+    row.innerHTML = `<span class="branch-order-handle">&#9776;</span><span class="branch-order-name" title="클릭 시 해당 지점으로 이동">${b.shortName ? esc(b.shortName)+' · ' : ''}${esc(b.name)}</span>`;
+    row.querySelector('.branch-order-name').addEventListener('click', ()=>{
+      UI.view = 'branch'; UI.branchId = b.id; UI.branchTab = 'rooms'; UI.roomStatusFilter = '이용중'; render();
+    });
     const editBtn = document.createElement('button');
     editBtn.className = 'btn small';
     editBtn.textContent = '수정';
@@ -3308,6 +3500,8 @@ const BRANCH_FORM_FIELDS_HTML = (prefix, v)=> `
     <div class="fld"><label class="field-label">헤어드라이기</label><input type="text" id="${prefix}Dryer" placeholder="예: 있음" value="${esc(v.hairDryer||'')}"></div>
     <div class="fld"><label class="field-label">청소비(원)</label><input type="number" id="${prefix}Fee" min="0" step="1000" value="${v.cleaningFee||0}"></div>
     <div class="fld"><label class="field-label">2인 추가금(원)</label><input type="number" id="${prefix}DoubleFee" min="0" step="1000" value="${v.doubleOccupancyFee||0}"></div>
+    <div class="fld"><label class="field-label">공용 주방 위치</label><input type="text" id="${prefix}Kitchen" placeholder="예: 2층 복도 끝" value="${esc(v.sharedKitchenLocation||'')}"></div>
+    <div class="fld"><label class="field-label">종량제봉투 보관위치</label><input type="text" id="${prefix}TrashBag" placeholder="예: 1층 관리실" value="${esc(v.trashBagLocation||'')}"></div>
     <div class="fld"><label class="field-label">주차 가능 대수</label>
       <select id="${prefix}Cap">${Array.from({length:11},(_,i)=>`<option value="${i}" ${((v.parkingCapacity||0)===i)?'selected':''}>${i}대</option>`).join('')}</select></div>
     <div class="fld" style="grid-column:1/-1;"><label class="field-label">특이사항 메모</label><textarea id="${prefix}Memo">${esc(v.memo||'')}</textarea></div>
@@ -3338,6 +3532,8 @@ function renderAdminAddBranchForm(){
         hairDryer: document.getElementById('nbDryer').value.trim(),
         cleaningFee: Number(document.getElementById('nbFee').value) || 0,
         doubleOccupancyFee: Number(document.getElementById('nbDoubleFee').value) || 0,
+        sharedKitchenLocation: document.getElementById('nbKitchen').value.trim(),
+        trashBagLocation: document.getElementById('nbTrashBag').value.trim(),
         parkingNote:'', parkingCapacity: Number(document.getElementById('nbCap').value) || 0,
         memo: document.getElementById('nbMemo').value
       };
@@ -3374,6 +3570,8 @@ function renderAdminEditBranchForm(branch){
       branch.hairDryer = document.getElementById('ebDryer').value.trim();
       branch.cleaningFee = Number(document.getElementById('ebFee').value) || 0;
       branch.doubleOccupancyFee = Number(document.getElementById('ebDoubleFee').value) || 0;
+      branch.sharedKitchenLocation = document.getElementById('ebKitchen').value.trim();
+      branch.trashBagLocation = document.getElementById('ebTrashBag').value.trim();
       branch.parkingCapacity = Number(document.getElementById('ebCap').value) || 0;
       branch.memo = document.getElementById('ebMemo').value;
       logChange(`"${branch.name}" 지점 정보 수정`);
@@ -3651,19 +3849,22 @@ function renderCleaningWeekMatrix(){
   }
 
   const entries = collectCleaningEntries().filter(e=> e.date && weekDates.includes(e.date));
-  const grid = new Map(); // branchId -> date -> {moveout,retouch,extra}
+  const grid = new Map(); // branchId -> date -> {moveout:[room번호...], retouch:[...], extra:[...]}
   entries.forEach(e=>{
     const bkey = e.branch ? e.branch.id : '__none__';
     if(!grid.has(bkey)) grid.set(bkey, new Map());
     const dmap = grid.get(bkey);
-    if(!dmap.has(e.date)) dmap.set(e.date, { moveout:0, retouch:0, extra:0 });
-    dmap.get(e.date)[e.type]++;
+    if(!dmap.has(e.date)) dmap.set(e.date, { moveout:[], retouch:[], extra:[] });
+    dmap.get(e.date)[e.type].push(e.room.number);
   });
 
-  function chipsHtml(counts, branchName, dateLabel){
-    return Object.keys(MAINT_KIND_META).filter(k=> counts[k]).map(k=>
-      `<span class="cal-chip ${k}" title="${esc(branchName)}${dateLabel?' '+dateLabel:''} ${MAINT_KIND_META[k].label} ${counts[k]}건 · 클릭 시 이동">${MAINT_KIND_META[k].label}(${counts[k]})</span>`
-    ).join('');
+  function chipsHtml(dayEntry, branchName, dateLabel){
+    return Object.keys(MAINT_KIND_META).filter(k=> dayEntry[k] && dayEntry[k].length).map(k=>{
+      const rooms = dayEntry[k];
+      const roomsText = rooms.map(n=> n+'호').join(', ');
+      const tip = `${branchName} · ${roomsText} · ${MAINT_KIND_META[k].label} · 청소예정일 ${dateLabel}`;
+      return `<span class="cal-chip ${k}" title="${esc(tip)}">${MAINT_KIND_META[k].label}(${rooms.length})</span>`;
+    }).join('');
   }
 
   const DOW = ['월','화','수','목','금','토','일'];
