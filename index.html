@@ -2834,10 +2834,10 @@ function handleContractExcelFile(file, onImported){
 }
 
 function contractSignature(c){
-  return [
-    c.roomId, c.contractDate, c.contractPeriod, c.contractor, c.resident, c.rent, c.paymentAmount,
-    c.contractStatus, c.contractType, c.contractCategory, c.paymentCategory, c.deposit, c.depositNote, c.contractContent
-  ].join('|');
+  // 계약현황 팝업에 실제로 노출되는 항목(계약일/계약기간/계약자/입실료/결제금액/계약구분)만으로
+  // 중복 여부를 판단한다. 나머지 항목(입실자/계약상태/보증금 등)까지 모두 같아야 한다고 보면
+  // 스프레드시트 원본의 사소한 차이 때문에 눈에 보이는 완전 중복도 못 잡는 경우가 있었다.
+  return [c.roomId, c.contractDate, c.contractPeriod, c.contractor, c.rent, c.paymentAmount, c.contractCategory].join('|');
 }
 function importContractGrid(headerCells, dataRows, onImported){
   const idx = {};
