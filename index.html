@@ -2416,10 +2416,12 @@ function roomContractSegments(room){
 function contractEndDateMismatch(room){
   const segments = roomContractSegments(room);
   if(segments.length === 0) return false;
-  const latestSeg = segments[segments.length - 1];
+  // 계약이 여러 건으로 나뉘어 있어도(연장/분할결제 등) 실제 비교 대상은
+  // 그 중 계약만료일(종료일)이 가장 늦은 날짜 하나면 충분하다.
+  const latestEnd = segments.reduce((max, seg)=> seg.end > max ? seg.end : max, segments[0].end);
   const residents = DB.residents.filter(p=>p.roomId===room.id);
   if(residents.length === 0) return false;
-  return !residents.some(p=> p.moveOut === latestSeg.end);
+  return !residents.some(p=> p.moveOut === latestEnd);
 }
 function buildContractBar(seg, isLatest, rowMeta, room, monthStart, daysInMonth){
   const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth(), daysInMonth);
