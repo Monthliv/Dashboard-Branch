@@ -2870,11 +2870,25 @@ function importContractGrid(headerCells, dataRows, onImported){
     if(!branchRaw && !roomRaw) return;
 
     const resolvedBranchName = BRANCH_NAME_ALIASES[branchRaw] || branchRaw;
-    const branch = DB.branches.find(b=> cleanKeyLoose(b.name).toLowerCase()===resolvedBranchName.toLowerCase());
-    let room = branch ? DB.rooms.find(r=> r.branchId===branch.id && normalizeRoomNo(r.number)===normalizeRoomNo(roomRaw)) : null;
+    let branch = DB.branches.find(b=> cleanKeyLoose(b.name).toLowerCase()===resolvedBranchName.toLowerCase());
+    let roomSearchName = roomRaw;
+    if(!branch){
+      // 고시원 명은 동 구분 없이 공통으로 쓰고, 방이름 앞에 "A동"처럼 건물 구분이 붙어 있는 경우
+      // (예: "A동 309호 블레스+룸 / 원룸 / 외창") 지점명에 동을 붙인 이름("...A동")으로 다시 찾는다.
+      const buildingMatch = roomRaw.match(/^([A-Za-z0-9가-힣]{1,4}동)\s+(.*)$/);
+      if(buildingMatch){
+        const withBuilding = cleanKeyLoose(`${resolvedBranchName} ${buildingMatch[1]}`);
+        const branchWithBuilding = DB.branches.find(b=> cleanKeyLoose(b.name).toLowerCase()===withBuilding.toLowerCase());
+        if(branchWithBuilding){
+          branch = branchWithBuilding;
+          roomSearchName = buildingMatch[2];
+        }
+      }
+    }
+    let room = branch ? DB.rooms.find(r=> r.branchId===branch.id && normalizeRoomNo(r.number)===normalizeRoomNo(roomSearchName)) : null;
     if(!room && branch){
       // 방이름에 호실번호 외의 상세 명칭이 붙어 있어도(예: "304 그레이스"), 지점명과 호실번호 앞자리 숫자만 일치하면 매칭
-      const prefix = roomNumberPrefix(roomRaw);
+      const prefix = roomNumberPrefix(roomSearchName);
       if(prefix) room = DB.rooms.find(r=> r.branchId===branch.id && roomNumberPrefix(r.number)===prefix);
     }
     if(!room){
