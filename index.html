@@ -934,7 +934,7 @@ function renderBranchUpcomingCards(branch){
     .sort((a,b)=> a.date.localeCompare(b.date));
 
   const moveOutItems = DB.residents
-    .filter(p=> roomIds.has(p.roomId) && p.moveOut && p.moveOut>=today && p.moveOut<=soonEnd)
+    .filter(p=> roomIds.has(p.roomId) && p.scheduledToLeave && p.moveOut && p.moveOut>=today && p.moveOut<=soonEnd)
     .map(p=> ({ room: rooms.find(r=>r.id===p.roomId), date: p.moveOut, name: maskViewerName(p.name) || '이름 미입력' }))
     .sort((a,b)=> a.date.localeCompare(b.date));
 
