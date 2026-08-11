@@ -1362,8 +1362,11 @@ function addResidentToRoom(room){
   UI.draftResident[room.id] = p;
   render();
 }
-function roomAnyResidentScheduledToLeave(room){
-  return DB.residents.some(p=>p.roomId===room.id && p.scheduledToLeave);
+function roomHasVacatingResident(room){
+  return DB.residents.some(p=>p.roomId===room.id && (p.scheduledToLeave || p.pendingRoomMove));
+}
+function roomHasUpcomingResident(room){
+  return DB.residents.some(p=>p.roomId===room.id && computeResStatus(p)==='입실예정');
 }
 function addUpcomingResidentToRoom(room){
   if(UI.draftResident[room.id]){
@@ -2109,7 +2112,7 @@ function renderResidentEditCard(p, isSecondary, isDraft, room){
   card.appendChild(memo);
   card.appendChild(renderMemoStyleControls(p, 'memoColor', 'memoBold'));
 
-  if(room && !isDraft && !UI.draftResident[room.id] && roomAnyResidentScheduledToLeave(room)){
+  if(room && !isDraft && !UI.draftResident[room.id] && !roomHasUpcomingResident(room) && roomHasVacatingResident(room)){
     const addRow = document.createElement('div');
     addRow.style.cssText = 'margin-top:10px; padding-top:10px; border-top:1px dashed var(--line);';
     const addBtn = document.createElement('button');
