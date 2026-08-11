@@ -135,7 +135,7 @@
   .parking-cap-row{ margin-bottom:8px; }
   .branch-info-table{ width:100%; border-collapse:collapse; table-layout:fixed; }
   .branch-info-table td{ padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; font-size:13px; }
-  .branch-info-table td.bi-label{ width:88px; color:var(--ink-soft); font-weight:700; font-size:11.5px; white-space:nowrap; }
+  .branch-info-table td.bi-label{ width:108px; color:var(--ink-soft); font-weight:700; font-size:11.5px; white-space:nowrap; }
   .branch-info-table tr:last-child td{ border-bottom:none; }
   .branch-info-table input, .branch-info-table select, .branch-info-table textarea{ width:100%; font-size:13px; }
   .parking-summary{ font-size:12.5px; color:var(--ink-soft); margin-bottom:6px; }
@@ -1186,13 +1186,14 @@ function renderBranchInfoBar(branch){
 
   const infoRows = [
     { label:'주차', view: parkingView, edit: parkingEdit },
+    { label:'주차비용', ...textField('parkingFee', '예: 30000원', '주차비용') },
     { label:'엘리베이터', ...textField('elevator', '예: 있음', '엘리베이터 정보') },
     { label:'난방방식', ...textField('heatingType', '예: 개별난방', '난방방식') },
     { label:'헤어드라이기', ...textField('hairDryer', '예: 있음', '헤어드라이기 정보') },
     { label:'청소비', ...feeField('cleaningFee', '예: 50000', '청소비') },
-    { label:'2인 추가금', ...feeField('doubleOccupancyFee', '예: 100000', '2인 추가금') },
+    { label:'2인 추가금', ...textField('doubleOccupancyFee', '예: 100000원', '2인 추가금') },
     { label:'공용 주방 위치', ...textField('sharedKitchenLocation', '예: 2층 복도 끝', '공용 주방 위치') },
-    { label:'종량제봉투 보관위치', ...textField('trashBagLocation', '예: 1층 관리실', '종량제봉투 보관위치') }
+    { label:'종량제 봉투', ...textField('trashBagLocation', '예: 1층 관리실', '종량제 봉투 보관위치') }
   ];
 
   const infoCol = document.createElement('div'); infoCol.className = 'col';
@@ -1216,9 +1217,22 @@ function renderBranchInfoBar(branch){
   infoCol.appendChild(table);
   bar.appendChild(infoCol);
 
-  // ---- 특이사항 메모 (맨 하단) ----
+  // ---- 출입문 비번 ----
+  const doorCol = document.createElement('div'); doorCol.className = 'col';
+  doorCol.appendChild(el('h3', null, '출입문 비번'));
+  if(editOn){
+    const doorInput = document.createElement('input');
+    doorInput.type = 'text'; doorInput.placeholder = '예: *1234#'; doorInput.value = branch.doorPasscode || '';
+    doorInput.addEventListener('input', ()=>{ logChange(`"${branch.name}" 출입문 비번 수정`); branch.doorPasscode = doorInput.value; scheduleSave(); });
+    doorCol.appendChild(doorInput);
+  } else {
+    doorCol.appendChild(el('div', 'branch-view-text', branch.doorPasscode || '-'));
+  }
+  bar.appendChild(doorCol);
+
+  // ---- 기타 특이사항 (맨 하단) ----
   const memoCol = document.createElement('div'); memoCol.className = 'col';
-  memoCol.appendChild(el('h3', null, '특이사항 메모'));
+  memoCol.appendChild(el('h3', null, '기타 특이사항'));
   if(editOn){
     const memoArea = document.createElement('textarea');
     memoArea.placeholder = '지점 전체 공지/특이사항';
@@ -1227,7 +1241,7 @@ function renderBranchInfoBar(branch){
     memoCol.appendChild(memoArea);
     memoCol.appendChild(renderMemoStyleControls(branch, 'memoColor', 'memoBold'));
   } else {
-    const memoDiv = el('div', 'branch-view-text', branch.memo || '-');
+    const memoDiv = el('div', 'branch-view-text', branch.memo || '-', 'white-space:pre-wrap;');
     if(branch.memo){
       memoDiv.style.color = MEMO_COLORS[branch.memoColor] || MEMO_COLORS.black;
       if(branch.memoBold) memoDiv.style.fontWeight = '700';
@@ -2524,12 +2538,12 @@ function downloadBranchRoomUpdateTemplate(){
     ['2. 필수 항목: 지점명 / 지점단축명 / 호실번호 / 타입 / 인실구분. 이 중 하나라도 비어있는 행은 반영되지 않습니다.'],
     ['3. 필수 항목 외 나머지 값은 비워둬도 됩니다. 비워두면 기존 정보를 그대로 유지합니다(덮어쓰지 않습니다).'],
     ['4. 인실구분: 1인실 / 2인실'],
-    ['5. 청소비 / 2인추가금 / 정상입실료는 숫자만 입력하세요. (예: 50000)'],
+    ['5. 청소비 / 정상입실료는 숫자만 입력하세요. (예: 50000). 주차비용 / 2인추가금은 자유롭게 텍스트로 입력할 수 있습니다.'],
   ];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(guideRows), '안내');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([{
     지점명:'먼슬리브 예시지점', 지점단축명:'예시', 주소:'서울시 성동구 ...', 엘리베이터:'있음', 난방방식:'개별난방', 헤어드라이기:'있음',
-    청소비:50000, '2인추가금':100000, 공용주방위치:'2층 복도 끝', 종량제봉투보관위치:'1층 관리실', 주차가능대수:2, 지점특이사항:'',
+    청소비:50000, '2인추가금':'100000원', 공용주방위치:'2층 복도 끝', 종량제봉투보관위치:'1층 관리실', 주차가능대수:2, 주차비용:'30000원', 출입문비번:'*1234#', 지점특이사항:'',
     호실번호:'101', 타입:'그레이스', 인실구분:'1인실', 정상입실료:450000, 판매상태:'공실', 호실특이사항:''
   }]), 'Sheet1');
   XLSX.writeFile(wb, 'monthliv_지점호실_업데이트_양식.xlsx');
@@ -2543,9 +2557,10 @@ function downloadBranchRoomCurrentData(){
     return {
       지점명: b ? b.name : '', 지점단축명: b ? (b.shortName||'') : '', 주소: b ? (b.address||'') : '',
       엘리베이터: b ? (b.elevator||'') : '', 난방방식: b ? (b.heatingType||'') : '', 헤어드라이기: b ? (b.hairDryer||'') : '',
-      청소비: b ? (b.cleaningFee||0) : 0, '2인추가금': b ? (b.doubleOccupancyFee||0) : 0,
+      청소비: b ? (b.cleaningFee||0) : 0, '2인추가금': b ? (b.doubleOccupancyFee||'') : '',
       공용주방위치: b ? (b.sharedKitchenLocation||'') : '', 종량제봉투보관위치: b ? (b.trashBagLocation||'') : '',
-      주차가능대수: b ? (b.parkingCapacity||0) : 0, 지점특이사항: b ? (b.memo||'') : '',
+      주차가능대수: b ? (b.parkingCapacity||0) : 0, 주차비용: b ? (b.parkingFee||'') : '', 출입문비번: b ? (b.doorPasscode||'') : '',
+      지점특이사항: b ? (b.memo||'') : '',
       호실번호: r.number, 타입: r.type, 인실구분: r.occupancy, 정상입실료: r.price||0, 판매상태: r.saleStatus, 호실특이사항: r.note||''
     };
   });
@@ -2599,7 +2614,7 @@ function handleBranchRoomBulkUpdateFile(file){
         const isNewBranch = !branch;
         if(!branch){
           branch = { id: uid('b'), name: resolvedName, shortName: shortNameRaw, address:'', elevator:'', heatingType:'', hairDryer:'',
-            cleaningFee:0, doubleOccupancyFee:0, sharedKitchenLocation:'', trashBagLocation:'', parkingNote:'', parkingCapacity:0, memo:'' };
+            cleaningFee:0, doubleOccupancyFee:'', sharedKitchenLocation:'', trashBagLocation:'', parkingNote:'', parkingCapacity:0, parkingFee:'', doorPasscode:'', memo:'' };
           newBranches.push(branch);
           result.branchesCreated++;
         } else {
@@ -2617,9 +2632,10 @@ function handleBranchRoomBulkUpdateFile(file){
         };
         setBranchField('address','주소'); setBranchField('elevator','엘리베이터');
         setBranchField('heatingType','난방방식'); setBranchField('hairDryer','헤어드라이기');
-        setBranchField('cleaningFee','청소비', true); setBranchField('doubleOccupancyFee','2인추가금', true);
+        setBranchField('cleaningFee','청소비', true); setBranchField('doubleOccupancyFee','2인추가금');
         setBranchField('sharedKitchenLocation','공용주방위치'); setBranchField('trashBagLocation','종량제봉투보관위치');
-        setBranchField('parkingCapacity','주차가능대수', true); setBranchField('memo','지점특이사항');
+        setBranchField('parkingCapacity','주차가능대수', true); setBranchField('parkingFee','주차비용');
+        setBranchField('doorPasscode','출입문비번'); setBranchField('memo','지점특이사항');
 
         let room = DB.rooms.find(r=> r.branchId===branch.id && normalizeRoomNo(r.number)===normalizeRoomNo(roomRaw))
           || newRooms.find(r=> r.branchId===branch.id && normalizeRoomNo(r.number)===normalizeRoomNo(roomRaw));
@@ -3567,12 +3583,14 @@ const BRANCH_FORM_FIELDS_HTML = (prefix, v)=> `
     <div class="fld"><label class="field-label">난방방식</label><input type="text" id="${prefix}Heating" placeholder="예: 개별난방" value="${esc(v.heatingType||'')}"></div>
     <div class="fld"><label class="field-label">헤어드라이기</label><input type="text" id="${prefix}Dryer" placeholder="예: 있음" value="${esc(v.hairDryer||'')}"></div>
     <div class="fld"><label class="field-label">청소비(원)</label><input type="number" id="${prefix}Fee" min="0" step="1000" value="${v.cleaningFee||0}"></div>
-    <div class="fld"><label class="field-label">2인 추가금(원)</label><input type="number" id="${prefix}DoubleFee" min="0" step="1000" value="${v.doubleOccupancyFee||0}"></div>
+    <div class="fld"><label class="field-label">2인 추가금</label><input type="text" id="${prefix}DoubleFee" placeholder="예: 100000원" value="${esc(v.doubleOccupancyFee||'')}"></div>
     <div class="fld"><label class="field-label">공용 주방 위치</label><input type="text" id="${prefix}Kitchen" placeholder="예: 2층 복도 끝" value="${esc(v.sharedKitchenLocation||'')}"></div>
     <div class="fld"><label class="field-label">종량제봉투 보관위치</label><input type="text" id="${prefix}TrashBag" placeholder="예: 1층 관리실" value="${esc(v.trashBagLocation||'')}"></div>
     <div class="fld"><label class="field-label">주차 가능 대수</label>
       <select id="${prefix}Cap">${Array.from({length:11},(_,i)=>`<option value="${i}" ${((v.parkingCapacity||0)===i)?'selected':''}>${i}대</option>`).join('')}</select></div>
-    <div class="fld" style="grid-column:1/-1;"><label class="field-label">특이사항 메모</label><textarea id="${prefix}Memo">${esc(v.memo||'')}</textarea></div>
+    <div class="fld"><label class="field-label">주차비용</label><input type="text" id="${prefix}ParkingFee" placeholder="예: 30000원" value="${esc(v.parkingFee||'')}"></div>
+    <div class="fld"><label class="field-label">출입문 비번</label><input type="text" id="${prefix}Door" placeholder="예: *1234#" value="${esc(v.doorPasscode||'')}"></div>
+    <div class="fld" style="grid-column:1/-1;"><label class="field-label">기타 특이사항</label><textarea id="${prefix}Memo">${esc(v.memo||'')}</textarea></div>
   `;
 
 function renderAdminAddBranchForm(){
@@ -3599,9 +3617,11 @@ function renderAdminAddBranchForm(){
         heatingType: document.getElementById('nbHeating').value.trim(),
         hairDryer: document.getElementById('nbDryer').value.trim(),
         cleaningFee: Number(document.getElementById('nbFee').value) || 0,
-        doubleOccupancyFee: Number(document.getElementById('nbDoubleFee').value) || 0,
+        doubleOccupancyFee: document.getElementById('nbDoubleFee').value.trim(),
         sharedKitchenLocation: document.getElementById('nbKitchen').value.trim(),
         trashBagLocation: document.getElementById('nbTrashBag').value.trim(),
+        parkingFee: document.getElementById('nbParkingFee').value.trim(),
+        doorPasscode: document.getElementById('nbDoor').value.trim(),
         parkingNote:'', parkingCapacity: Number(document.getElementById('nbCap').value) || 0,
         memo: document.getElementById('nbMemo').value
       };
@@ -3637,9 +3657,11 @@ function renderAdminEditBranchForm(branch){
       branch.heatingType = document.getElementById('ebHeating').value.trim();
       branch.hairDryer = document.getElementById('ebDryer').value.trim();
       branch.cleaningFee = Number(document.getElementById('ebFee').value) || 0;
-      branch.doubleOccupancyFee = Number(document.getElementById('ebDoubleFee').value) || 0;
+      branch.doubleOccupancyFee = document.getElementById('ebDoubleFee').value.trim();
       branch.sharedKitchenLocation = document.getElementById('ebKitchen').value.trim();
       branch.trashBagLocation = document.getElementById('ebTrashBag').value.trim();
+      branch.parkingFee = document.getElementById('ebParkingFee').value.trim();
+      branch.doorPasscode = document.getElementById('ebDoor').value.trim();
       branch.parkingCapacity = Number(document.getElementById('ebCap').value) || 0;
       branch.memo = document.getElementById('ebMemo').value;
       logChange(`"${branch.name}" 지점 정보 수정`);
