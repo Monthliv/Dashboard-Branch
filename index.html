@@ -613,6 +613,14 @@ function maintBadgeHtml(kind, suffix){
   if(!m) return '';
   return `<span class="badge" style="background:${m.bg};color:${m.fg};">${m.label}${suffix||''}</span>`;
 }
+function roomCardMaintKind(room){
+  // 청소/리터치 예정일이 지나면 방 카드(입실자 카드)에서는 배지를 더 이상 노출하지 않는다.
+  // 단, 원본 데이터(needsCleaning 등)는 그대로 두어 청소 관리 화면에는 계속 기록이 남는다.
+  const kind = roomMaintKind(room);
+  if(!kind) return null;
+  if(room.maintenanceDate && room.maintenanceDate < todayISO()) return null;
+  return kind;
+}
 
 function seedState(){
   const branchSeongsu = uid('b'), branchJamsil = uid('b'), branchDoksan = uid('b');
@@ -1521,7 +1529,7 @@ function renderRoomCard(room, sectionStatus){
   const maintDateSuffix = room.maintenanceDate ? ` · ${room.maintenanceDate.slice(5)}` : '';
   const headerRight = `
     <span class="badge" style="background:${meta.bg};color:${meta.fg}">${effStatus}</span>
-    ${maintBadgeHtml(roomMaintKind(room), maintDateSuffix)}
+    ${maintBadgeHtml(roomCardMaintKind(room), maintDateSuffix)}
   `;
 
   const header = document.createElement('div');
@@ -2465,29 +2473,28 @@ function cleanKeyLoose(s){ return String(s||'').replace(/[\u200B-\u200D\uFEFF]/g
 function normalizeRoomNo(s){ const c = cleanKeyLoose(s).toLowerCase(); return /^\d+$/.test(c) ? String(parseInt(c,10)) : c; }
 function roomNumberPrefix(s){ const m = cleanKeyLoose(s).match(/^\d+/); return m ? String(parseInt(m[0],10)) : null; }
 
-function renderResidentResyncPanel(){
+function renderBranchRoomBulkUpdatePanel(){
   const box = document.createElement('div');
   box.className = 'stat-section';
   box.innerHTML = `
-    <h3>엑셀 일괄 업로드</h3>
+    <h3>지점/호실 관리 엑셀 일괄 업데이트</h3>
     <div style="font-size:12px;color:var(--ink-soft);margin-bottom:12px;">
-      "지점명 / 호실번호 / 이름 / 연락처 / 입실일 / 퇴실예정일" (+선택: 타입 / 인실구분 / 정상입실료(원)) 형식의 엑셀을 업로드하면,
-      지점명·호실번호가 아직 없는 경우 새로 만들고(타입/인실구분/가격 컬럼이 있으면 반영, 없으면 기타/1인실/0원),
-      각 행의 입실자를 해당 호실에 추가로 등록합니다. 이름이 "-" 또는 "*"인 행은 건너뜁니다.
-      기존 입실자를 모두 지우고 새로 채우려면 먼저 "초기화"를 눌러주세요.
+      지점명·호실번호를 기준으로 지점/호실 정보를 일괄 업데이트합니다. 이미 등록된 지점·호실이면 입력된 값으로 정보를 덮어쓰고
+      (빈 칸은 기존 값을 그대로 유지), 지점명이나 호실번호가 아직 없으면 새로 만듭니다.<br>
+      필수 항목: 지점명 / 지점단축명 / 호실번호 / 타입 / 인실구분 (이 5개가 비어있는 행은 반영되지 않습니다). 나머지 항목은 비워둬도 됩니다.
     </div>
   `;
   const btnRow = document.createElement('div');
-  btnRow.style.cssText = 'display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px;';
+  btnRow.style.cssText = 'display:flex; gap:10px; align-items:center; flex-wrap:wrap;';
   const templateBtn = document.createElement('button');
   templateBtn.className = 'btn';
   templateBtn.textContent = '⬇ 양식 다운로드';
-  templateBtn.onclick = downloadResyncTemplate;
+  templateBtn.onclick = downloadBranchRoomUpdateTemplate;
   const downloadCurrentBtn = document.createElement('button');
   downloadCurrentBtn.className = 'btn';
   downloadCurrentBtn.textContent = '⬇ 현재 데이터 다운로드';
-  downloadCurrentBtn.title = '현재 등록된 지점/호실/입실자 내용을 엑셀로 다운로드';
-  downloadCurrentBtn.onclick = downloadCurrentData;
+  downloadCurrentBtn.title = '현재 등록된 지점/호실 정보를 엑셀로 다운로드 (수정 후 다시 업로드해 일괄 반영할 수 있습니다)';
+  downloadCurrentBtn.onclick = downloadBranchRoomCurrentData;
   const uploadBtn = document.createElement('button');
   uploadBtn.className = 'btn primary';
   uploadBtn.textContent = '⬆ 엑셀 업로드';
@@ -2498,150 +2505,168 @@ function renderResidentResyncPanel(){
   uploadBtn.onclick = ()=> fileInput.click();
   fileInput.addEventListener('change', ()=>{
     if(fileInput.files && fileInput.files[0]){
-      handleResidentResyncFile(fileInput.files[0]);
+      handleBranchRoomBulkUpdateFile(fileInput.files[0]);
       fileInput.value = '';
     }
   });
   btnRow.appendChild(templateBtn); btnRow.appendChild(downloadCurrentBtn); btnRow.appendChild(uploadBtn); btnRow.appendChild(fileInput);
   box.appendChild(btnRow);
-
-  const resetBtn = document.createElement('button');
-  resetBtn.className = 'btn danger';
-  resetBtn.textContent = '⚠ 입실자 전체 초기화';
-  resetBtn.title = '모든 입실자와 퇴실 이력을 삭제합니다 (지점·호실은 유지)';
-  resetBtn.onclick = ()=>{
-    showConfirm(`현재 등록된 모든 입실자(${DB.residents.length}명)와 퇴실 이력을 삭제할까요?\n지점·호실 구성은 그대로 유지됩니다.\n이 작업은 되돌릴 수 없습니다.`, ()=>{
-      DB.residents = [];
-      DB.residentHistory = [];
-      logChange('입실자 전체 초기화');
-      scheduleSave(); render();
-      showAlert('입실자와 퇴실 이력이 모두 삭제되었습니다.');
-    });
-  };
-  box.appendChild(resetBtn);
   return box;
 }
 
-function downloadResyncTemplate(){
+function downloadBranchRoomUpdateTemplate(){
   if(typeof XLSX === 'undefined'){ showAlert('엑셀 라이브러리를 불러오지 못했습니다. 네트워크 연결을 확인해주세요.'); return; }
   const wb = XLSX.utils.book_new();
   const guideRows = [
-    ['MONTHLIV 엑셀 일괄 업로드 양식 안내'],
+    ['MONTHLIV 지점/호실 관리 엑셀 일괄 업데이트 양식 안내'],
     [''],
-    ['1. 지점명/호실번호가 아직 없으면 새로 만들어집니다. 이미 있으면 그 지점·호실에 입실자만 추가됩니다.'],
-    ['2. 타입 / 인실구분 / 정상입실료(원)은 호실이 새로 만들어질 때만 사용됩니다(선택 입력, 비워두면 기타/1인실/0원).'],
-    ['   - 인실구분: 1인실 / 2인실'],
-    ['3. 이름이 "-" 또는 "*"인 행은 건너뜁니다.'],
-    ['4. 날짜는 YYYY-MM-DD 형식으로 입력하세요. (예: 2026-08-01)'],
+    ['1. 지점명·호실번호를 기준으로 기존 지점/호실을 찾아 정보를 업데이트합니다. 없으면 새로 만듭니다.'],
+    ['2. 필수 항목: 지점명 / 지점단축명 / 호실번호 / 타입 / 인실구분. 이 중 하나라도 비어있는 행은 반영되지 않습니다.'],
+    ['3. 필수 항목 외 나머지 값은 비워둬도 됩니다. 비워두면 기존 정보를 그대로 유지합니다(덮어쓰지 않습니다).'],
+    ['4. 인실구분: 1인실 / 2인실'],
+    ['5. 청소비 / 2인추가금 / 정상입실료는 숫자만 입력하세요. (예: 50000)'],
   ];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(guideRows), '안내');
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([
-    { 지점명:'먼슬리브 예시지점', 호실번호:'101', 이름:'홍길동', 연락처:'010-1234-5678', 입실일:'2026-08-01', 퇴실예정일:'2026-09-01', 타입:'그레이스', 인실구분:'1인실', '정상입실료(원)':450000 }
-  ]), 'Sheet1');
-  XLSX.writeFile(wb, 'monthliv_엑셀업로드_양식.xlsx');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([{
+    지점명:'먼슬리브 예시지점', 지점단축명:'예시', 주소:'서울시 성동구 ...', 엘리베이터:'있음', 난방방식:'개별난방', 헤어드라이기:'있음',
+    청소비:50000, '2인추가금':100000, 공용주방위치:'2층 복도 끝', 종량제봉투보관위치:'1층 관리실', 주차가능대수:2, 지점특이사항:'',
+    호실번호:'101', 타입:'그레이스', 인실구분:'1인실', 정상입실료:450000, 판매상태:'공실', 호실특이사항:''
+  }]), 'Sheet1');
+  XLSX.writeFile(wb, 'monthliv_지점호실_업데이트_양식.xlsx');
 }
 
-function handleResidentResyncFile(file){
+function downloadBranchRoomCurrentData(){
+  if(typeof XLSX === 'undefined'){ showAlert('엑셀 라이브러리를 불러오지 못했습니다. 네트워크 연결을 확인해주세요.'); return; }
+  const wb = XLSX.utils.book_new();
+  const rows = DB.rooms.map(r=>{
+    const b = DB.branches.find(x=>x.id===r.branchId);
+    return {
+      지점명: b ? b.name : '', 지점단축명: b ? (b.shortName||'') : '', 주소: b ? (b.address||'') : '',
+      엘리베이터: b ? (b.elevator||'') : '', 난방방식: b ? (b.heatingType||'') : '', 헤어드라이기: b ? (b.hairDryer||'') : '',
+      청소비: b ? (b.cleaningFee||0) : 0, '2인추가금': b ? (b.doubleOccupancyFee||0) : 0,
+      공용주방위치: b ? (b.sharedKitchenLocation||'') : '', 종량제봉투보관위치: b ? (b.trashBagLocation||'') : '',
+      주차가능대수: b ? (b.parkingCapacity||0) : 0, 지점특이사항: b ? (b.memo||'') : '',
+      호실번호: r.number, 타입: r.type, 인실구분: r.occupancy, 정상입실료: r.price||0, 판매상태: r.saleStatus, 호실특이사항: r.note||''
+    };
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.length ? rows : [{}]), '지점호실');
+  XLSX.writeFile(wb, `monthliv_지점호실_현재데이터_${todayISO()}.xlsx`);
+}
+
+function handleBranchRoomBulkUpdateFile(file){
   if(typeof XLSX === 'undefined'){ showAlert('엑셀 라이브러리를 불러오지 못했습니다. 네트워크 연결을 확인해주세요.'); return; }
   const reader = new FileReader();
   reader.onload = (e)=>{
     try{
-      const wb = XLSX.read(new Uint8Array(e.target.result), { type:'array', cellDates:true });
+      const wb = XLSX.read(new Uint8Array(e.target.result), { type:'array' });
       const sheet = wb.Sheets[wb.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(sheet, { defval:'' });
 
-      const result = { matched:0, vacant:0, branchesCreated:0, roomsCreated:0, overCapacity:[] };
-      const newResidents = [];
+      const result = { branchesCreated:0, branchesUpdated:0, roomsCreated:0, roomsUpdated:0 };
       const newBranches = [];
       const newRooms = [];
-      const slotCounters = {};
+      const pendingBranchUpdates = [];
+      const pendingRoomUpdates = [];
+      const touchedBranches = new Set();
+      const touchedRooms = new Set();
+      const invalidRows = [];
 
-      function findOrCreateBranch(branchRaw){
+      const get = (row, key)=> String(row[key]==null ? '' : row[key]).trim();
+
+      rows.forEach((row, idx)=>{
+        const branchRaw = cleanKeyLoose(get(row,'지점명'));
+        const shortNameRaw = get(row,'지점단축명');
+        const roomRaw = cleanKeyLoose(get(row,'호실번호')).replace(/호$/,'');
+        const typeRaw = get(row,'타입');
+        const occRaw = cleanKeyLoose(get(row,'인실구분'));
+        if(!branchRaw && !shortNameRaw && !roomRaw && !typeRaw && !occRaw) return; // 완전히 빈 행
+
+        const missing = [];
+        if(!branchRaw) missing.push('지점명');
+        if(!shortNameRaw) missing.push('지점단축명');
+        if(!roomRaw) missing.push('호실번호');
+        if(!typeRaw) missing.push('타입');
+        if(!occRaw) missing.push('인실구분');
+        if(missing.length){
+          invalidRows.push(`[${idx+2}행] 필수 항목 누락(${missing.join('/')})으로 제외`);
+          return;
+        }
+        const occValue = (occRaw==='2' || occRaw==='2인실') ? '2인실' : '1인실';
+
         const resolvedName = BRANCH_NAME_ALIASES[branchRaw] || branchRaw;
         let branch = DB.branches.find(b=> cleanKeyLoose(b.name).toLowerCase()===resolvedName.toLowerCase())
           || newBranches.find(b=> cleanKeyLoose(b.name).toLowerCase()===resolvedName.toLowerCase());
+        const isNewBranch = !branch;
         if(!branch){
-          branch = { id: uid('b'), name: resolvedName, address:'', parkingNote:'', parkingCapacity:0, memo:'' };
+          branch = { id: uid('b'), name: resolvedName, shortName: shortNameRaw, address:'', elevator:'', heatingType:'', hairDryer:'',
+            cleaningFee:0, doubleOccupancyFee:0, sharedKitchenLocation:'', trashBagLocation:'', parkingNote:'', parkingCapacity:0, memo:'' };
           newBranches.push(branch);
           result.branchesCreated++;
+        } else {
+          if(!touchedBranches.has(branch.id)) result.branchesUpdated++;
+          pendingBranchUpdates.push({ branch, field:'shortName', value: shortNameRaw });
         }
-        return branch;
-      }
+        touchedBranches.add(branch.id);
 
-      function findOrCreateRoom(branch, roomRaw, row){
+        const setBranchField = (field, key, isNum)=>{
+          const v = get(row,key);
+          if(v==='') return;
+          const value = isNum ? (Number(v)||0) : v;
+          if(isNewBranch) branch[field] = value;
+          else pendingBranchUpdates.push({ branch, field, value });
+        };
+        setBranchField('address','주소'); setBranchField('elevator','엘리베이터');
+        setBranchField('heatingType','난방방식'); setBranchField('hairDryer','헤어드라이기');
+        setBranchField('cleaningFee','청소비', true); setBranchField('doubleOccupancyFee','2인추가금', true);
+        setBranchField('sharedKitchenLocation','공용주방위치'); setBranchField('trashBagLocation','종량제봉투보관위치');
+        setBranchField('parkingCapacity','주차가능대수', true); setBranchField('memo','지점특이사항');
+
         let room = DB.rooms.find(r=> r.branchId===branch.id && normalizeRoomNo(r.number)===normalizeRoomNo(roomRaw))
           || newRooms.find(r=> r.branchId===branch.id && normalizeRoomNo(r.number)===normalizeRoomNo(roomRaw));
+        const isNewRoom = !room;
         if(!room){
-          const type = cleanKeyLoose(row['타입']) || '기타';
-          const occRaw = cleanKeyLoose(String(row['인실구분']||''));
-          const occupancy = (occRaw==='2' || occRaw==='2인실') ? '2인실' : '1인실';
-          const price = Number(row['정상입실료(원)']) || Number(row['정상입실료']) || 0;
-          room = { id: uid('r'), branchId: branch.id, number: roomRaw, type, occupancy, saleStatus:'공실',
-            needsCleaning:false, needsRetouch:false, needsExtraCleaning:false, note:'', price };
+          room = { id: uid('r'), branchId: branch.id, number: roomRaw, type: typeRaw, occupancy: occValue, saleStatus:'공실',
+            needsCleaning:false, needsRetouch:false, needsExtraCleaning:false, note:'', price:0 };
           newRooms.push(room);
           result.roomsCreated++;
+        } else {
+          if(!touchedRooms.has(room.id)) result.roomsUpdated++;
+          pendingRoomUpdates.push({ room, field:'type', value: typeRaw });
+          pendingRoomUpdates.push({ room, field:'occupancy', value: occValue });
         }
-        return room;
-      }
+        touchedRooms.add(room.id);
 
-      rows.forEach((row, idx)=>{
-        const branchRaw = cleanKeyLoose(row['지점명']);
-        const roomRaw = cleanKeyLoose(String(row['호실번호']||'')).replace(/호$/,'');
-        if(!branchRaw && !roomRaw) return; // 빈 여백 행
-
-        const branch = findOrCreateBranch(branchRaw);
-        const room = findOrCreateRoom(branch, roomRaw, row);
-
-        const nameRaw = cleanKeyLoose(row['이름']);
-        if(!nameRaw || nameRaw==='-' || nameRaw==='*'){ result.vacant++; return; }
-
-        if(slotCounters[room.id] == null){
-          slotCounters[room.id] = DB.residents.filter(p=>p.roomId===room.id).length;
-        }
-        const cap = occupancyCapacity(room);
-        const slot = slotCounters[room.id];
-        if(slot >= cap){
-          result.overCapacity.push(`[${idx+2}행] ${branch.name} ${room.number}호 "${nameRaw}" (정원 ${cap}명 초과로 제외)`);
-          return;
-        }
-        slotCounters[room.id] = slot + 1;
-
-        let phone = String(row['연락처']||'').trim();
-        if(phone.startsWith('=')) phone = phone.slice(1);
-        const moveIn = toISODateStr(row['입실일']);
-        const moveOut = toISODateStr(row['퇴실예정일']);
-        const p = {
-          id: uid('p'), roomId: room.id, name: nameRaw,
-          channel: '독립생활', resStatus:'', contractType:'신규',
-          moveIn, moveOut, originalMoveIn: moveIn, scheduledToLeave:false,
-          phone, memo:'', carNumber:'', firstSaveDone:true, slotIndex: slot
+        const setRoomField = (field, key, isNum)=>{
+          const v = get(row,key);
+          if(v==='') return;
+          const value = isNum ? (Number(v)||0) : v;
+          if(isNewRoom) room[field] = value;
+          else pendingRoomUpdates.push({ room, field, value });
         };
-        p.resStatus = computeResStatus(p);
-        newResidents.push(p);
-        result.matched++;
+        setRoomField('price','정상입실료', true); setRoomField('saleStatus','판매상태'); setRoomField('note','호실특이사항');
       });
 
-      const problems = [...result.overCapacity];
       showConfirm(
         `엑셀 분석 결과\n`+
         `- 새로 생성될 지점: ${result.branchesCreated}개\n`+
+        `- 정보가 업데이트될 기존 지점: ${result.branchesUpdated}개\n`+
         `- 새로 생성될 호실: ${result.roomsCreated}개\n`+
-        `- 추가로 등록될 입실자: ${result.matched}명\n`+
-        `- 건너뜀(이름 "-"/"*"): ${result.vacant}건\n`+
-        `- 정원 초과 제외: ${result.overCapacity.length}건\n\n`+
-        `위 내용을 현재 데이터에 추가할까요? (기존 입실자는 그대로 유지됩니다)`,
+        `- 정보가 업데이트될 기존 호실: ${result.roomsUpdated}개\n`+
+        (invalidRows.length ? `- 필수 항목 누락으로 제외된 행: ${invalidRows.length}건\n` : '') +
+        `\n위 내용을 반영할까요?`,
         ()=>{
           DB.branches.push(...newBranches);
           DB.rooms.push(...newRooms);
-          DB.residents.push(...newResidents);
-          logChange(`엑셀 일괄 업로드: 지점 ${result.branchesCreated}개·호실 ${result.roomsCreated}개 생성, 입실자 ${result.matched}명 추가`);
+          pendingBranchUpdates.forEach(u=> u.branch[u.field] = u.value);
+          pendingRoomUpdates.forEach(u=> u.room[u.field] = u.value);
+          logChange(`지점/호실 엑셀 일괄 업데이트: 지점 생성 ${result.branchesCreated}개·수정 ${result.branchesUpdated}개, 호실 생성 ${result.roomsCreated}개·수정 ${result.roomsUpdated}개`);
           scheduleSave();
           render();
-          if(problems.length){
-            showAlert(`업로드 완료 (${result.matched}명 추가). 다만 아래 ${problems.length}건은 반영되지 않았습니다:\n\n` +
-              problems.slice(0,30).join('\n') + (problems.length>30 ? `\n...외 ${problems.length-30}건` : ''));
+          if(invalidRows.length){
+            showAlert(`지점/호실 정보가 업데이트되었습니다.\n\n필수 항목(지점명/지점단축명/호실번호/타입/인실구분) 누락으로 제외된 행:\n` +
+              invalidRows.slice(0,30).join('\n') + (invalidRows.length>30 ? `\n...외 ${invalidRows.length-30}건` : ''));
           } else {
-            showAlert(`업로드가 완료되었습니다. (${result.matched}명 추가)`);
+            showAlert('지점/호실 정보가 업데이트되었습니다.');
           }
         }
       );
@@ -2651,39 +2676,6 @@ function handleResidentResyncFile(file){
     }
   };
   reader.readAsArrayBuffer(file);
-}
-
-function downloadCurrentData(){
-  if(typeof XLSX === 'undefined'){ showAlert('엑셀 라이브러리를 불러오지 못했습니다. 네트워크 연결을 확인해주세요.'); return; }
-  const wb = XLSX.utils.book_new();
-
-  const branchRows = DB.branches.map(b=> ({
-    지점명: b.name, 주소: b.address||'', 주차가능대수: b.parkingCapacity||0, 주차메모: b.parkingNote||'', 특이사항메모: b.memo||''
-  }));
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(branchRows), '지점');
-
-  const roomRows = DB.rooms.map(r=>{
-    const branch = DB.branches.find(b=>b.id===r.branchId);
-    return {
-      지점명: branch ? branch.name : '', 호실번호: r.number, 타입: r.type, 인실구분: r.occupancy,
-      판매상태: r.saleStatus, 정상입실료: r.price||0,
-      퇴실청소필요: r.needsCleaning ? 'O' : 'X', 리터치필요: r.needsRetouch ? 'O' : 'X', 추가청소필요: r.needsExtraCleaning ? 'O' : 'X', 호실특이사항: r.note||''
-    };
-  });
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(roomRows), '호실');
-
-  const residentRows = DB.residents.map(p=>{
-    const room = DB.rooms.find(r=>r.id===p.roomId);
-    const branch = room ? DB.branches.find(b=>b.id===room.branchId) : null;
-    return {
-      지점명: branch ? branch.name : '', 호실번호: room ? room.number : '', 순번: (p.slotIndex||0)+1,
-      이름: p.name||'', 연락처: p.phone||'', 유입채널: p.channel||'', 입실일: p.moveIn||'', 퇴실예정일: p.moveOut||'',
-      차량번호: p.carNumber||'', 메모: p.memo||''
-    };
-  });
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(residentRows), '입실자');
-
-  XLSX.writeFile(wb, `monthliv_현재데이터_${todayISO()}.xlsx`);
 }
 
 /* ---------------- 계약관리: 스프레드시트에서 복사한 표를 붙여넣어 호실별 계약 이력으로 저장 ---------------- */
@@ -3402,7 +3394,7 @@ function renderAdminView(){
   }
 
   wrap.appendChild(renderBranchRoomManagePanel());
-  wrap.appendChild(renderResidentResyncPanel());
+  wrap.appendChild(renderBranchRoomBulkUpdatePanel());
   wrap.appendChild(renderContractManagePanel());
   wrap.appendChild(renderChannelManagePanel());
   wrap.appendChild(renderUserManagePanel());
