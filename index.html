@@ -189,6 +189,9 @@
 
   .branch-view-text{ font-size:14px; font-weight:600; padding:2px 0; }
   .branch-view-text.title{ font-size:19px; font-weight:800; }
+  .branch-title-toggle{ cursor:pointer; display:inline-flex; align-items:center; }
+  .branch-title-toggle:hover{ color:var(--accent-ink); }
+  .branch-title-chevron{ font-size:13px; margin-left:8px; color:var(--ink-soft); }
   .branch-view-text.small{ font-size:12.5px; font-weight:400; color:var(--ink-soft); white-space:pre-wrap; }
 
   .overdue-banner{
@@ -548,7 +551,7 @@ let DB = null;
 let UI = {
   view:'stats', branchId:null, branchTab:'rooms',
   roomEditMode:{}, residentEditMode:{}, roomSnapshots:{}, residentSnapshots:{}, draftResident:{}, parkingListOpen:{}, residentFieldEdit:{},
-  branchEditMode:{}, branchSnapshots:{}, historyOpen:{}, addingBranch:false, addingRoom:false, managingRoom:false, editingBranchId:null,
+  branchEditMode:{}, branchSnapshots:{}, branchInfoOpen:{}, historyOpen:{}, addingBranch:false, addingRoom:false, managingRoom:false, editingBranchId:null,
   tlYear:null, tlMonth:null, roomStatusFilter:'이용중', cleanWeekStart:null, overdueTabKey:null,
   cleanTodayPage:1, cleanFuturePage:1
 };
@@ -1025,6 +1028,7 @@ function renderBranchView(){
 function renderBranchInfoBar(branch){
   const wrap = document.createElement('div');
   const editOn = !!UI.branchEditMode[branch.id];
+  const infoOpen = editOn || !!UI.branchInfoOpen[branch.id];
 
   const pencil = document.createElement('button');
   pencil.className = 'iconbtn branch-edit-pencil' + (editOn ? ' active' : '');
@@ -1071,14 +1075,22 @@ function renderBranchInfoBar(branch){
     });
     titleCol.appendChild(addressInput);
   } else {
-    const titleDiv = document.createElement('div'); titleDiv.className = 'branch-view-text title';
-    titleDiv.textContent = branch.name;
+    const titleDiv = document.createElement('div'); titleDiv.className = 'branch-view-text title branch-title-toggle';
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = branch.name;
+    titleDiv.appendChild(nameSpan);
     if(branch.address){
       const addrSpan = document.createElement('span');
       addrSpan.className = 'branch-address';
       addrSpan.textContent = branch.address;
       titleDiv.appendChild(addrSpan);
     }
+    const chevron = document.createElement('span');
+    chevron.className = 'branch-title-chevron';
+    chevron.textContent = infoOpen ? '▾' : '▸';
+    titleDiv.appendChild(chevron);
+    titleDiv.title = infoOpen ? '클릭하여 세부 정보 접기' : '클릭하여 세부 정보 펼치기';
+    titleDiv.onclick = ()=>{ UI.branchInfoOpen[branch.id] = !infoOpen; render(); };
     titleCol.appendChild(titleDiv);
   }
   bar.appendChild(titleCol);
@@ -1196,59 +1208,61 @@ function renderBranchInfoBar(branch){
     { label:'종량제 봉투', ...textField('trashBagLocation', '예: 1층 관리실', '종량제 봉투 보관위치') }
   ];
 
-  const infoCol = document.createElement('div'); infoCol.className = 'col';
-  const table = document.createElement('table');
-  table.className = 'branch-info-table';
-  const tbody = document.createElement('tbody');
-  for(let i=0; i<infoRows.length; i+=2){
-    const tr = document.createElement('tr');
-    [infoRows[i], infoRows[i+1]].forEach(row=>{
-      const th = document.createElement('td'); th.className = 'bi-label';
-      const td = document.createElement('td'); td.className = 'bi-value';
-      if(row){
-        th.textContent = row.label;
-        td.appendChild(editOn ? row.edit() : row.view());
-      }
-      tr.appendChild(th); tr.appendChild(td);
-    });
-    tbody.appendChild(tr);
-  }
-  table.appendChild(tbody);
-  infoCol.appendChild(table);
-  bar.appendChild(infoCol);
-
-  // ---- 출입문 비번 ----
-  const doorCol = document.createElement('div'); doorCol.className = 'col';
-  doorCol.appendChild(el('h3', null, '출입문 비번'));
-  if(editOn){
-    const doorInput = document.createElement('input');
-    doorInput.type = 'text'; doorInput.placeholder = '예: *1234#'; doorInput.value = branch.doorPasscode || '';
-    doorInput.addEventListener('input', ()=>{ logChange(`"${branch.name}" 출입문 비번 수정`); branch.doorPasscode = doorInput.value; scheduleSave(); });
-    doorCol.appendChild(doorInput);
-  } else {
-    doorCol.appendChild(el('div', 'branch-view-text', branch.doorPasscode || '-'));
-  }
-  bar.appendChild(doorCol);
-
-  // ---- 기타 특이사항 (맨 하단) ----
-  const memoCol = document.createElement('div'); memoCol.className = 'col';
-  memoCol.appendChild(el('h3', null, '기타 특이사항'));
-  if(editOn){
-    const memoArea = document.createElement('textarea');
-    memoArea.placeholder = '지점 전체 공지/특이사항';
-    memoArea.value = branch.memo;
-    memoArea.addEventListener('input', ()=>{ logChange(`"${branch.name}" 특이사항 메모 수정`); branch.memo = memoArea.value; scheduleSave(); });
-    memoCol.appendChild(memoArea);
-    memoCol.appendChild(renderMemoStyleControls(branch, 'memoColor', 'memoBold'));
-  } else {
-    const memoDiv = el('div', 'branch-view-text', branch.memo || '-', 'white-space:pre-wrap;');
-    if(branch.memo){
-      memoDiv.style.color = MEMO_COLORS[branch.memoColor] || MEMO_COLORS.black;
-      if(branch.memoBold) memoDiv.style.fontWeight = '700';
+  if(infoOpen){
+    const infoCol = document.createElement('div'); infoCol.className = 'col';
+    const table = document.createElement('table');
+    table.className = 'branch-info-table';
+    const tbody = document.createElement('tbody');
+    for(let i=0; i<infoRows.length; i+=2){
+      const tr = document.createElement('tr');
+      [infoRows[i], infoRows[i+1]].forEach(row=>{
+        const th = document.createElement('td'); th.className = 'bi-label';
+        const td = document.createElement('td'); td.className = 'bi-value';
+        if(row){
+          th.textContent = row.label;
+          td.appendChild(editOn ? row.edit() : row.view());
+        }
+        tr.appendChild(th); tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
     }
-    memoCol.appendChild(memoDiv);
+    table.appendChild(tbody);
+    infoCol.appendChild(table);
+    bar.appendChild(infoCol);
+
+    // ---- 출입문 비번 ----
+    const doorCol = document.createElement('div'); doorCol.className = 'col';
+    doorCol.appendChild(el('h3', null, '출입문 비번'));
+    if(editOn){
+      const doorInput = document.createElement('input');
+      doorInput.type = 'text'; doorInput.placeholder = '예: *1234#'; doorInput.value = branch.doorPasscode || '';
+      doorInput.addEventListener('input', ()=>{ logChange(`"${branch.name}" 출입문 비번 수정`); branch.doorPasscode = doorInput.value; scheduleSave(); });
+      doorCol.appendChild(doorInput);
+    } else {
+      doorCol.appendChild(el('div', 'branch-view-text', branch.doorPasscode || '-'));
+    }
+    bar.appendChild(doorCol);
+
+    // ---- 기타 특이사항 (맨 하단) ----
+    const memoCol = document.createElement('div'); memoCol.className = 'col';
+    memoCol.appendChild(el('h3', null, '기타 특이사항'));
+    if(editOn){
+      const memoArea = document.createElement('textarea');
+      memoArea.placeholder = '지점 전체 공지/특이사항';
+      memoArea.value = branch.memo;
+      memoArea.addEventListener('input', ()=>{ logChange(`"${branch.name}" 특이사항 메모 수정`); branch.memo = memoArea.value; scheduleSave(); });
+      memoCol.appendChild(memoArea);
+      memoCol.appendChild(renderMemoStyleControls(branch, 'memoColor', 'memoBold'));
+    } else {
+      const memoDiv = el('div', 'branch-view-text', branch.memo || '-', 'white-space:pre-wrap;');
+      if(branch.memo){
+        memoDiv.style.color = MEMO_COLORS[branch.memoColor] || MEMO_COLORS.black;
+        if(branch.memoBold) memoDiv.style.fontWeight = '700';
+      }
+      memoCol.appendChild(memoDiv);
+    }
+    bar.appendChild(memoCol);
   }
-  bar.appendChild(memoCol);
 
   wrap.appendChild(bar);
 
