@@ -657,9 +657,9 @@ function seedState(){
 
   return {
     branches: [
-      { id: branchSeongsu, name: '먼슬리브 성수', address: '', parkingNote: '', parkingCapacity: 0, memo: '' },
-      { id: branchJamsil, name: '먼슬리브 잠실', address: '', parkingNote: '건물 뒤 2대 가능 (297구4624, 272모3214)', parkingCapacity: 2, memo: '' },
-      { id: branchDoksan, name: '먼슬리브 가산독산', address: '', parkingNote: '건물 앞 1대만 가능 (4번 자리)', parkingCapacity: 1, memo: '' }
+      { id: branchSeongsu, name: '먼슬리브 성수', address: '', parkingCapacity: 0, memo: '' },
+      { id: branchJamsil, name: '먼슬리브 잠실', address: '', parkingCapacity: 2, memo: '' },
+      { id: branchDoksan, name: '먼슬리브 가산독산', address: '', parkingCapacity: 1, memo: '' }
     ],
     rooms, residents, residentHistory: [], contracts: [], channelList: [...DEFAULT_CHANNEL_LIST]
   };
@@ -1127,12 +1127,6 @@ function renderBranchInfoBar(branch){
       }
       div.appendChild(list);
     }
-    if(branch.parkingNote){
-      const pnDiv = el('div', 'branch-view-text small', branch.parkingNote, 'margin-top:4px;');
-      pnDiv.style.color = MEMO_COLORS[branch.parkingNoteColor] || MEMO_COLORS.black;
-      if(branch.parkingNoteBold) pnDiv.style.fontWeight = '700';
-      div.appendChild(pnDiv);
-    }
     return div;
   }
   function parkingEdit(){
@@ -1142,20 +1136,10 @@ function renderBranchInfoBar(branch){
     capSel.addEventListener('change', ()=>{
       const newCap = Number(capSel.value);
       logChange(`"${branch.name}" 주차 가능 대수 변경: ${branch.parkingCapacity||0}대 → ${newCap}대${parkingGroupNote()}`);
-      syncParkingGroupCapacity(branch, newCap);
+      branch.parkingCapacity = newCap;
       scheduleSave(); render();
     });
     div.appendChild(capSel);
-    const groupInput = document.createElement('input');
-    groupInput.type = 'text';
-    groupInput.placeholder = '주차 공유 그룹명 (예: 신대방삼거리) — 같은 이름을 입력한 지점끼리 주차 대수·이용현황을 합산합니다';
-    groupInput.value = branch.parkingGroup || '';
-    groupInput.style.marginTop = '8px';
-    groupInput.addEventListener('input', ()=>{
-      logChange(`"${branch.name}" 주차 공유 그룹 수정: "${branch.parkingGroup||''}" → "${groupInput.value}"`);
-      branch.parkingGroup = groupInput.value; scheduleSave();
-    });
-    div.appendChild(groupInput);
     const activeList = branchActiveCarResidents(branch);
     const summary = document.createElement('div');
     summary.className = 'parking-summary';
@@ -1179,13 +1163,6 @@ function renderBranchInfoBar(branch){
       }
       div.appendChild(list);
     }
-    const parkingNote = document.createElement('textarea');
-    parkingNote.placeholder = '예: 건물 뒤 2대 가능';
-    parkingNote.value = branch.parkingNote;
-    parkingNote.style.marginTop = '8px';
-    parkingNote.addEventListener('input', ()=>{ logChange(`"${branch.name}" 주차 메모 수정`); branch.parkingNote = parkingNote.value; scheduleSave(); });
-    div.appendChild(parkingNote);
-    div.appendChild(renderMemoStyleControls(branch, 'parkingNoteColor', 'parkingNoteBold'));
     return div;
   }
   function textField(field, placeholder, logLabel){
@@ -1526,24 +1503,26 @@ function processScheduledLeaves(){
 function roomHasActiveResident(room){
   return DB.residents.some(p => p.roomId===room.id && occupiesRoom(p));
 }
-function branchParkingGroupBranches(branch){
-  // 같은 "주차 공유 그룹명"을 입력한 지점끼리는 주차 가능 대수·이용현황을 합산해서 관리합니다.
-  // (예: A동/B동처럼 물리적으로 주차 공간을 나눠 쓰지 않고 하나로 관리하는 경우)
-  if(!branch) return [];
-  const key = branch.parkingGroup && cleanKeyLoose(branch.parkingGroup).toLowerCase();
-  if(!key) return [branch];
-  return DB.branches.filter(b=> b.parkingGroup && cleanKeyLoose(b.parkingGroup).toLowerCase()===key);
+function branchParkingCombineGroup(branch){
+  // 신대방삼거리역 A동/B동은 물리적으로 주차 공간을 나눠 쓰지 않고 하나로 관리하므로,
+  // 이 지점들만 예외적으로 이용 현황(대수)을 항상 합산해서 보여준다. (다른 지점은 해당 없음)
+  if(!branch || !cleanKeyLoose(branch.name).includes('신대방삼거리역')) return [branch].filter(Boolean);
+  return DB.branches.filter(b=> cleanKeyLoose(b.name).includes('신대방삼거리역'));
 }
-function syncParkingGroupCapacity(branch, newCap){
-  branchParkingGroupBranches(branch).forEach(b=> b.parkingCapacity = newCap);
+function branchParkingCapCeiling(branch){
+  // 합산 대상 지점끼리는 실제 물리적 주차 대수를 관리하는 B동 지점의 설정값을 초과 여부 판단 기준으로 쓴다.
+  const group = branchParkingCombineGroup(branch);
+  if(group.length <= 1) return branch.parkingCapacity || 0;
+  const bBranch = group.find(b=> cleanKeyLoose(b.name).includes('B동'));
+  return (bBranch || branch).parkingCapacity || 0;
 }
 function branchParkingGroupSuffix(branch){
-  const group = branchParkingGroupBranches(branch);
+  const group = branchParkingCombineGroup(branch);
   if(group.length <= 1) return '';
   return ` (${group.map(b=>branchLabel(b)).join('+')} 합산)`;
 }
 function branchActiveCarResidents(branch){
-  const group = branchParkingGroupBranches(branch);
+  const group = branchParkingCombineGroup(branch);
   const branchIds = new Set(group.map(b=>b.id));
   const isGrouped = group.length > 1;
   const roomIds = new Set(DB.rooms.filter(r=>branchIds.has(r.branchId)).map(r=>r.id));
@@ -1559,7 +1538,7 @@ function branchActiveCarResidents(branch){
     });
 }
 function branchActiveCarCount(branch, excludeResidentId){
-  const group = branchParkingGroupBranches(branch);
+  const group = branchParkingCombineGroup(branch);
   const branchIds = new Set(group.map(b=>b.id));
   const roomIds = new Set(DB.rooms.filter(r=>branchIds.has(r.branchId)).map(r=>r.id));
   return DB.residents.filter(p =>
@@ -1916,7 +1895,7 @@ function wouldExceedParking(p, candidateMoveIn, candidateMoveOut){
   const branch = room ? DB.branches.find(b=>b.id===room.branchId) : null;
   if(!branch) return null;
   if(!occupiesRoom({ moveIn: candidateMoveIn, moveOut: candidateMoveOut })) return null;
-  const cap = branch.parkingCapacity || 0;
+  const cap = branchParkingCapCeiling(branch);
   const others = branchActiveCarCount(branch, p.id);
   const projected = others + 1;
   if(projected > cap) return { branch, cap, others, projected };
@@ -2597,7 +2576,7 @@ function downloadBranchRoomUpdateTemplate(){
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(guideRows), '안내');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([{
     지점명:'먼슬리브 예시지점', 지점단축명:'예시', 주소:'서울시 성동구 ...', 엘리베이터:'있음', 난방방식:'개별난방', 헤어드라이기:'있음',
-    청소비:50000, '2인추가금':'100000원', 공용주방위치:'2층 복도 끝', 종량제봉투보관위치:'1층 관리실', 주차가능대수:2, 주차비용:'30000원', 주차공유그룹:'', 출입문비번:'*1234#', 지점특이사항:'',
+    청소비:50000, '2인추가금':'100000원', 공용주방위치:'2층 복도 끝', 종량제봉투보관위치:'1층 관리실', 주차가능대수:2, 주차비용:'30000원', 출입문비번:'*1234#', 지점특이사항:'',
     호실번호:'101', 타입:'그레이스', 인실구분:'1인실', 정상입실료:450000, 판매상태:'공실', 호실특이사항:''
   }]), 'Sheet1');
   XLSX.writeFile(wb, 'monthliv_지점호실_업데이트_양식.xlsx');
@@ -2613,7 +2592,7 @@ function downloadBranchRoomCurrentData(){
       엘리베이터: b ? (b.elevator||'') : '', 난방방식: b ? (b.heatingType||'') : '', 헤어드라이기: b ? (b.hairDryer||'') : '',
       청소비: b ? (b.cleaningFee||0) : 0, '2인추가금': b ? (b.doubleOccupancyFee||'') : '',
       공용주방위치: b ? (b.sharedKitchenLocation||'') : '', 종량제봉투보관위치: b ? (b.trashBagLocation||'') : '',
-      주차가능대수: b ? (b.parkingCapacity||0) : 0, 주차비용: b ? (b.parkingFee||'') : '', 주차공유그룹: b ? (b.parkingGroup||'') : '', 출입문비번: b ? (b.doorPasscode||'') : '',
+      주차가능대수: b ? (b.parkingCapacity||0) : 0, 주차비용: b ? (b.parkingFee||'') : '', 출입문비번: b ? (b.doorPasscode||'') : '',
       지점특이사항: b ? (b.memo||'') : '',
       호실번호: r.number, 타입: r.type, 인실구분: r.occupancy, 정상입실료: r.price||0, 판매상태: r.saleStatus, 호실특이사항: r.note||''
     };
@@ -2668,7 +2647,7 @@ function handleBranchRoomBulkUpdateFile(file){
         const isNewBranch = !branch;
         if(!branch){
           branch = { id: uid('b'), name: resolvedName, shortName: shortNameRaw, address:'', elevator:'', heatingType:'', hairDryer:'',
-            cleaningFee:0, doubleOccupancyFee:'', sharedKitchenLocation:'', trashBagLocation:'', parkingNote:'', parkingCapacity:0, parkingFee:'', parkingGroup:'', doorPasscode:'', memo:'' };
+            cleaningFee:0, doubleOccupancyFee:'', sharedKitchenLocation:'', trashBagLocation:'', parkingCapacity:0, parkingFee:'', doorPasscode:'', memo:'' };
           newBranches.push(branch);
           result.branchesCreated++;
         } else {
@@ -2689,7 +2668,7 @@ function handleBranchRoomBulkUpdateFile(file){
         setBranchField('cleaningFee','청소비', true); setBranchField('doubleOccupancyFee','2인추가금');
         setBranchField('sharedKitchenLocation','공용주방위치'); setBranchField('trashBagLocation','종량제봉투보관위치');
         setBranchField('parkingCapacity','주차가능대수', true); setBranchField('parkingFee','주차비용');
-        setBranchField('parkingGroup','주차공유그룹'); setBranchField('doorPasscode','출입문비번'); setBranchField('memo','지점특이사항');
+        setBranchField('doorPasscode','출입문비번'); setBranchField('memo','지점특이사항');
 
         let room = DB.rooms.find(r=> r.branchId===branch.id && normalizeRoomNo(r.number)===normalizeRoomNo(roomRaw))
           || newRooms.find(r=> r.branchId===branch.id && normalizeRoomNo(r.number)===normalizeRoomNo(roomRaw));
@@ -2763,7 +2742,7 @@ function renderContractManagePanel(){
       계약내용 / 계약일 / 계약기간 / 고시원 명 / 방이름 / 계약자 / 계약자 연락처 / 입실자 / 입실료 / 결제금액 / 계약구분 / 결제구분 / 보증금 / 보증금 안내
       순서의 표를 텍스트로 붙여넣거나, 같은 형식의 엑셀 파일을 업로드하면 고시원 명·방이름으로 지점·호실을 찾아 계약 이력으로 저장합니다.
       각 호실 카드의 "계약현황" 버튼에서 확인할 수 있습니다.<br>
-      해당 호실에 입실자가 없거나 기존 입실자의 계약이 만기 지난 상태라면, 계약일이 가장 최신인 건을 기준으로 기존 입실자는 계약 종료일에 퇴실 처리하고 새 입실자 정보(이름·연락처·입실일·퇴실일)를 자동으로 반영합니다.
+      빈 호실이면 계약일이 가장 최신인 건을 기준으로 새 입실자 정보(이름·연락처·입실일·퇴실일)를 자동으로 채워줍니다. 이미 입실자가 있는 호실은 입실자 정보는 그대로 두고 계약 이력만 저장하며, 최신 계약의 종료일과 입실자의 퇴실예정일이 다르면 "계약현황" 버튼에 하이라이트로 표시됩니다.
     </div>`;
   const btnRow = document.createElement('div');
   btnRow.style.cssText = 'display:flex; gap:8px; align-items:center; flex-wrap:wrap;';
@@ -2984,8 +2963,10 @@ function importContractGrid(headerCells, dataRows, onImported){
     return;
   }
 
-  // 호실별로 계약일이 가장 최신인 건 하나만 골라, 그 호실의 실제 입실자 정보를 자동 갱신할지 판단한다.
-  // (한 번에 여러 건의 계약 이력이 붙여넣기 될 수 있으므로, 입실자 갱신은 호실당 최신 계약 1건에만 적용)
+  // 호실별로 계약일이 가장 최신인 건 하나만 골라, 빈 방이면 그 계약 정보로 입실자를 새로 등록한다.
+  // (한 번에 여러 건의 계약 이력이 붙여넣기 될 수 있으므로, 입실자 등록은 호실당 최신 계약 1건에만 적용)
+  // 이미 입실자가 있는 방은 건드리지 않는다 — 계약 이력만 저장하고, 최신 계약의 종료일과 입실자의
+  // 퇴실예정일이 다르면 "계약현황" 버튼의 기존 하이라이트 기능으로 담당자가 직접 확인하도록 한다.
   const latestByRoom = new Map();
   newContracts.forEach(c=>{
     const prev = latestByRoom.get(c.roomId);
@@ -2997,8 +2978,7 @@ function importContractGrid(headerCells, dataRows, onImported){
     const room = DB.rooms.find(r=>r.id===c.roomId);
     if(!room) return;
     const roomResidents = DB.residents.filter(p=>p.roomId===room.id);
-    const canReplace = roomResidents.length===0 || roomResidents.every(p=> isOverdue(p));
-    if(!canReplace) return;
+    if(roomResidents.length > 0) return;
     const range = parseContractPeriodRange(c.contractPeriod);
     const residentName = c.resident || c.contractor;
     if(!range || !residentName){ residentSkipCount++; return; }
@@ -3009,29 +2989,23 @@ function importContractGrid(headerCells, dataRows, onImported){
       carNumber:'', memo:'', firstSaveDone:true, slotIndex:0
     };
     newResident.resStatus = computeResStatus(newResident);
-    residentSyncActions.push({ room, newResident, oldResidents: roomResidents.slice() });
+    residentSyncActions.push({ room, newResident });
   });
-  const residentsCheckedOut = residentSyncActions.reduce((sum,a)=> sum + a.oldResidents.length, 0);
 
   showConfirm(
     `계약 데이터 ${newContracts.length}건을 가져올까요?`
       + (duplicateCount ? `\n(이미 등록된 중복 ${duplicateCount}건은 제외됩니다)` : '')
       + (unmatched.length ? `\n(호실을 찾지 못한 ${unmatched.length}건은 제외됩니다)` : '')
-      + (residentSyncActions.length ? `\n\n입실자 없거나 계약 만기 지난 호실 ${residentSyncActions.length}곳의 입실자 정보를 최신 계약 기준으로 자동 반영합니다.${residentsCheckedOut ? ` (기존 입실자 ${residentsCheckedOut}명 퇴실 처리)` : ''}` : '')
-      + (residentSkipCount ? `\n(계약기간·입실자 정보가 불명확해 입실자 자동 반영을 건너뛴 호실: ${residentSkipCount}곳)` : ''),
+      + (residentSyncActions.length ? `\n\n빈 호실 ${residentSyncActions.length}곳에 새 계약자 정보로 입실자를 등록합니다.` : '')
+      + (residentSkipCount ? `\n(계약기간·입실자 정보가 불명확해 입실자 등록을 건너뛴 호실: ${residentSkipCount}곳)` : ''),
     ()=>{
       DB.contracts.push(...newContracts);
-      residentSyncActions.forEach(action=>{
-        // 새 입실자를 먼저 등록해야, 기존 입실자를 퇴실 처리할 때 호실이 일시적으로 "공실"로
-        // 잘못 표시되며 청소 대상으로 잡히는 것을 막을 수 있다.
-        DB.residents.push(action.newResident);
-        action.oldResidents.forEach(p=> moveResidentToHistory(p, p.moveOut));
-      });
-      logChange(`계약 데이터 가져오기: ${newContracts.length}건 추가${duplicateCount ? ` (중복 ${duplicateCount}건 제외)` : ''}${unmatched.length ? ` (미매칭 ${unmatched.length}건)` : ''}${residentSyncActions.length ? ` / 입실자 자동 반영 ${residentSyncActions.length}건` : ''}`);
+      residentSyncActions.forEach(action=> DB.residents.push(action.newResident));
+      logChange(`계약 데이터 가져오기: ${newContracts.length}건 추가${duplicateCount ? ` (중복 ${duplicateCount}건 제외)` : ''}${unmatched.length ? ` (미매칭 ${unmatched.length}건)` : ''}${residentSyncActions.length ? ` / 빈 호실 입실자 등록 ${residentSyncActions.length}건` : ''}`);
       scheduleSave(); render();
       if(typeof onImported === 'function') onImported();
       showAlert(`${newContracts.length}건을 가져왔습니다.`
-        + (residentSyncActions.length ? `\n입실자 정보를 자동 반영한 호실: ${residentSyncActions.length}곳${residentsCheckedOut ? ` (기존 입실자 ${residentsCheckedOut}명 퇴실 처리)` : ''}` : '')
+        + (residentSyncActions.length ? `\n빈 호실에 새 입실자를 등록한 곳: ${residentSyncActions.length}곳` : '')
         + (duplicateCount ? `\n이미 등록되어 제외된 중복 데이터: ${duplicateCount}건` : '')
         + (unmatched.length ? `\n\n호실을 찾지 못한 항목:\n${unmatched.slice(0,20).join('\n')}${unmatched.length>20 ? `\n...외 ${unmatched.length-20}건` : ''}` : ''));
     }
@@ -3691,7 +3665,6 @@ const BRANCH_FORM_FIELDS_HTML = (prefix, v)=> `
     <div class="fld"><label class="field-label">주차 가능 대수</label>
       <select id="${prefix}Cap">${Array.from({length:11},(_,i)=>`<option value="${i}" ${((v.parkingCapacity||0)===i)?'selected':''}>${i}대</option>`).join('')}</select></div>
     <div class="fld"><label class="field-label">주차비용</label><input type="text" id="${prefix}ParkingFee" placeholder="예: 30000원" value="${esc(v.parkingFee||'')}"></div>
-    <div class="fld"><label class="field-label">주차 공유 그룹명</label><input type="text" id="${prefix}ParkingGroup" placeholder="같은 이름끼리 대수·이용현황 합산" value="${esc(v.parkingGroup||'')}"></div>
     <div class="fld"><label class="field-label">출입문 비번</label><input type="text" id="${prefix}Door" placeholder="예: *1234#" value="${esc(v.doorPasscode||'')}"></div>
     <div class="fld" style="grid-column:1/-1;"><label class="field-label">기타 특이사항</label><textarea id="${prefix}Memo">${esc(v.memo||'')}</textarea></div>
   `;
@@ -3724,13 +3697,11 @@ function renderAdminAddBranchForm(){
         sharedKitchenLocation: document.getElementById('nbKitchen').value.trim(),
         trashBagLocation: document.getElementById('nbTrashBag').value.trim(),
         parkingFee: document.getElementById('nbParkingFee').value.trim(),
-        parkingGroup: document.getElementById('nbParkingGroup').value.trim(),
         doorPasscode: document.getElementById('nbDoor').value.trim(),
-        parkingNote:'', parkingCapacity: Number(document.getElementById('nbCap').value) || 0,
+        parkingCapacity: Number(document.getElementById('nbCap').value) || 0,
         memo: document.getElementById('nbMemo').value
       };
       DB.branches.push(nb);
-      if(nb.parkingGroup) syncParkingGroupCapacity(nb, nb.parkingCapacity);
       logChange(`"${name}" 지점 신규 등록`);
       UI.addingBranch = false;
       scheduleSave(); render();
@@ -3766,10 +3737,8 @@ function renderAdminEditBranchForm(branch){
       branch.sharedKitchenLocation = document.getElementById('ebKitchen').value.trim();
       branch.trashBagLocation = document.getElementById('ebTrashBag').value.trim();
       branch.parkingFee = document.getElementById('ebParkingFee').value.trim();
-      branch.parkingGroup = document.getElementById('ebParkingGroup').value.trim();
       branch.doorPasscode = document.getElementById('ebDoor').value.trim();
       branch.parkingCapacity = Number(document.getElementById('ebCap').value) || 0;
-      if(branch.parkingGroup) syncParkingGroupCapacity(branch, branch.parkingCapacity);
       branch.memo = document.getElementById('ebMemo').value;
       logChange(`"${branch.name}" 지점 정보 수정`);
       UI.editingBranchId = null;
