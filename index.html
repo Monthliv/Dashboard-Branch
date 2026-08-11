@@ -1463,7 +1463,7 @@ function moveResidentToHistory(p, moveOutOverride){
     room.needsRetouch = false;
     room.needsExtraCleaning = false;
     room.maintenanceDate = nextMonWedFri(todayISO());
-    room.maintenanceMemo = '퇴실청소';
+    room.maintenanceMemo = '';
   }
 }
 function restoreFromHistory(h){
@@ -3961,6 +3961,17 @@ function collectCleaningEntries(){
   return entries;
 }
 
+function completeCleaningEntry(room, type){
+  const field = MAINT_KIND_FIELD[type];
+  if(!field || !room[field]) return;
+  const label = MAINT_KIND_META[type].label;
+  room[field] = false;
+  room.maintenanceDate = '';
+  room.maintenanceMemo = '';
+  logChange(`${room.number}호 ${label} 완료 처리`);
+  scheduleSave(); render();
+}
+
 function goToBranchRooms(branchId){
   UI.view='branch'; UI.branchId = branchId; UI.branchTab='rooms'; UI.roomStatusFilter='이용중'; render();
 }
@@ -4174,7 +4185,18 @@ function renderTodayCleaningCard(list){
       const row = document.createElement('div');
       row.className = 'cleaning-row';
       const kindBadge = maintBadgeHtml(x.type);
-      row.innerHTML = `<span class="rm">${esc(x.room.number)}호</span><span class="kind">${kindBadge}</span>`;
+      row.innerHTML = `<span class="rm">${esc(x.room.number)}호</span>`;
+      const kindSpan = document.createElement('span');
+      kindSpan.className = 'kind';
+      kindSpan.innerHTML = kindBadge;
+      if(canEdit() && x.room[MAINT_KIND_FIELD[x.type]]){
+        const doneBtn = document.createElement('button');
+        doneBtn.className = 'btn small primary';
+        doneBtn.textContent = '청소완료';
+        doneBtn.onclick = (e)=>{ e.stopPropagation(); completeCleaningEntry(x.room, x.type); };
+        kindSpan.appendChild(doneBtn);
+      }
+      row.appendChild(kindSpan);
       row.style.cursor = 'pointer';
       row.title = '해당 지점으로 이동';
       row.onclick = ()=>{
