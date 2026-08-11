@@ -1153,7 +1153,7 @@ function renderBranchInfoBar(branch){
     groupInput.style.marginTop = '8px';
     groupInput.addEventListener('input', ()=>{
       logChange(`"${branch.name}" 주차 공유 그룹 수정: "${branch.parkingGroup||''}" → "${groupInput.value}"`);
-      branch.parkingGroup = groupInput.value; scheduleSave(); render();
+      branch.parkingGroup = groupInput.value; scheduleSave();
     });
     div.appendChild(groupInput);
     const activeList = branchActiveCarResidents(branch);
