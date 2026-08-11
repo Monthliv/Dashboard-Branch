@@ -414,6 +414,37 @@
   .channel-chip .iconbtn{ width:20px; height:20px; border-radius:50%; }
   .channel-add-row{ display:flex; gap:8px; align-items:center; }
   .channel-add-row input{ flex:1; max-width:280px; }
+
+  .shortcuts-layout{ display:flex; gap:16px; align-items:flex-start; }
+  .shortcuts-lnb{ flex:0 0 260px; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; }
+  .shortcuts-lnb h3{ margin:0 0 12px; font-size:14px; }
+  .shortcuts-lnb-list{ display:flex; flex-direction:column; gap:2px; margin-bottom:14px; }
+  .shortcuts-lnb-item{ display:flex; align-items:center; gap:4px; }
+  .shortcuts-lnb-item button.link{
+    flex:1; text-align:left; background:none; border:none; padding:9px 10px; border-radius:8px;
+    font-size:13px; font-weight:600; color:var(--ink); cursor:pointer; font-family:inherit;
+  }
+  .shortcuts-lnb-item button.link:hover{ background:#FAF8F2; }
+  .shortcuts-lnb-item button.link.active{ background:var(--accent-soft); color:var(--accent-ink); }
+  .shortcuts-add-row{ display:flex; flex-direction:column; gap:8px; padding-top:12px; border-top:1px dashed var(--line); }
+  .shortcuts-add-row input{ width:100%; }
+  .shortcuts-frame-wrap{
+    flex:1; min-width:0; height:75vh; display:flex; flex-direction:column;
+    background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:hidden;
+  }
+  .shortcuts-frame-head{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:10px 14px; border-bottom:1px solid var(--line); font-size:12.5px; font-weight:700; flex:none;
+  }
+  .shortcuts-frame-head a{ color:var(--accent-ink); font-weight:600; font-size:12px; text-decoration:none; }
+  .shortcuts-frame-head a:hover{ text-decoration:underline; }
+  .shortcuts-frame-wrap iframe{ flex:1; width:100%; border:none; display:block; }
+  .shortcuts-empty{ flex:1; display:flex; align-items:center; justify-content:center; color:var(--ink-soft); font-size:13px; }
+  @media (max-width: 900px){
+    .shortcuts-layout{ flex-direction:column; }
+    .shortcuts-lnb{ flex:none; width:100%; }
+    .shortcuts-frame-wrap{ width:100%; height:60vh; }
+  }
   .user-entry{ padding:8px 0; border-bottom:1px dashed var(--line); }
   .user-entry:last-child{ border-bottom:none; }
   .user-row{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
@@ -536,6 +567,7 @@
       <div style="display:flex; gap:8px; align-items:center;">
         <span class="sub" id="loggedInAs"></span>
         <button class="btn small" id="cleaningBtn">청소 관리</button>
+        <button class="btn small" id="shortcutsBtn">바로가기</button>
         <button class="btn small" id="adminBtn" style="display:none;">관리자 설정</button>
         <button class="btn small" id="changePwBtn">비밀번호 변경</button>
         <button class="btn small" id="logoutBtn">로그아웃</button>
@@ -553,7 +585,7 @@ let UI = {
   roomEditMode:{}, residentEditMode:{}, roomSnapshots:{}, residentSnapshots:{}, draftResident:{}, parkingListOpen:{}, residentFieldEdit:{},
   branchEditMode:{}, branchSnapshots:{}, branchInfoOpen:{}, historyOpen:{}, addingBranch:false, addingRoom:false, managingRoom:false, editingBranchId:null,
   tlYear:null, tlMonth:null, roomStatusFilter:'이용중', cleanWeekStart:null, overdueTabKey:null,
-  cleanTodayPage:1, cleanFuturePage:1
+  cleanTodayPage:1, cleanFuturePage:1, shortcutSelectedId:null
 };
 
 function uid(p){ return p + '_' + Math.random().toString(36).slice(2,9); }
@@ -661,7 +693,7 @@ function seedState(){
       { id: branchJamsil, name: '먼슬리브 잠실', address: '', parkingCapacity: 2, memo: '' },
       { id: branchDoksan, name: '먼슬리브 가산독산', address: '', parkingCapacity: 1, memo: '' }
     ],
-    rooms, residents, residentHistory: [], contracts: [], channelList: [...DEFAULT_CHANNEL_LIST]
+    rooms, residents, residentHistory: [], contracts: [], channelList: [...DEFAULT_CHANNEL_LIST], shortcuts: []
   };
 }
 
@@ -783,6 +815,7 @@ function render(){
   if(UI.view === 'stats'){ main.appendChild(renderStatsView()); return; }
   if(UI.view === 'admin'){ main.appendChild(renderAdminView()); return; }
   if(UI.view === 'cleaning'){ main.appendChild(renderCleaningView()); return; }
+  if(UI.view === 'shortcuts'){ main.appendChild(renderShortcutsView()); return; }
   main.appendChild(renderBranchView());
 }
 
@@ -807,6 +840,10 @@ function renderTopNav(){
   const cleaningBtn = document.getElementById('cleaningBtn');
   cleaningBtn.className = 'btn small' + (UI.view==='cleaning' ? ' primary' : '');
   cleaningBtn.onclick = ()=>{ UI.view = 'cleaning'; render(); };
+
+  const shortcutsBtn = document.getElementById('shortcutsBtn');
+  shortcutsBtn.className = 'btn small' + (UI.view==='shortcuts' ? ' primary' : '');
+  shortcutsBtn.onclick = ()=>{ UI.view = 'shortcuts'; render(); };
 
   const adminBtn = document.getElementById('adminBtn');
   adminBtn.style.display = isSuperAdmin() ? '' : 'none';
@@ -3413,6 +3450,107 @@ function renderChannelManagePanel(){
   return box;
 }
 
+/* ---------------- 바로가기(유용한 기능 링크 모음) ---------------- */
+function renderShortcutsView(){
+  const wrap = document.createElement('div');
+  wrap.style.paddingTop = '18px';
+  wrap.className = 'shortcuts-layout';
+
+  if((UI.shortcutSelectedId==null || !DB.shortcuts.some(s=>s.id===UI.shortcutSelectedId)) && DB.shortcuts.length){
+    UI.shortcutSelectedId = DB.shortcuts[0].id;
+  }
+
+  const lnb = document.createElement('div');
+  lnb.className = 'shortcuts-lnb';
+  lnb.appendChild(el('h3', null, '바로가기'));
+
+  const list = document.createElement('div');
+  list.className = 'shortcuts-lnb-list';
+  if(DB.shortcuts.length===0){
+    list.appendChild(el('div','cleaning-empty','등록된 바로가기가 없습니다.'));
+  } else {
+    DB.shortcuts.forEach(s=>{
+      const item = document.createElement('div');
+      item.className = 'shortcuts-lnb-item';
+      const linkBtn = document.createElement('button');
+      linkBtn.className = 'link' + (UI.shortcutSelectedId===s.id ? ' active' : '');
+      linkBtn.textContent = s.name;
+      linkBtn.onclick = ()=>{ UI.shortcutSelectedId = s.id; render(); };
+      item.appendChild(linkBtn);
+      if(canEdit()){
+        const delBtn = document.createElement('button');
+        delBtn.className = 'iconbtn del';
+        delBtn.innerHTML = '&times;';
+        delBtn.title = '이 바로가기 삭제';
+        delBtn.onclick = ()=>{
+          showConfirm(`"${s.name}" 바로가기를 삭제할까요?`, ()=>{
+            DB.shortcuts = DB.shortcuts.filter(x=>x.id!==s.id);
+            if(UI.shortcutSelectedId===s.id) UI.shortcutSelectedId = DB.shortcuts[0] ? DB.shortcuts[0].id : null;
+            logChange(`"${s.name}" 바로가기 삭제`);
+            scheduleSave(); render();
+          });
+        };
+        item.appendChild(delBtn);
+      }
+      list.appendChild(item);
+    });
+  }
+  lnb.appendChild(list);
+
+  if(canEdit()){
+    const addRow = document.createElement('div');
+    addRow.className = 'shortcuts-add-row';
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text'; nameInput.placeholder = '기능명 (예: 환불금액 계산기)';
+    const urlInput = document.createElement('input');
+    urlInput.type = 'text'; urlInput.placeholder = '링크 주소 (예: https://...)';
+    const addBtn = document.createElement('button');
+    addBtn.className = 'btn small primary';
+    addBtn.textContent = '+ 바로가기 추가';
+    const doAdd = ()=>{
+      const name = nameInput.value.trim();
+      let url = urlInput.value.trim();
+      if(!name || !url){ showAlert('기능명과 링크 주소를 모두 입력해주세요.'); return; }
+      if(!/^https?:\/\//i.test(url)) url = 'https://' + url;
+      const s = { id: uid('sc'), name, url };
+      DB.shortcuts.push(s);
+      UI.shortcutSelectedId = s.id;
+      logChange(`"${name}" 바로가기 추가`);
+      scheduleSave(); render();
+    };
+    addBtn.onclick = doAdd;
+    urlInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') doAdd(); });
+    addRow.appendChild(nameInput); addRow.appendChild(urlInput); addRow.appendChild(addBtn);
+    lnb.appendChild(addRow);
+  }
+
+  wrap.appendChild(lnb);
+
+  const frameWrap = document.createElement('div');
+  frameWrap.className = 'shortcuts-frame-wrap';
+  const selected = DB.shortcuts.find(s=>s.id===UI.shortcutSelectedId);
+  if(selected){
+    const frameHead = document.createElement('div');
+    frameHead.className = 'shortcuts-frame-head';
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = selected.name;
+    const openLink = document.createElement('a');
+    openLink.href = selected.url; openLink.target = '_blank'; openLink.rel = 'noopener';
+    openLink.textContent = '새 탭에서 열기 ↗';
+    frameHead.appendChild(nameSpan); frameHead.appendChild(openLink);
+    frameWrap.appendChild(frameHead);
+    const iframe = document.createElement('iframe');
+    iframe.src = selected.url;
+    iframe.title = selected.name;
+    frameWrap.appendChild(iframe);
+  } else {
+    frameWrap.appendChild(el('div','shortcuts-empty','왼쪽에서 바로가기를 선택하거나 추가해주세요.'));
+  }
+  wrap.appendChild(frameWrap);
+
+  return wrap;
+}
+
 /* ---------------- stats view ---------------- */
 function renderStatsView(){
   const wrap = document.createElement('div');
@@ -4654,6 +4792,7 @@ async function initApp(user){
   DB = await loadState();
   DB.residentHistory = DB.residentHistory || [];
   DB.contracts = DB.contracts || [];
+  DB.shortcuts = DB.shortcuts || [];
   DB.channelList = (DB.channelList && DB.channelList.length) ? DB.channelList : [...DEFAULT_CHANNEL_LIST];
   // 과거 버전에서 "완료" 없이 새로고침 등으로 남겨졌을 수 있는 미확정 입실자(이름 미입력 등) 정리
   const beforeCount = DB.residents.length;
