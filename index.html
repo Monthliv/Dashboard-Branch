@@ -803,29 +803,45 @@ async function writeChangeLog(summary){
 }
 
 async function loadState(){
+  let base;
   try{
-    const [snap, contractsSnap, historySnap] = await Promise.all([
-      FIRESTORE_DOC.get(), CONTRACTS_COL.get(), RESIDENT_HISTORY_COL.get()
-    ]);
-    const base = (snap.exists && snap.data() && snap.data().json) ? JSON.parse(snap.data().json) : seedState();
+    const snap = await FIRESTORE_DOC.get();
+    base = (snap.exists && snap.data() && snap.data().json) ? JSON.parse(snap.data().json) : seedState();
+  }catch(e){
+    console.error('불러오기 실패:', e);
+    return seedState();
+  }
+  // 계약 이력·퇴실 이력은 별도 컬렉션에서 따로 불러온다. 이 부분만 실패하더라도(예: 새 컬렉션에
+  // 대한 Firestore 권한 설정 누락 등) 이미 정상적으로 불러온 지점/호실/입실자 같은 핵심 데이터를
+  // 절대 통째로 버리면 안 되므로, 메인 문서 로딩과는 별도의 try/catch로 완전히 분리한다.
+  try{
+    const contractsSnap = await CONTRACTS_COL.get();
     const contractsFromCol = contractsSnap.docs.map(d=>d.data());
-    const historyFromCol = historySnap.docs.map(d=>d.data());
-    // 예전 버전은 계약 이력·퇴실 이력을 메인 문서 안에 배열로 통째로 저장했다(문서 용량 제한
-    // 초과의 원인). 새 컬렉션이 아직 비어있고 메인 문서에 예전 데이터가 남아있으면, 딱 한 번
-    // 그 데이터를 새 컬렉션 구조로 옮겨 쓴다. 그 뒤로는 컬렉션 쪽 데이터가 항상 기준이 된다.
+    // 예전 버전은 계약 이력을 메인 문서 안에 배열로 통째로 저장했다(문서 용량 제한 초과의 원인).
+    // 새 컬렉션이 아직 비어있고 메인 문서에 예전 데이터가 남아있으면, 딱 한 번 그 데이터를 새
+    // 컬렉션 구조로 옮겨 쓴다. 그 뒤로는 컬렉션 쪽 데이터가 항상 기준이 된다.
     if(contractsFromCol.length===0 && Array.isArray(base.contracts) && base.contracts.length>0){
       await batchWriteDocs(CONTRACTS_COL, base.contracts);
     } else {
       base.contracts = contractsFromCol;
     }
+  }catch(e){
+    console.error('계약 이력 불러오기 실패:', e);
+    base.contracts = Array.isArray(base.contracts) ? base.contracts : [];
+  }
+  try{
+    const historySnap = await RESIDENT_HISTORY_COL.get();
+    const historyFromCol = historySnap.docs.map(d=>d.data());
     if(historyFromCol.length===0 && Array.isArray(base.residentHistory) && base.residentHistory.length>0){
       await batchWriteDocs(RESIDENT_HISTORY_COL, base.residentHistory);
     } else {
       base.residentHistory = historyFromCol;
     }
-    return base;
-  }catch(e){ console.error('불러오기 실패:', e); }
-  return seedState();
+  }catch(e){
+    console.error('퇴실 이력 불러오기 실패:', e);
+    base.residentHistory = Array.isArray(base.residentHistory) ? base.residentHistory : [];
+  }
+  return base;
 }
 let saveTimer = null;
 async function saveState(){
