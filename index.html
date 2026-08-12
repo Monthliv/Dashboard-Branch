@@ -583,7 +583,7 @@ let DB = null;
 let UI = {
   view:'stats', branchId:null, branchTab:'rooms',
   roomEditMode:{}, residentEditMode:{}, roomSnapshots:{}, residentSnapshots:{}, draftResident:{}, parkingListOpen:{}, residentFieldEdit:{},
-  branchEditMode:{}, branchSnapshots:{}, branchInfoOpen:{}, historyOpen:{}, addingBranch:false, addingRoom:false, managingRoom:false, editingBranchId:null,
+  branchEditMode:{}, branchSnapshots:{}, branchInfoOpen:{}, historyOpen:{}, addingBranch:false, addingRoom:false, managingRoom:false, managingTypePrice:false, editingBranchId:null,
   tlYear:null, tlMonth:null, roomStatusFilter:'이용중', cleanWeekStart:null, overdueTabKey:null,
   cleanTodayPage:1, cleanFuturePage:1, shortcutSelectedId:null
 };
@@ -629,6 +629,26 @@ const DEFAULT_CHANNEL_LIST = ['독립생활','삼삼엠투','리브애니','기�
 const ROOM_TYPE_LIST = ['블레스','그레이스','트리니티','기타'];
 const OCCUPANCY_LIST = ['1인실','2인실'];
 function occupancyCapacity(room){ return (room.occupancy === '1인실') ? 1 : 2; }
+/* 방 가격은 호실별이 아니라 지점+타입별로 관리한다. 같은 지점의 같은 타입 호실은 항상 같은 가격을 쓴다. */
+function roomPrice(room){
+  const branch = DB.branches.find(b=>b.id===room.branchId);
+  return (branch && branch.typePrices && branch.typePrices[room.type]) || 0;
+}
+function computeTypePriceDefaults(branch){
+  // 타입별 가격 관리를 처음 도입할 때, 기존에 호실마다 따로 등록돼 있던 가격 중
+  // 지점·타입별로 가장 많이 쓰인(최빈값) 가격을 그 타입의 기준가로 채워준다.
+  const map = {};
+  ROOM_TYPE_LIST.forEach(t=>{
+    const prices = DB.rooms.filter(r=>r.branchId===branch.id && r.type===t && r.price).map(r=>r.price);
+    if(prices.length===0){ map[t] = 0; return; }
+    const freq = new Map();
+    prices.forEach(p=> freq.set(p, (freq.get(p)||0)+1));
+    let best = prices[0], bestCount = 0;
+    freq.forEach((count, price)=>{ if(count>bestCount || (count===bestCount && price>best)){ best=price; bestCount=count; } });
+    map[t] = best;
+  });
+  return map;
+}
 
 /* 호실 청소 상태: 퇴실청소(자동+수동)/리터치(수동)/추가청소(수동) 중 하나만 켤 수 있다 */
 const MAINT_KIND_META = {
@@ -1620,7 +1640,7 @@ function renderRoomCard(room, sectionStatus){
   header.className = 'rc-header';
   header.innerHTML = `
     <div class="rc-header-top">
-      <div class="rc-title"><span class="roomno">${esc(room.number)}</span><span class="roomtype">${esc(room.type)}</span><span class="room-price">${formatWon(room.price)}</span></div>
+      <div class="rc-title"><span class="roomno">${esc(room.number)}</span><span class="roomtype">${esc(room.type)}</span><span class="room-price">${formatWon(roomPrice(room))}</span></div>
     </div>
     <div class="rc-header-badges">${headerRight}</div>
   `;
@@ -2563,9 +2583,10 @@ function renderBranchRoomBulkUpdatePanel(){
   box.innerHTML = `
     <h3>지점/호실 관리 엑셀 일괄 업데이트</h3>
     <div style="font-size:12px;color:var(--ink-soft);margin-bottom:12px;">
-      지점명·호실번호를 기준으로 지점/호실 정보를 일괄 업데이트합니다. 이미 등록된 지점·호실이면 입력된 값으로 정보를 덮어쓰고
-      (빈 칸은 기존 값을 그대로 유지), 지점명이나 호실번호가 아직 없으면 새로 만듭니다.<br>
-      필수 항목: 지점명 / 지점단축명 / 호실번호 / 타입 / 인실구분 (이 5개가 비어있는 행은 반영되지 않습니다). 나머지 항목은 비워둬도 됩니다.
+      "지점정보" · "타입별가격" · "호실정보" 3개 시트로 구성됩니다. 지점명을 기준으로 지점/호실 정보를 일괄 업데이트하며, 이미 등록된
+      지점·호실이면 입력된 값으로 정보를 덮어쓰고(빈 칸은 기존 값을 그대로 유지), 없으면 새로 만듭니다.<br>
+      지점정보 필수 항목: 지점명 / 지점단축명. 호실정보 필수 항목: 지점명 / 호실번호 / 타입 / 인실구분.
+      방 가격은 호실별이 아니라 타입별가격 시트에서 지점·타입별로 관리합니다(같은 지점·같은 타입 호실은 모두 같은 가격).
     </div>
   `;
   const btnRow = document.createElement('div');
@@ -2604,37 +2625,55 @@ function downloadBranchRoomUpdateTemplate(){
   const guideRows = [
     ['MONTHLIV 지점/호실 관리 엑셀 일괄 업데이트 양식 안내'],
     [''],
-    ['1. 지점명·호실번호를 기준으로 기존 지점/호실을 찾아 정보를 업데이트합니다. 없으면 새로 만듭니다.'],
-    ['2. 필수 항목: 지점명 / 지점단축명 / 호실번호 / 타입 / 인실구분. 이 중 하나라도 비어있는 행은 반영되지 않습니다.'],
-    ['3. 필수 항목 외 나머지 값은 비워둬도 됩니다. 비워두면 기존 정보를 그대로 유지합니다(덮어쓰지 않습니다).'],
-    ['4. 인실구분: 1인실 / 2인실'],
-    ['5. 청소비 / 정상입실료는 숫자만 입력하세요. (예: 50000). 주차비용 / 2인추가금은 자유롭게 텍스트로 입력할 수 있습니다.'],
+    ['1. "지점정보" 시트는 지점당 1행, "타입별가격" 시트도 지점당 1행, "호실정보" 시트는 호실당 1행입니다.'],
+    ['2. 지점명을 기준으로 기존 지점/호실을 찾아 정보를 업데이트합니다. 없으면 새로 만듭니다.'],
+    ['3. 지점정보 필수 항목: 지점명 / 지점단축명. 호실정보 필수 항목: 지점명 / 호실번호 / 타입 / 인실구분.'],
+    ['4. 필수 항목 외 나머지 값은 비워둬도 됩니다. 비워두면 기존 정보를 그대로 유지합니다(덮어쓰지 않습니다).'],
+    ['5. 인실구분: 1인실 / 2인실'],
+    ['6. 방 가격은 개별 호실이 아니라 "타입별가격" 시트에서 지점·타입별로 관리합니다. (같은 지점의 같은 타입 호실은 모두 같은 가격)'],
+    ['7. 청소비 / 타입별가격 금액은 숫자만 입력하세요. (예: 50000). 주차비용 / 2인추가금은 자유롭게 텍스트로 입력할 수 있습니다.'],
   ];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(guideRows), '안내');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([{
     지점명:'먼슬리브 예시지점', 지점단축명:'예시', 주소:'서울시 성동구 ...', 엘리베이터:'있음', 난방방식:'개별난방', 헤어드라이기:'있음',
-    청소비:50000, '2인추가금':'100000원', 공용주방위치:'2층 복도 끝', 종량제봉투보관위치:'1층 관리실', 주차가능대수:2, 주차비용:'30000원', 출입문비번:'*1234#', 지점특이사항:'',
-    호실번호:'101', 타입:'그레이스', 인실구분:'1인실', 정상입실료:450000, 판매상태:'공실', 호실특이사항:''
-  }]), 'Sheet1');
+    청소비:50000, '2인추가금':'100000원', 공용주방위치:'2층 복도 끝', 종량제봉투보관위치:'1층 관리실',
+    주차가능대수:2, 주차비용:'30000원', 출입문비번:'*1234#', 지점특이사항:''
+  }]), '지점정보');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([{
+    지점명:'먼슬리브 예시지점', 블레스:480000, 그레이스:450000, 트리니티:550000, 기타:430000
+  }]), '타입별가격');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([{
+    지점명:'먼슬리브 예시지점', 호실번호:'101', 타입:'그레이스', 인실구분:'1인실', 판매상태:'공실', 호실특이사항:''
+  }]), '호실정보');
   XLSX.writeFile(wb, 'monthliv_지점호실_업데이트_양식.xlsx');
 }
 
 function downloadBranchRoomCurrentData(){
   if(typeof XLSX === 'undefined'){ showAlert('엑셀 라이브러리를 불러오지 못했습니다. 네트워크 연결을 확인해주세요.'); return; }
   const wb = XLSX.utils.book_new();
-  const rows = DB.rooms.map(r=>{
+  const branchRows = DB.branches.map(b=>({
+    지점명: b.name, 지점단축명: b.shortName||'', 주소: b.address||'',
+    엘리베이터: b.elevator||'', 난방방식: b.heatingType||'', 헤어드라이기: b.hairDryer||'',
+    청소비: b.cleaningFee||0, '2인추가금': b.doubleOccupancyFee||'',
+    공용주방위치: b.sharedKitchenLocation||'', 종량제봉투보관위치: b.trashBagLocation||'',
+    주차가능대수: b.parkingCapacity||0, 주차비용: b.parkingFee||'', 출입문비번: b.doorPasscode||'',
+    지점특이사항: b.memo||''
+  }));
+  const priceRows = DB.branches.map(b=>{
+    const row = { 지점명: b.name };
+    ROOM_TYPE_LIST.forEach(t=> row[t] = (b.typePrices && b.typePrices[t]) || 0);
+    return row;
+  });
+  const roomRows = DB.rooms.map(r=>{
     const b = DB.branches.find(x=>x.id===r.branchId);
     return {
-      지점명: b ? b.name : '', 지점단축명: b ? (b.shortName||'') : '', 주소: b ? (b.address||'') : '',
-      엘리베이터: b ? (b.elevator||'') : '', 난방방식: b ? (b.heatingType||'') : '', 헤어드라이기: b ? (b.hairDryer||'') : '',
-      청소비: b ? (b.cleaningFee||0) : 0, '2인추가금': b ? (b.doubleOccupancyFee||'') : '',
-      공용주방위치: b ? (b.sharedKitchenLocation||'') : '', 종량제봉투보관위치: b ? (b.trashBagLocation||'') : '',
-      주차가능대수: b ? (b.parkingCapacity||0) : 0, 주차비용: b ? (b.parkingFee||'') : '', 출입문비번: b ? (b.doorPasscode||'') : '',
-      지점특이사항: b ? (b.memo||'') : '',
-      호실번호: r.number, 타입: r.type, 인실구분: r.occupancy, 정상입실료: r.price||0, 판매상태: r.saleStatus, 호실특이사항: r.note||''
+      지점명: b ? b.name : '', 호실번호: r.number, 타입: r.type, 인실구분: r.occupancy,
+      판매상태: r.saleStatus, 호실특이사항: r.note||''
     };
   });
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.length ? rows : [{}]), '지점호실');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(branchRows.length ? branchRows : [{}]), '지점정보');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(priceRows.length ? priceRows : [{}]), '타입별가격');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(roomRows.length ? roomRows : [{}]), '호실정보');
   XLSX.writeFile(wb, `monthliv_지점호실_현재데이터_${todayISO()}.xlsx`);
 }
 
@@ -2644,47 +2683,49 @@ function handleBranchRoomBulkUpdateFile(file){
   reader.onload = (e)=>{
     try{
       const wb = XLSX.read(new Uint8Array(e.target.result), { type:'array' });
-      const sheet = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(sheet, { defval:'' });
+      const get = (row, key)=> String(row[key]==null ? '' : row[key]).trim();
+      const sheetRows = (name)=>{
+        const sheet = wb.Sheets[name];
+        return sheet ? XLSX.utils.sheet_to_json(sheet, { defval:'' }) : [];
+      };
 
-      const result = { branchesCreated:0, branchesUpdated:0, roomsCreated:0, roomsUpdated:0 };
+      const result = { branchesCreated:0, branchesUpdated:0, roomsCreated:0, roomsUpdated:0, pricesUpdated:0 };
       const newBranches = [];
       const newRooms = [];
       const pendingBranchUpdates = [];
       const pendingRoomUpdates = [];
+      const pendingTypePrices = new Map(); // branchId -> { branch, patch:{type:price} }
       const touchedBranches = new Set();
       const touchedRooms = new Set();
       const invalidRows = [];
+      const unmatchedBranchRows = [];
 
-      const get = (row, key)=> String(row[key]==null ? '' : row[key]).trim();
+      function findBranch(nameRaw){
+        const resolvedName = BRANCH_NAME_ALIASES[nameRaw] || nameRaw;
+        return DB.branches.find(b=> cleanKeyLoose(b.name).toLowerCase()===resolvedName.toLowerCase())
+          || newBranches.find(b=> cleanKeyLoose(b.name).toLowerCase()===resolvedName.toLowerCase());
+      }
 
-      rows.forEach((row, idx)=>{
+      // ---- 1) 지점정보: 지점당 1행 ----
+      sheetRows('지점정보').forEach((row, idx)=>{
         const branchRaw = cleanKeyLoose(get(row,'지점명'));
         const shortNameRaw = get(row,'지점단축명');
-        const roomRaw = cleanKeyLoose(get(row,'호실번호')).replace(/호$/,'');
-        const typeRaw = get(row,'타입');
-        const occRaw = cleanKeyLoose(get(row,'인실구분'));
-        if(!branchRaw && !shortNameRaw && !roomRaw && !typeRaw && !occRaw) return; // 완전히 빈 행
+        if(!branchRaw && !shortNameRaw) return; // 완전히 빈 행
 
         const missing = [];
         if(!branchRaw) missing.push('지점명');
         if(!shortNameRaw) missing.push('지점단축명');
-        if(!roomRaw) missing.push('호실번호');
-        if(!typeRaw) missing.push('타입');
-        if(!occRaw) missing.push('인실구분');
         if(missing.length){
-          invalidRows.push(`[${idx+2}행] 필수 항목 누락(${missing.join('/')})으로 제외`);
+          invalidRows.push(`[지점정보 ${idx+2}행] 필수 항목 누락(${missing.join('/')})으로 제외`);
           return;
         }
-        const occValue = (occRaw==='2' || occRaw==='2인실') ? '2인실' : '1인실';
 
         const resolvedName = BRANCH_NAME_ALIASES[branchRaw] || branchRaw;
-        let branch = DB.branches.find(b=> cleanKeyLoose(b.name).toLowerCase()===resolvedName.toLowerCase())
-          || newBranches.find(b=> cleanKeyLoose(b.name).toLowerCase()===resolvedName.toLowerCase());
+        let branch = findBranch(branchRaw);
         const isNewBranch = !branch;
         if(!branch){
           branch = { id: uid('b'), name: resolvedName, shortName: shortNameRaw, address:'', elevator:'', heatingType:'', hairDryer:'',
-            cleaningFee:0, doubleOccupancyFee:'', sharedKitchenLocation:'', trashBagLocation:'', parkingCapacity:0, parkingFee:'', doorPasscode:'', memo:'' };
+            cleaningFee:0, doubleOccupancyFee:'', sharedKitchenLocation:'', trashBagLocation:'', parkingCapacity:0, parkingFee:'', doorPasscode:'', memo:'', typePrices:{} };
           newBranches.push(branch);
           result.branchesCreated++;
         } else {
@@ -2706,13 +2747,57 @@ function handleBranchRoomBulkUpdateFile(file){
         setBranchField('sharedKitchenLocation','공용주방위치'); setBranchField('trashBagLocation','종량제봉투보관위치');
         setBranchField('parkingCapacity','주차가능대수', true); setBranchField('parkingFee','주차비용');
         setBranchField('doorPasscode','출입문비번'); setBranchField('memo','지점특이사항');
+      });
+
+      // ---- 2) 타입별가격: 지점당 1행, 타입별 열 ----
+      sheetRows('타입별가격').forEach((row, idx)=>{
+        const branchRaw = cleanKeyLoose(get(row,'지점명'));
+        if(!branchRaw) return;
+        const branch = findBranch(branchRaw);
+        if(!branch){
+          unmatchedBranchRows.push(`[타입별가격 ${idx+2}행] ${branchRaw} (지점 못 찾음)`);
+          return;
+        }
+        if(!pendingTypePrices.has(branch.id)) pendingTypePrices.set(branch.id, { branch, patch:{} });
+        const entry = pendingTypePrices.get(branch.id);
+        ROOM_TYPE_LIST.forEach(t=>{
+          const v = get(row, t);
+          if(v==='') return;
+          entry.patch[t] = Number(v)||0;
+          result.pricesUpdated++;
+        });
+      });
+
+      // ---- 3) 호실정보: 호실당 1행 ----
+      sheetRows('호실정보').forEach((row, idx)=>{
+        const branchRaw = cleanKeyLoose(get(row,'지점명'));
+        const roomRaw = cleanKeyLoose(get(row,'호실번호')).replace(/호$/,'');
+        const typeRaw = get(row,'타입');
+        const occRaw = cleanKeyLoose(get(row,'인실구분'));
+        if(!branchRaw && !roomRaw && !typeRaw && !occRaw) return; // 완전히 빈 행
+
+        const missing = [];
+        if(!branchRaw) missing.push('지점명');
+        if(!roomRaw) missing.push('호실번호');
+        if(!typeRaw) missing.push('타입');
+        if(!occRaw) missing.push('인실구분');
+        if(missing.length){
+          invalidRows.push(`[호실정보 ${idx+2}행] 필수 항목 누락(${missing.join('/')})으로 제외`);
+          return;
+        }
+        const branch = findBranch(branchRaw);
+        if(!branch){
+          unmatchedBranchRows.push(`[호실정보 ${idx+2}행] ${branchRaw} ${roomRaw}호 (지점 못 찾음)`);
+          return;
+        }
+        const occValue = (occRaw==='2' || occRaw==='2인실') ? '2인실' : '1인실';
 
         let room = DB.rooms.find(r=> r.branchId===branch.id && normalizeRoomNo(r.number)===normalizeRoomNo(roomRaw))
           || newRooms.find(r=> r.branchId===branch.id && normalizeRoomNo(r.number)===normalizeRoomNo(roomRaw));
         const isNewRoom = !room;
         if(!room){
           room = { id: uid('r'), branchId: branch.id, number: roomRaw, type: typeRaw, occupancy: occValue, saleStatus:'공실',
-            needsCleaning:false, needsRetouch:false, needsExtraCleaning:false, note:'', price:0 };
+            needsCleaning:false, needsRetouch:false, needsExtraCleaning:false, note:'' };
           newRooms.push(room);
           result.roomsCreated++;
         } else {
@@ -2722,15 +2807,22 @@ function handleBranchRoomBulkUpdateFile(file){
         }
         touchedRooms.add(room.id);
 
-        const setRoomField = (field, key, isNum)=>{
+        const setRoomField = (field, key)=>{
           const v = get(row,key);
           if(v==='') return;
-          const value = isNum ? (Number(v)||0) : v;
-          if(isNewRoom) room[field] = value;
-          else pendingRoomUpdates.push({ room, field, value });
+          if(isNewRoom) room[field] = v;
+          else pendingRoomUpdates.push({ room, field, value: v });
         };
-        setRoomField('price','정상입실료', true); setRoomField('saleStatus','판매상태'); setRoomField('note','호실특이사항');
+        setRoomField('saleStatus','판매상태'); setRoomField('note','호실특이사항');
       });
+
+      if(newBranches.length===0 && newRooms.length===0 && pendingBranchUpdates.length===0
+        && pendingRoomUpdates.length===0 && pendingTypePrices.size===0){
+        showAlert(`반영할 내용이 없습니다.`
+          + (invalidRows.length ? `\n\n${invalidRows.slice(0,20).join('\n')}` : '')
+          + (unmatchedBranchRows.length ? `\n\n${unmatchedBranchRows.slice(0,20).join('\n')}` : ''));
+        return;
+      }
 
       showConfirm(
         `엑셀 분석 결과\n`+
@@ -2738,22 +2830,25 @@ function handleBranchRoomBulkUpdateFile(file){
         `- 정보가 업데이트될 기존 지점: ${result.branchesUpdated}개\n`+
         `- 새로 생성될 호실: ${result.roomsCreated}개\n`+
         `- 정보가 업데이트될 기존 호실: ${result.roomsUpdated}개\n`+
+        `- 타입별 가격 업데이트: ${result.pricesUpdated}건\n`+
         (invalidRows.length ? `- 필수 항목 누락으로 제외된 행: ${invalidRows.length}건\n` : '') +
+        (unmatchedBranchRows.length ? `- 지점을 찾지 못해 제외된 행: ${unmatchedBranchRows.length}건\n` : '') +
         `\n위 내용을 반영할까요?`,
         ()=>{
           DB.branches.push(...newBranches);
           DB.rooms.push(...newRooms);
           pendingBranchUpdates.forEach(u=> u.branch[u.field] = u.value);
           pendingRoomUpdates.forEach(u=> u.room[u.field] = u.value);
-          logChange(`지점/호실 엑셀 일괄 업데이트: 지점 생성 ${result.branchesCreated}개·수정 ${result.branchesUpdated}개, 호실 생성 ${result.roomsCreated}개·수정 ${result.roomsUpdated}개`);
+          pendingTypePrices.forEach(({branch, patch})=>{
+            branch.typePrices = Object.assign({}, branch.typePrices, patch);
+          });
+          logChange(`지점/호실 엑셀 일괄 업데이트: 지점 생성 ${result.branchesCreated}개·수정 ${result.branchesUpdated}개, 호실 생성 ${result.roomsCreated}개·수정 ${result.roomsUpdated}개, 타입별 가격 ${result.pricesUpdated}건`);
           scheduleSave();
           render();
-          if(invalidRows.length){
-            showAlert(`지점/호실 정보가 업데이트되었습니다.\n\n필수 항목(지점명/지점단축명/호실번호/타입/인실구분) 누락으로 제외된 행:\n` +
-              invalidRows.slice(0,30).join('\n') + (invalidRows.length>30 ? `\n...외 ${invalidRows.length-30}건` : ''));
-          } else {
-            showAlert('지점/호실 정보가 업데이트되었습니다.');
-          }
+          const noteLines = [];
+          if(invalidRows.length) noteLines.push(`필수 항목 누락으로 제외된 행:\n` + invalidRows.slice(0,30).join('\n') + (invalidRows.length>30 ? `\n...외 ${invalidRows.length-30}건` : ''));
+          if(unmatchedBranchRows.length) noteLines.push(`지점을 찾지 못해 제외된 행:\n` + unmatchedBranchRows.slice(0,30).join('\n') + (unmatchedBranchRows.length>30 ? `\n...외 ${unmatchedBranchRows.length-30}건` : ''));
+          showAlert('지점/호실 정보가 업데이트되었습니다.' + (noteLines.length ? '\n\n' + noteLines.join('\n\n') : ''));
         }
       );
     }catch(err){
@@ -3633,7 +3728,7 @@ function renderAdminView(){
   return wrap;
 }
 
-const ADMIN_PANEL_TOGGLE_FLAGS = ['addingBranch','addingRoom','managingRoom'];
+const ADMIN_PANEL_TOGGLE_FLAGS = ['addingBranch','addingRoom','managingRoom','managingTypePrice'];
 function renderBranchRoomManagePanel(){
   const box = document.createElement('div');
   box.className = 'stat-section';
@@ -3657,11 +3752,13 @@ function renderBranchRoomManagePanel(){
   }
   btnRow.appendChild(toggleBtn('addingBranch', '+ 지점 추가', '지점 추가 취소', 'primary'));
   btnRow.appendChild(toggleBtn('addingRoom', '+ 호실 추가', '호실 추가 취소', 'primary'));
-  btnRow.appendChild(toggleBtn('managingRoom', '호실 정보 수정 · 삭제', '호실 정보 수정 취소', 'danger'));
+  btnRow.appendChild(toggleBtn('managingTypePrice', '타입별 가격 관리', '타입별 가격 관리 취소', 'primary'));
+  btnRow.appendChild(toggleBtn('managingRoom', '호실 삭제', '호실 삭제 취소', 'danger'));
   box.appendChild(btnRow);
 
   if(UI.addingBranch) box.appendChild(renderAdminAddBranchForm());
   else if(UI.addingRoom) box.appendChild(renderAdminAddRoomForm());
+  else if(UI.managingTypePrice) box.appendChild(renderTypePriceManageForm());
   else if(UI.managingRoom) box.appendChild(renderAdminRoomManageForm());
   else if(UI.editingBranchId) box.appendChild(renderAdminEditBranchForm(DB.branches.find(b=>b.id===UI.editingBranchId)));
   else box.appendChild(renderBranchOrderBody());
@@ -3736,9 +3833,7 @@ function renderAdminRoomManageForm(){
     <div class="fld"><label class="field-label">지점 *</label>
       <select id="drBranch">${DB.branches.map(b=>`<option value="${b.id}">${esc(b.name)}</option>`).join('')}</select></div>
     <div class="fld"><label class="field-label">호실 *</label><select id="drRoom"></select></div>
-    <div class="fld"><label class="field-label">정상 입실료(월)</label><input type="number" id="drPrice" min="0" step="10000"></div>
     <div class="btn-row">
-      <button class="btn primary" id="drSave">가격 저장</button>
       <button class="btn danger" id="drSubmit">호실 삭제</button>
       <button class="btn" id="drCancel">취소</button>
     </div>
@@ -3746,33 +3841,16 @@ function renderAdminRoomManageForm(){
   setTimeout(()=>{
     const branchSel = document.getElementById('drBranch');
     const roomSel = document.getElementById('drRoom');
-    const priceInput = document.getElementById('drPrice');
     const fillRooms = ()=>{
       const rms = DB.rooms.filter(r=>r.branchId===branchSel.value)
         .sort((a,b)=> a.number.localeCompare(b.number,'ko',{numeric:true}));
       roomSel.innerHTML = rms.length
         ? rms.map(r=>`<option value="${r.id}">${esc(r.number)}호 (${esc(r.type)})</option>`).join('')
         : `<option value="">호실 없음</option>`;
-      updatePrice();
-    };
-    const updatePrice = ()=>{
-      const room = DB.rooms.find(r=>r.id===roomSel.value);
-      priceInput.value = room ? (room.price || 0) : '';
     };
     fillRooms();
     branchSel.onchange = fillRooms;
-    roomSel.onchange = updatePrice;
     document.getElementById('drCancel').onclick = ()=>{ UI.managingRoom=false; render(); };
-    document.getElementById('drSave').onclick = ()=>{
-      const room = DB.rooms.find(r=>r.id===roomSel.value);
-      if(!room){ showAlert('호실을 선택해주세요.'); return; }
-      const branch = DB.branches.find(b=>b.id===room.branchId);
-      const newPrice = Number(priceInput.value) || 0;
-      logChange(`${branch ? branch.name + ' ' : ''}${room.number}호 입실료 변경: ${formatWon(room.price)} → ${formatWon(newPrice)}`);
-      room.price = newPrice;
-      scheduleSave();
-      showAlert('입실료가 저장되었습니다.');
-    };
     document.getElementById('drSubmit').onclick = ()=>{
       const room = DB.rooms.find(r=>r.id===roomSel.value);
       if(!room){ showAlert('삭제할 호실을 선택해주세요.'); return; }
@@ -3785,6 +3863,53 @@ function renderAdminRoomManageForm(){
         scheduleSave(); render();
       });
     };
+  },0);
+  return form;
+}
+
+function renderTypePriceManageForm(){
+  const form = document.createElement('div');
+  form.className = 'admin-add-form';
+  if(DB.branches.length===0){
+    form.innerHTML = `<div class="fld">등록된 지점이 없습니다.</div>`;
+    return form;
+  }
+  form.innerHTML = `
+    <div class="fld" style="grid-column:1/-1;"><label class="field-label">지점 *</label>
+      <select id="tpBranch">${DB.branches.map(b=>`<option value="${b.id}">${esc(b.name)}</option>`).join('')}</select></div>
+    <div id="tpPriceFields" style="grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;"></div>
+    <div style="grid-column:1/-1;font-size:11.5px;color:var(--ink-soft);">같은 지점·같은 타입 호실은 모두 이 가격을 사용합니다. 개별 호실마다 다른 가격을 지정할 수는 없습니다.</div>
+    <div class="btn-row">
+      <button class="btn" id="tpCancel">닫기</button>
+    </div>
+  `;
+  setTimeout(()=>{
+    const branchSel = document.getElementById('tpBranch');
+    const fieldsWrap = document.getElementById('tpPriceFields');
+    const renderFields = ()=>{
+      const branch = DB.branches.find(b=>b.id===branchSel.value);
+      fieldsWrap.innerHTML = '';
+      if(!branch) return;
+      ROOM_TYPE_LIST.forEach(t=>{
+        const fld = document.createElement('div');
+        fld.className = 'fld';
+        fld.innerHTML = `<label class="field-label">${esc(t)}</label><input type="number" min="0" step="10000">`;
+        const input = fld.querySelector('input');
+        input.value = (branch.typePrices && branch.typePrices[t]) || 0;
+        input.addEventListener('change', ()=>{
+          const newPrice = Number(input.value) || 0;
+          const oldPrice = (branch.typePrices && branch.typePrices[t]) || 0;
+          if(newPrice===oldPrice) return;
+          logChange(`"${branch.name}" ${t} 타입 가격 변경: ${formatWon(oldPrice)} → ${formatWon(newPrice)}`);
+          branch.typePrices = Object.assign({}, branch.typePrices, { [t]: newPrice });
+          scheduleSave();
+        });
+        fieldsWrap.appendChild(fld);
+      });
+    };
+    renderFields();
+    branchSel.onchange = renderFields;
+    document.getElementById('tpCancel').onclick = ()=>{ UI.managingTypePrice=false; render(); };
   },0);
   return form;
 }
@@ -3837,7 +3962,8 @@ function renderAdminAddBranchForm(){
         parkingFee: document.getElementById('nbParkingFee').value.trim(),
         doorPasscode: document.getElementById('nbDoor').value.trim(),
         parkingCapacity: Number(document.getElementById('nbCap').value) || 0,
-        memo: document.getElementById('nbMemo').value
+        memo: document.getElementById('nbMemo').value,
+        typePrices: {}
       };
       DB.branches.push(nb);
       logChange(`"${name}" 지점 신규 등록`);
@@ -3904,7 +4030,6 @@ function renderAdminAddRoomForm(){
       <select id="nrOccupancy">${OCCUPANCY_LIST.map(t=>`<option>${t}</option>`).join('')}</select></div>
     <div class="fld"><label class="field-label">초기 상태</label>
       <select id="nrStatus">${STATUS_LIST_MANUAL.map(s=>`<option>${s}</option>`).join('')}</select></div>
-    <div class="fld"><label class="field-label">정상 입실료(월)</label><input type="number" id="nrPrice" placeholder="예: 450000" min="0" step="10000"></div>
     <div class="btn-row">
       <button class="btn primary" id="nrSubmit">추가</button>
       <button class="btn" id="nrCancel">취소</button>
@@ -3928,8 +4053,7 @@ function renderAdminAddRoomForm(){
         type: document.getElementById('nrType').value,
         occupancy: document.getElementById('nrOccupancy').value,
         saleStatus: document.getElementById('nrStatus').value,
-        needsCleaning:false, needsRetouch:false, needsExtraCleaning:false, maintenanceDate:'', preSelling:false, note:'',
-        price: Number(document.getElementById('nrPrice').value) || 0
+        needsCleaning:false, needsRetouch:false, needsExtraCleaning:false, maintenanceDate:'', preSelling:false, note:''
       };
       DB.rooms.push(room);
       UI.addingRoom = false;
@@ -4813,6 +4937,14 @@ async function initApp(user){
     }
   });
   if(canEdit() && statusFixed) scheduleSave();
+  let typePricesFilled = false;
+  DB.branches.forEach(branch=>{
+    if(!branch.typePrices){
+      branch.typePrices = computeTypePriceDefaults(branch);
+      typePricesFilled = true;
+    }
+  });
+  if(canEdit() && typePricesFilled) scheduleSave();
   UI.branchId = allowedBranches()[0] ? allowedBranches()[0].id : null;
   if(!isSuperAdmin()) UI.view = 'branch'; // 슈퍼어드민이 아니면 전체 통계 대신 지점 대시보드로 바로 진입
   render();
