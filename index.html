@@ -5016,7 +5016,8 @@ async function initApp(user){
   });
   if(canEdit() && typePricesFilled) scheduleSave();
   UI.branchId = allowedBranches()[0] ? allowedBranches()[0].id : null;
-  if(!isSuperAdmin()) UI.view = 'branch'; // 슈퍼어드민이 아니면 전체 통계 대신 지점 대시보드로 바로 진입
+  if(USER_ROLE === 'editor') UI.view = 'branch'; // 수정 권한 계정은 전체 통계 대신 지점 대시보드로 바로 진입
+  // 조회 전용(viewer) 계정과 슈퍼어드민은 기본값인 전체 통계 대시보드로 진입
   render();
   document.getElementById('savedNote').textContent = '자동 저장됨 · 이 대시보드를 사용하는 모든 사람에게 공유됩니다';
 
