@@ -25,6 +25,7 @@
     --st-presell:#6C5FC7;  --st-presell-bg:#EDEBFA;
     --st-shortsale:#C2478B; --st-shortsale-bg:#FBE7F1;
     --st-proxy:#2E8B57;    --st-proxy-bg:#E4F3EA;
+    --st-reserved:#A67C00; --st-reserved-bg:#FBF0D6;
 
     --ch-indep:#5B4FCF; --ch-33m2:#B5459A; --ch-liveany:#D6673E; --ch-etc:#7A8790;
   }
@@ -303,6 +304,7 @@
   .flagchip.on.retouch{ background:#E3E8FD; border-color:#8B9FEE; color:#2E3F9E; }
   .flagchip.on.extra{ background:#E1F5E9; border-color:#6FBF8B; color:#1F7A45; }
   .flagchip.on.presell{ background:var(--st-forsale-bg); border-color:var(--st-forsale); color:var(--st-forsale); }
+  .flagchip.on.reserved{ background:var(--st-reserved-bg); border-color:var(--st-reserved); color:var(--st-reserved); }
   .edit-section-label{ font-size:11px; font-weight:700; color:var(--ink-soft); letter-spacing:.02em; margin:14px 0 8px; display:flex; justify-content:space-between; align-items:center; }
   .edit-section-label:first-child{ margin-top:0; }
 
@@ -682,7 +684,7 @@ function seedState(){
   const rooms = []; const residents = [];
   function addRoom(branchId, number, type, occupancy, status, cleaning, retouch, note, price){
     const r = { id: uid('r'), branchId, number, type, occupancy, saleStatus: status,
-      needsCleaning: cleaning, needsRetouch: retouch, needsExtraCleaning:false, maintenanceDate:'', preSelling:false, note: note || '', price: price||0 };
+      needsCleaning: cleaning, needsRetouch: retouch, needsExtraCleaning:false, maintenanceDate:'', preSelling:false, note: note || '', price: price||0, reserved:false };
     rooms.push(r); return r;
   }
   function addResident(roomId, name, channel, resStatus, contractType, moveIn, moveOut, phone, memo, carNumber){
@@ -813,6 +815,7 @@ function statusMeta(s){
     '퇴실예정':    { fg:'var(--st-leaving)',  bg:'var(--st-leaving-bg)' },
     '판매보류':    { fg:'var(--st-hold)',     bg:'var(--st-hold-bg)' },
     '대리결제':    { fg:'var(--st-proxy)',    bg:'var(--st-proxy-bg)' },
+    '예약':        { fg:'var(--st-reserved)', bg:'var(--st-reserved-bg)' },
   };
   return m[s] || m['공실'];
 }
@@ -1365,10 +1368,11 @@ function roomIsLeavingSoon(room){
 function roomHasPaymentProxy(room){
   return DB.residents.some(p=> p.roomId===room.id && p.paymentProxy);
 }
-const ROOM_TAB_LIST = [...STATUS_LIST_STATS, '대리결제'];
+const ROOM_TAB_LIST = [...STATUS_LIST_STATS, '대리결제', '예약'];
 function roomsInFilterTab(rooms, s){
   if(s === '퇴실예정') return rooms.filter(roomIsLeavingSoon);
   if(s === '대리결제') return rooms.filter(roomHasPaymentProxy);
+  if(s === '예약') return rooms.filter(r=> r.reserved);
   return rooms.filter(r=> roomTabs(r).includes(s));
 }
 function renderRoomsSection(branch){
@@ -1631,9 +1635,11 @@ function renderRoomCard(room, sectionStatus){
   const roomEditOn = !!UI.roomEditMode[room.id];
 
   const maintDateSuffix = room.maintenanceDate ? ` · ${room.maintenanceDate.slice(5)}` : '';
+  const reserveMeta = statusMeta('예약');
   const headerRight = `
     <span class="badge" style="background:${meta.bg};color:${meta.fg}">${effStatus}</span>
     ${maintBadgeHtml(roomCardMaintKind(room), maintDateSuffix)}
+    ${room.reserved ? `<span class="badge" style="background:${reserveMeta.bg};color:${reserveMeta.fg}">예약${room.reservationMoveIn ? ' · '+room.reservationMoveIn.slice(5) : ''}</span>` : ''}
   `;
 
   const header = document.createElement('div');
@@ -1717,6 +1723,19 @@ function renderRoomCard(room, sectionStatus){
       });
     }
     card.appendChild(histBox);
+  }
+
+  if(!roomEditOn && room.reserved){
+    const parts = [];
+    if(room.reservationName) parts.push(room.reservationName);
+    if(room.reservationPhone) parts.push(room.reservationPhone);
+    if(room.reservationMoveIn) parts.push(`입실예정 ${room.reservationMoveIn}`);
+    if(room.reservationMemo) parts.push(room.reservationMemo);
+    const chip = document.createElement('div');
+    chip.className = 'rc-note-chip';
+    chip.textContent = parts.length ? `예약: ${parts.join(' · ')}` : '예약';
+    chip.title = chip.textContent;
+    card.appendChild(chip);
   }
 
   if(!roomEditOn && room.note){
@@ -1930,6 +1949,59 @@ function renderRoomEditForm(room){
     });
     memoWrap.appendChild(labeled(`${kindLabel} 메모`, memoInput));
     wrap.appendChild(memoWrap);
+  }
+
+  const reserveChipRow = document.createElement('div');
+  reserveChipRow.style.marginBottom = '10px';
+  reserveChipRow.innerHTML = `<label class="field-label">예약</label>`;
+  const reserveChips = document.createElement('div');
+  reserveChips.className = 'maint-chips';
+  const reserveChip = document.createElement('span');
+  reserveChip.className = 'flagchip reserved' + (room.reserved ? ' on' : '');
+  reserveChip.textContent = '예약';
+  reserveChip.onclick = ()=>{
+    const turningOn = !room.reserved;
+    room.reserved = turningOn;
+    if(!turningOn){
+      room.reservationName=''; room.reservationPhone=''; room.reservationMoveIn=''; room.reservationMemo='';
+    }
+    logChange(`${room.number}호 예약 ${turningOn?'설정':'해제'}`);
+    scheduleSave(); render();
+  };
+  reserveChips.appendChild(reserveChip);
+  reserveChipRow.appendChild(reserveChips);
+  wrap.appendChild(reserveChipRow);
+
+  if(room.reserved){
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.value = room.reservationName || '';
+    nameInput.placeholder = '예약자명';
+    nameInput.addEventListener('input', ()=>{ logChange(`${room.number}호 예약자명 수정`); room.reservationName = nameInput.value; scheduleSave(); });
+    wrap.appendChild(labeled('예약자명', nameInput));
+
+    const phoneInput = document.createElement('input');
+    phoneInput.type = 'text';
+    phoneInput.value = room.reservationPhone || '';
+    phoneInput.placeholder = '연락처';
+    phoneInput.addEventListener('input', ()=>{ logChange(`${room.number}호 예약자 연락처 수정`); room.reservationPhone = phoneInput.value; scheduleSave(); });
+    wrap.appendChild(labeled('연락처', phoneInput));
+
+    const moveInInput = document.createElement('input');
+    moveInInput.type = 'date';
+    moveInInput.value = room.reservationMoveIn || '';
+    moveInInput.addEventListener('change', ()=>{
+      logChange(`${room.number}호 예약 입실예정일 변경: ${moveInInput.value || '미정'}`);
+      room.reservationMoveIn = moveInInput.value; scheduleSave();
+    });
+    wrap.appendChild(labeled('입실예정일', moveInInput));
+
+    const reserveMemoInput = document.createElement('textarea');
+    reserveMemoInput.rows = 2;
+    reserveMemoInput.value = room.reservationMemo || '';
+    reserveMemoInput.placeholder = '예: 계약금 입금 예정, 문의 채널 등';
+    reserveMemoInput.addEventListener('input', ()=>{ logChange(`${room.number}호 예약 메모 수정`); room.reservationMemo = reserveMemoInput.value; scheduleSave(); });
+    wrap.appendChild(labeled('메모', reserveMemoInput));
   }
 
   const noteWrap = document.createElement('div');
@@ -2797,7 +2869,7 @@ function handleBranchRoomBulkUpdateFile(file){
         const isNewRoom = !room;
         if(!room){
           room = { id: uid('r'), branchId: branch.id, number: roomRaw, type: typeRaw, occupancy: occValue, saleStatus:'공실',
-            needsCleaning:false, needsRetouch:false, needsExtraCleaning:false, note:'' };
+            needsCleaning:false, needsRetouch:false, needsExtraCleaning:false, note:'', reserved:false };
           newRooms.push(room);
           result.roomsCreated++;
         } else {
@@ -3662,12 +3734,10 @@ function renderStatsView(){
   const table = document.createElement('table');
   table.className = 'branch-table';
   table.innerHTML = `<thead><tr><th>지점</th><th>호실수</th><th>이용중</th><th>판매중</th><th>입실율</th><th>예약</th><th>판매보류</th></tr></thead>`;
-  const today = todayISO();
   const tbody = document.createElement('tbody');
   const totals = { total:0, occupied:0, forSale:0, hold:0, reserved:0, activeCount:0 };
   allowedBranches().forEach(b=>{
     const rms = DB.rooms.filter(r=>r.branchId===b.id);
-    const roomIds = new Set(rms.map(r=>r.id));
     const total = rms.length;
     let occupied=0, forSale=0, activeCount=0;
     const holdRooms = [];
@@ -3678,7 +3748,7 @@ function renderStatsView(){
       if(tabs.includes('판매보류')) holdRooms.push(r);
       if(roomHasActiveResident(r)) activeCount++;
     });
-    const reserved = DB.residents.filter(p => roomIds.has(p.roomId) && p.moveIn && p.moveIn > today).length;
+    const reserved = rms.filter(r=> r.reserved).length;
     const occRate = total ? Math.round((activeCount/total)*100) : 0;
     totals.total += total; totals.occupied += occupied; totals.forSale += forSale;
     totals.hold += holdRooms.length; totals.reserved += reserved; totals.activeCount += activeCount;
@@ -4053,7 +4123,7 @@ function renderAdminAddRoomForm(){
         type: document.getElementById('nrType').value,
         occupancy: document.getElementById('nrOccupancy').value,
         saleStatus: document.getElementById('nrStatus').value,
-        needsCleaning:false, needsRetouch:false, needsExtraCleaning:false, maintenanceDate:'', preSelling:false, note:''
+        needsCleaning:false, needsRetouch:false, needsExtraCleaning:false, maintenanceDate:'', preSelling:false, note:'', reserved:false
       };
       DB.rooms.push(room);
       UI.addingRoom = false;
