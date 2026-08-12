@@ -740,6 +740,26 @@ const FIRESTORE_DOC = firestoreDB.collection('monthliv').doc('state');
 const USERS_COL = firestoreDB.collection('users');
 const CHANGELOG_COL = firestoreDB.collection('changeLog');
 const EMAIL_INDEX_COL = firestoreDB.collection('emailIndex');
+// 계약 이력·퇴실 이력은 시간이 지날수록 한없이 늘어나는 데이터라, 메인 상태 문서 안에
+// 배열로 함께 저장하면 Firestore 문서 용량 제한(1MB)을 넘길 수 있다. 그래서 각각 별도
+// 컬렉션에 레코드 1건당 문서 1개로 저장한다.
+const CONTRACTS_COL = firestoreDB.collection('contracts');
+const RESIDENT_HISTORY_COL = firestoreDB.collection('residentHistory');
+const FIRESTORE_BATCH_CHUNK = 450; // Firestore 배치 쓰기는 1회 최대 500건까지만 허용된다.
+async function batchWriteDocs(col, records){
+  for(let i=0; i<records.length; i+=FIRESTORE_BATCH_CHUNK){
+    const batch = firestoreDB.batch();
+    records.slice(i, i+FIRESTORE_BATCH_CHUNK).forEach(r=> batch.set(col.doc(r.id), r));
+    await batch.commit();
+  }
+}
+async function batchDeleteDocs(col, ids){
+  for(let i=0; i<ids.length; i+=FIRESTORE_BATCH_CHUNK){
+    const batch = firestoreDB.batch();
+    ids.slice(i, i+FIRESTORE_BATCH_CHUNK).forEach(id=> batch.delete(col.doc(id)));
+    await batch.commit();
+  }
+}
 function normalizeEmailKey(email){ return String(email||'').trim().toLowerCase(); }
 function indexEmail(email){
   const key = normalizeEmailKey(email);
@@ -784,10 +804,26 @@ async function writeChangeLog(summary){
 
 async function loadState(){
   try{
-    const snap = await FIRESTORE_DOC.get();
-    if(snap.exists && snap.data() && snap.data().json){
-      return JSON.parse(snap.data().json);
+    const [snap, contractsSnap, historySnap] = await Promise.all([
+      FIRESTORE_DOC.get(), CONTRACTS_COL.get(), RESIDENT_HISTORY_COL.get()
+    ]);
+    const base = (snap.exists && snap.data() && snap.data().json) ? JSON.parse(snap.data().json) : seedState();
+    const contractsFromCol = contractsSnap.docs.map(d=>d.data());
+    const historyFromCol = historySnap.docs.map(d=>d.data());
+    // 예전 버전은 계약 이력·퇴실 이력을 메인 문서 안에 배열로 통째로 저장했다(문서 용량 제한
+    // 초과의 원인). 새 컬렉션이 아직 비어있고 메인 문서에 예전 데이터가 남아있으면, 딱 한 번
+    // 그 데이터를 새 컬렉션 구조로 옮겨 쓴다. 그 뒤로는 컬렉션 쪽 데이터가 항상 기준이 된다.
+    if(contractsFromCol.length===0 && Array.isArray(base.contracts) && base.contracts.length>0){
+      await batchWriteDocs(CONTRACTS_COL, base.contracts);
+    } else {
+      base.contracts = contractsFromCol;
     }
+    if(historyFromCol.length===0 && Array.isArray(base.residentHistory) && base.residentHistory.length>0){
+      await batchWriteDocs(RESIDENT_HISTORY_COL, base.residentHistory);
+    } else {
+      base.residentHistory = historyFromCol;
+    }
+    return base;
   }catch(e){ console.error('불러오기 실패:', e); }
   return seedState();
 }
@@ -796,7 +832,8 @@ async function saveState(){
   const note = document.getElementById('savedNote');
   if(note) note.textContent = '저장 중…';
   try{
-    await FIRESTORE_DOC.set({ json: JSON.stringify(DB), updatedAt: new Date().toISOString() });
+    const core = { branches: DB.branches, rooms: DB.rooms, residents: DB.residents, channelList: DB.channelList, shortcuts: DB.shortcuts };
+    await FIRESTORE_DOC.set({ json: JSON.stringify(core), updatedAt: new Date().toISOString() });
     if(note) note.textContent = '자동 저장됨 · 이 대시보드를 사용하는 모든 사람에게 공유됩니다';
     const summary = pendingChangeSummary || '정보 수정';
     pendingChangeSummary = '';
@@ -1515,11 +1552,13 @@ function roomHasOverdueResident(room){
 }
 function moveResidentToHistory(p, moveOutOverride){
   logChange(`${p.name || '입실자'} 퇴실 처리`);
-  DB.residentHistory.push({
+  const historyEntry = {
     id: uid('h'), roomId: p.roomId,
     name: p.name || '(이름 미입력)', phone: p.phone || '',
     moveIn: p.originalMoveIn || p.moveIn || '', moveOut: moveOutOverride || p.moveOut || todayISO()
-  });
+  };
+  DB.residentHistory.push(historyEntry);
+  RESIDENT_HISTORY_COL.doc(historyEntry.id).set(historyEntry).catch(e=> console.error('퇴실 이력 저장 실패:', e));
   DB.residents = DB.residents.filter(x=>x.id!==p.id);
   delete UI.residentEditMode[p.id];
   delete UI.residentSnapshots[p.id];
@@ -1560,6 +1599,7 @@ function restoreFromHistory(h){
     p.resStatus = computeResStatus(p);
     DB.residents.push(p);
     DB.residentHistory = DB.residentHistory.filter(x=>x.id!==h.id);
+    RESIDENT_HISTORY_COL.doc(h.id).delete().catch(e=> console.error('퇴실 이력 삭제 실패:', e));
     UI.historyOpen[room.id] = false;
     logChange(`"${h.name}" 님을 ${room.number}호 입실자로 복원`);
     scheduleSave(); render();
@@ -1719,6 +1759,7 @@ function renderRoomCard(room, sectionStatus){
           delHistBtn.onclick = ()=>{
             showConfirm(`"${h.name}" 님의 히스토리 기록을 완전히 삭제할까요? 이 작업은 되돌릴 수 없습니다.`, ()=>{
               DB.residentHistory = DB.residentHistory.filter(x=>x.id!==h.id);
+              RESIDENT_HISTORY_COL.doc(h.id).delete().catch(e=> console.error('퇴실 이력 삭제 실패:', e));
               logChange(`"${h.name}" 히스토리 기록 삭제`);
               scheduleSave(); render();
             });
@@ -3006,22 +3047,23 @@ function renderContractManagePanel(){
 function dedupeContracts(){
   const seen = new Set();
   const deduped = [];
-  let removed = 0;
+  const removedContracts = [];
   DB.contracts.forEach(c=>{
     const sig = contractSignature(c);
-    if(seen.has(sig)){ removed++; return; }
+    if(seen.has(sig)){ removedContracts.push(c); return; }
     seen.add(sig);
     deduped.push(c);
   });
-  if(removed===0){
+  if(removedContracts.length===0){
     showAlert('중복된 계약 이력이 없습니다.');
     return;
   }
-  showConfirm(`완전히 동일한 중복 계약 이력 ${removed}건을 찾았습니다. 각 그룹에서 1건만 남기고 삭제할까요?`, ()=>{
+  showConfirm(`완전히 동일한 중복 계약 이력 ${removedContracts.length}건을 찾았습니다. 각 그룹에서 1건만 남기고 삭제할까요?`, ()=>{
     DB.contracts = deduped;
-    logChange(`중복 계약 이력 정리: ${removed}건 삭제`);
+    batchDeleteDocs(CONTRACTS_COL, removedContracts.map(c=>c.id)).catch(e=> console.error('중복 계약 삭제 실패:', e));
+    logChange(`중복 계약 이력 정리: ${removedContracts.length}건 삭제`);
     scheduleSave(); render();
-    showAlert(`중복 계약 이력 ${removed}건을 삭제했습니다.`);
+    showAlert(`중복 계약 이력 ${removedContracts.length}건을 삭제했습니다.`);
   });
 }
 
@@ -3219,6 +3261,7 @@ function importContractGrid(headerCells, dataRows, onImported){
       + (residentSkipCount ? `\n(계약기간·입실자 정보가 불명확해 입실자 등록을 건너뛴 호실: ${residentSkipCount}곳)` : ''),
     ()=>{
       DB.contracts.push(...newContracts);
+      batchWriteDocs(CONTRACTS_COL, newContracts).catch(e=> console.error('계약 데이터 저장 실패:', e));
       residentSyncActions.forEach(action=> DB.residents.push(action.newResident));
       logChange(`계약 데이터 가져오기: ${newContracts.length}건 추가${duplicateCount ? ` (중복 ${duplicateCount}건 제외)` : ''}${unmatched.length ? ` (미매칭 ${unmatched.length}건)` : ''}${residentSyncActions.length ? ` / 빈 호실 입실자 등록 ${residentSyncActions.length}건` : ''}`);
       scheduleSave(); render();
@@ -5060,8 +5103,6 @@ async function initApp(user){
   if(loggedInAs) loggedInAs.textContent = `${user.email} (${roleLabel})`;
 
   DB = await loadState();
-  DB.residentHistory = DB.residentHistory || [];
-  DB.contracts = DB.contracts || [];
   DB.shortcuts = DB.shortcuts || [];
   DB.channelList = (DB.channelList && DB.channelList.length) ? DB.channelList : [...DEFAULT_CHANNEL_LIST];
   // 과거 버전에서 "완료" 없이 새로고침 등으로 남겨졌을 수 있는 미확정 입실자(이름 미입력 등) 정리
