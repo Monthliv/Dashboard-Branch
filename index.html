@@ -480,6 +480,8 @@
   table.branch-table th{ color:var(--ink-soft); font-weight:700; font-size:11px; }
   table.branch-table .branch-table-total{ background:var(--accent-soft); font-weight:800; }
   table.branch-table .branch-table-total td{ border-bottom:2px solid var(--accent); color:var(--accent-ink); }
+  table.branch-table .stat-cell-link{ color:inherit; text-decoration:none; display:block; }
+  table.branch-table .stat-cell-link:hover{ color:var(--accent-ink); text-decoration:underline; }
 
   ::-webkit-scrollbar{ height:8px; width:8px; }
   ::-webkit-scrollbar-thumb{ background:#D8D2C2; border-radius:4px; }
@@ -3756,9 +3758,10 @@ function renderStatsView(){
     const holdText = holdRooms.length
       ? holdRooms.map(r=> esc(r.note ? `${r.number}: ${r.note}` : `${r.number}`)).join('<br>')
       : '-';
+    const tabCell = (tab, content)=> `<td><a href="#" data-goto="${b.id}" data-tab="${tab}" class="stat-cell-link">${content}</a></td>`;
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td><a href="#" data-goto="${b.id}" style="color:var(--accent-ink);font-weight:700;text-decoration:none;">${esc(branchLabel(b))}</a></td>
-      <td>${total}</td><td>${occupied}</td><td>${forSale}</td><td style="color:${occColor};font-weight:700;">${occRate}%</td><td>${reserved}</td><td>${holdText}</td>`;
+    tr.innerHTML = `<td><a href="#" data-goto="${b.id}" data-tab="이용중" style="color:var(--accent-ink);font-weight:700;text-decoration:none;">${esc(branchLabel(b))}</a></td>
+      <td>${total}</td>${tabCell('이용중', occupied)}${tabCell('판매중', forSale)}<td style="color:${occColor};font-weight:700;">${occRate}%</td>${tabCell('예약', reserved)}${tabCell('판매보류', holdText)}`;
     tbody.appendChild(tr);
   });
   const totalOccRate = totals.total ? Math.round((totals.activeCount/totals.total)*100) : 0;
@@ -3773,7 +3776,7 @@ function renderStatsView(){
   wrap.appendChild(branchSection);
 
   wrap.querySelectorAll('[data-goto]').forEach(a=>{
-    a.addEventListener('click', (e)=>{ e.preventDefault(); UI.view='branch'; UI.branchId = a.dataset.goto; UI.branchTab='rooms'; UI.roomStatusFilter='이용중'; render(); });
+    a.addEventListener('click', (e)=>{ e.preventDefault(); UI.view='branch'; UI.branchId = a.dataset.goto; UI.branchTab='rooms'; UI.roomStatusFilter=a.dataset.tab || '이용중'; render(); });
   });
 
   return wrap;
