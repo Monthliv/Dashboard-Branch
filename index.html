@@ -26,6 +26,7 @@
     --st-shortsale:#C2478B; --st-shortsale-bg:#FBE7F1;
     --st-proxy:#2E8B57;    --st-proxy-bg:#E4F3EA;
     --st-reserved:#A67C00; --st-reserved-bg:#FBF0D6;
+    --st-imported:#1789A6; --st-imported-bg:#E1F4F8;
 
     --ch-indep:#5B4FCF; --ch-33m2:#B5459A; --ch-liveany:#D6673E; --ch-etc:#7A8790;
   }
@@ -818,6 +819,7 @@ function statusMeta(s){
     '판매보류':    { fg:'var(--st-hold)',     bg:'var(--st-hold-bg)' },
     '대리결제':    { fg:'var(--st-proxy)',    bg:'var(--st-proxy-bg)' },
     '예약':        { fg:'var(--st-reserved)', bg:'var(--st-reserved-bg)' },
+    '가져온 입실자': { fg:'var(--st-imported)', bg:'var(--st-imported-bg)' },
   };
   return m[s] || m['공실'];
 }
@@ -1370,11 +1372,15 @@ function roomIsLeavingSoon(room){
 function roomHasPaymentProxy(room){
   return DB.residents.some(p=> p.roomId===room.id && p.paymentProxy);
 }
+function roomHasJustImportedResident(room){
+  return DB.residents.some(p=> p.roomId===room.id && p.justImported);
+}
 const ROOM_TAB_LIST = [...STATUS_LIST_STATS, '대리결제', '예약'];
 function roomsInFilterTab(rooms, s){
   if(s === '퇴실예정') return rooms.filter(roomIsLeavingSoon);
   if(s === '대리결제') return rooms.filter(roomHasPaymentProxy);
   if(s === '예약') return rooms.filter(r=> r.reserved);
+  if(s === '가져온 입실자') return rooms.filter(roomHasJustImportedResident);
   return rooms.filter(r=> roomTabs(r).includes(s));
 }
 function renderRoomsSection(branch){
@@ -1388,7 +1394,10 @@ function renderRoomsSection(branch){
   toolbar.className = 'room-toolbar';
   const legend = document.createElement('div');
   legend.className = 'legend';
-  ROOM_TAB_LIST.forEach(s=>{
+  // "가져온 입실자"는 계약 데이터 붙여넣기로 자동 생성된 입실자를 담당자가 확인하기 전까지만
+  // 임시로 보여주는 탭이라, 해당 지점에 그런 입실자가 있을 때만 탭 자체를 노출한다.
+  const tabList = rooms.some(roomHasJustImportedResident) ? [...ROOM_TAB_LIST, '가져온 입실자'] : ROOM_TAB_LIST;
+  tabList.forEach(s=>{
     const m = statusMeta(s);
     const cnt = roomsInFilterTab(rooms, s).length;
     const btn = document.createElement('button');
@@ -1793,7 +1802,7 @@ function renderResidentView(p, room, isSecondary){
   const block = document.createElement('div');
   block.className = 'resident-block';
 
-  if(!isSecondary && (p.channel !== '독립생활' || isOverdue(p) || p.scheduledToLeave || isUpcoming(p) || p.pendingRoomMove)){
+  if(!isSecondary && (p.channel !== '독립생활' || isOverdue(p) || p.scheduledToLeave || isUpcoming(p) || p.pendingRoomMove || p.justImported)){
     const flagsLine = document.createElement('div');
     flagsLine.className = 'resident-flags';
     flagsLine.innerHTML = `
@@ -1801,6 +1810,7 @@ function renderResidentView(p, room, isSecondary){
       ${isUpcoming(p) ? '<span class="badge res-status upcoming">입실예정</span>' : ''}
       ${p.scheduledToLeave ? '<span class="badge res-status leaving">퇴실예정</span>' : ''}
       ${p.pendingRoomMove ? `<span class="badge res-status moving">방이동예정 (${esc(p.pendingRoomMove.date)})</span>` : ''}
+      ${p.justImported ? `<span class="badge" style="background:var(--st-imported-bg);color:var(--st-imported)">가져옴 · 확인필요</span>` : ''}
       ${p.channel !== '독립생활' ? `<span class="badge" style="background:#F1EFE8;color:${channelColor(p.channel)}">${esc(p.channel)}</span>` : ''}
     `;
     block.appendChild(flagsLine);
@@ -2083,6 +2093,9 @@ function renderResidentEditCard(p, isSecondary, isDraft, room){
       delete UI.residentSnapshots[p.id];
       delete UI.residentFieldEdit[p.id];
       UI.residentEditMode[p.id] = false;
+      // 계약 데이터 붙여넣기로 자동 생성된 입실자는 담당자가 내용을 확인하고
+      // "수정 완료"를 누르는 순간, 임시 확인 목록(가져온 입실자 탭)에서 빠진다.
+      if(p.justImported) delete p.justImported;
       logChange(`${room ? room.number + '호 ' : ''}"${p.name}" 입실자 정보 수정`);
     }
     scheduleSave(); render();
@@ -3192,7 +3205,7 @@ function importContractGrid(headerCells, dataRows, onImported){
       id: uid('p'), roomId: room.id, name: residentName, phone: c.contractorPhone || '',
       channel: '독립생활', resStatus:'', contractType: c.contractCategory || '신규',
       moveIn: range.start, moveOut: range.end, originalMoveIn: range.start, scheduledToLeave:false,
-      carNumber:'', memo:'', firstSaveDone:true, slotIndex:0
+      carNumber:'', memo:'', firstSaveDone:true, slotIndex:0, justImported:true
     };
     newResident.resStatus = computeResStatus(newResident);
     residentSyncActions.push({ room, newResident });
@@ -3211,7 +3224,7 @@ function importContractGrid(headerCells, dataRows, onImported){
       scheduleSave(); render();
       if(typeof onImported === 'function') onImported();
       showAlert(`${newContracts.length}건을 가져왔습니다.`
-        + (residentSyncActions.length ? `\n빈 호실에 새 입실자를 등록한 곳: ${residentSyncActions.length}곳` : '')
+        + (residentSyncActions.length ? `\n빈 호실에 새 입실자를 등록한 곳: ${residentSyncActions.length}곳\n해당 지점 화면의 "가져온 입실자" 탭에서 확인 후 정보를 수정하면 그 탭에서 사라집니다.` : '')
         + (duplicateCount ? `\n이미 등록되어 제외된 중복 데이터: ${duplicateCount}건` : '')
         + (unmatched.length ? `\n\n호실을 찾지 못한 항목:\n${unmatched.slice(0,20).join('\n')}${unmatched.length>20 ? `\n...외 ${unmatched.length-20}건` : ''}` : ''));
     }
