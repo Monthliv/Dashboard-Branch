@@ -3741,6 +3741,7 @@ function renderStatsView(){
   if(USER_ROLE !== 'viewer'){
     wrap.appendChild(renderOverdueStatsCard());
     wrap.appendChild(renderPendingMoveStatsCard());
+    wrap.appendChild(renderJustImportedStatsCard());
   }
 
   const branchSection = document.createElement('div');
@@ -4266,6 +4267,65 @@ function renderPendingMoveStatsCard(){
       chip.title = '해당 호실로 이동';
       chip.onclick = ()=>{
         if(!item.branch || !item.room) return;
+        UI.view = 'branch';
+        UI.branchId = item.branch.id;
+        scrollToRoomCard(item.room);
+      };
+      chipRow.appendChild(chip);
+    });
+    groupWrap.appendChild(chipRow);
+    card.appendChild(groupWrap);
+  });
+
+  return card;
+}
+
+function renderJustImportedStatsCard(){
+  const items = [];
+  DB.residents.filter(p=>p.justImported).forEach(p=>{
+    const room = DB.rooms.find(r=>r.id===p.roomId);
+    if(!room || !hasBranchAccess(room.branchId)) return;
+    const branch = DB.branches.find(b=>b.id===room.branchId);
+    items.push({ p, room, branch });
+  });
+  if(items.length===0) return document.createDocumentFragment();
+
+  const groupMap = new Map();
+  items.forEach(item=>{
+    const key = item.branch ? item.branch.id : '__none__';
+    if(!groupMap.has(key)) groupMap.set(key, { branch: item.branch, entries: [] });
+    groupMap.get(key).entries.push(item);
+  });
+  const groups = [...groupMap.values()].sort((a,b)=> (a.branch?branchLabel(a.branch):'').localeCompare(b.branch?branchLabel(b.branch):''));
+
+  const card = document.createElement('div');
+  card.className = 'stat-section cleaning-card';
+  card.style.borderColor = 'var(--st-imported)';
+  card.innerHTML = `<h3 style="color:var(--st-imported);">계약 가져오기로 등록된 입실자 확인 필요 <span class="cnt-badge" style="background:var(--st-imported-bg);color:var(--st-imported);">${items.length}</span></h3>`;
+
+  groups.forEach(group=>{
+    const groupWrap = document.createElement('div');
+    groupWrap.className = 'overdue-branch-group';
+    const branchName = document.createElement('div');
+    branchName.className = 'overdue-branch-name';
+    branchName.textContent = group.branch ? branchLabel(group.branch) : '(지점 정보 없음)';
+    if(group.branch){
+      branchName.style.cursor = 'pointer';
+      branchName.title = '해당 지점의 "가져온 입실자" 탭으로 이동';
+      branchName.onclick = ()=>{ UI.view = 'branch'; UI.branchId = group.branch.id; UI.roomStatusFilter = '가져온 입실자'; render(); };
+    }
+    groupWrap.appendChild(branchName);
+
+    const chipRow = document.createElement('div');
+    chipRow.className = 'overdue-room-chips';
+    group.entries.forEach(item=>{
+      const chip = document.createElement('span');
+      chip.className = 'badge overdue-room-chip';
+      chip.style.background = 'var(--st-imported-bg)'; chip.style.color = 'var(--st-imported)';
+      chip.textContent = `${item.room.number}호 ${item.p.name || '(이름 미입력)'}`;
+      chip.title = '해당 호실로 이동';
+      chip.onclick = ()=>{
+        if(!item.branch) return;
         UI.view = 'branch';
         UI.branchId = item.branch.id;
         scrollToRoomCard(item.room);
