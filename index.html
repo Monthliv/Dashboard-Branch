@@ -3909,18 +3909,66 @@ function downloadFullBackup(){
   URL.revokeObjectURL(url);
 }
 
+async function restoreLatestBackup(){
+  let snap;
+  try{
+    snap = await BACKUPS_COL.get();
+  }catch(e){
+    console.error(e);
+    showAlert('백업 목록을 불러오지 못했습니다: ' + e.message);
+    return;
+  }
+  if(snap.empty){ showAlert('저장된 자동 백업이 없습니다.'); return; }
+  const docs = snap.docs.map(d=>({ id:d.id, data:d.data() })).sort((a,b)=> b.id.localeCompare(a.id));
+  const latest = docs[0];
+  let core;
+  try{ core = JSON.parse(latest.data.json); }catch(e){ showAlert('백업 데이터를 읽지 못했습니다.'); return; }
+
+  showConfirm(
+    `"${latest.id}" 날짜 백업을 가져올까요?\n\n` +
+    `백업 데이터: 지점 ${core.branches.length}개 · 호실 ${core.rooms.length}개 · 입실자 ${core.residents.length}명\n` +
+    `현재 데이터: 지점 ${DB.branches.length}개 · 호실 ${DB.rooms.length}개 · 입실자 ${DB.residents.length}명\n\n` +
+    `⚠ 현재 화면의 지점·호실·입실자 정보가 백업 시점 내용으로 완전히 대체됩니다(계약·퇴실 이력은 영향 없음). 되돌릴 수 없으니 신중히 확인해주세요.`,
+    async ()=>{
+      DB.branches = core.branches;
+      DB.rooms = core.rooms;
+      DB.residents = core.residents;
+      if(Array.isArray(core.channelList)) DB.channelList = core.channelList;
+      if(Array.isArray(core.shortcuts)) DB.shortcuts = core.shortcuts;
+      try{
+        const newCore = { branches: DB.branches, rooms: DB.rooms, residents: DB.residents, channelList: DB.channelList, shortcuts: DB.shortcuts };
+        await FIRESTORE_DOC.set({ json: JSON.stringify(newCore), updatedAt: new Date().toISOString() });
+        logChange(`"${latest.id}" 백업으로 복원`);
+        render();
+        showAlert('백업 데이터로 복원되었습니다.');
+      }catch(e){
+        console.error(e);
+        showAlert('복원 중 저장에 실패했습니다: ' + e.message);
+      }
+    }
+  );
+}
+
 function renderDataBackupPanel(){
   const box = document.createElement('div');
   box.className = 'stat-section';
   box.innerHTML = `<h3>데이터 백업</h3>
     <div style="font-size:12px;color:var(--ink-soft);margin-bottom:12px;">
-      지점·호실·입실자·계약 이력·퇴실 이력 등 전체 데이터를 JSON 파일로 다운로드합니다. 만일의 사고에 대비해 주기적으로 받아두는 것을 권장합니다.
+      지점·호실·입실자·계약 이력·퇴실 이력 등 전체 데이터를 JSON 파일로 다운로드합니다. 만일의 사고에 대비해 주기적으로 받아두는 것을 권장합니다.<br>
+      "백업 데이터 가져오기"는 매일 자동 저장되는 Firestore 백업(지점·호실·입실자, 최근 3일치) 중 가장 최신 것을 불러와 현재 데이터를 덮어씁니다.
     </div>`;
-  const btn = document.createElement('button');
-  btn.className = 'btn primary';
-  btn.textContent = '⬇ 전체 데이터 백업 다운로드';
-  btn.onclick = downloadFullBackup;
-  box.appendChild(btn);
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex; gap:8px; flex-wrap:wrap;';
+  const downloadBtn = document.createElement('button');
+  downloadBtn.className = 'btn primary';
+  downloadBtn.textContent = '⬇ 전체 데이터 백업 다운로드';
+  downloadBtn.onclick = downloadFullBackup;
+  const restoreBtn = document.createElement('button');
+  restoreBtn.className = 'btn danger';
+  restoreBtn.textContent = '⟳ 백업 데이터 가져오기';
+  restoreBtn.onclick = restoreLatestBackup;
+  btnRow.appendChild(downloadBtn); btnRow.appendChild(restoreBtn);
+  box.appendChild(btnRow);
   return box;
 }
 
