@@ -873,7 +873,7 @@ function statusMeta(s){
     '판매보류':    { fg:'var(--st-hold)',     bg:'var(--st-hold-bg)' },
     '대리결제':    { fg:'var(--st-proxy)',    bg:'var(--st-proxy-bg)' },
     '예약':        { fg:'var(--st-reserved)', bg:'var(--st-reserved-bg)' },
-    '가져온 입실자': { fg:'var(--st-imported)', bg:'var(--st-imported-bg)' },
+    '계약 확인 필요': { fg:'var(--st-imported)', bg:'var(--st-imported-bg)' },
   };
   return m[s] || m['공실'];
 }
@@ -1434,7 +1434,7 @@ function roomsInFilterTab(rooms, s){
   if(s === '퇴실예정') return rooms.filter(roomIsLeavingSoon);
   if(s === '대리결제') return rooms.filter(roomHasPaymentProxy);
   if(s === '예약') return rooms.filter(r=> r.reserved);
-  if(s === '가져온 입실자') return rooms.filter(roomHasJustImportedResident);
+  if(s === '계약 확인 필요') return rooms.filter(roomHasJustImportedResident);
   return rooms.filter(r=> roomTabs(r).includes(s));
 }
 function renderRoomsSection(branch){
@@ -1448,9 +1448,9 @@ function renderRoomsSection(branch){
   toolbar.className = 'room-toolbar';
   const legend = document.createElement('div');
   legend.className = 'legend';
-  // "가져온 입실자"는 계약 데이터 붙여넣기로 자동 생성된 입실자를 담당자가 확인하기 전까지만
-  // 임시로 보여주는 탭이라, 해당 지점에 그런 입실자가 있을 때만 탭 자체를 노출한다.
-  const tabList = rooms.some(roomHasJustImportedResident) ? [...ROOM_TAB_LIST, '가져온 입실자'] : ROOM_TAB_LIST;
+  // "계약 확인 필요"는 계약 데이터 붙여넣기로 새로 등록되었거나 계약 이력이 갱신된 입실자를
+  // 담당자가 확인하기 전까지만 임시로 보여주는 탭이라, 해당 지점에 대상이 있을 때만 노출한다.
+  const tabList = rooms.some(roomHasJustImportedResident) ? [...ROOM_TAB_LIST, '계약 확인 필요'] : ROOM_TAB_LIST;
   tabList.forEach(s=>{
     const m = statusMeta(s);
     const cnt = roomsInFilterTab(rooms, s).length;
@@ -1868,7 +1868,7 @@ function renderResidentView(p, room, isSecondary){
       ${isUpcoming(p) ? '<span class="badge res-status upcoming">입실예정</span>' : ''}
       ${p.scheduledToLeave ? '<span class="badge res-status leaving">퇴실예정</span>' : ''}
       ${p.pendingRoomMove ? `<span class="badge res-status moving">방이동예정 (${esc(p.pendingRoomMove.date)})</span>` : ''}
-      ${p.justImported ? `<span class="badge" style="background:var(--st-imported-bg);color:var(--st-imported)">가져옴 · 확인필요</span>` : ''}
+      ${p.justImported ? `<span class="badge" style="background:var(--st-imported-bg);color:var(--st-imported)">계약 확인 필요</span>` : ''}
       ${p.channel !== '독립생활' ? `<span class="badge" style="background:#F1EFE8;color:${channelColor(p.channel)}">${esc(p.channel)}</span>` : ''}
     `;
     block.appendChild(flagsLine);
@@ -2152,7 +2152,7 @@ function renderResidentEditCard(p, isSecondary, isDraft, room){
       delete UI.residentFieldEdit[p.id];
       UI.residentEditMode[p.id] = false;
       // 계약 데이터 붙여넣기로 자동 생성된 입실자는 담당자가 내용을 확인하고
-      // "수정 완료"를 누르는 순간, 임시 확인 목록(가져온 입실자 탭)에서 빠진다.
+      // "수정 완료"를 누르는 순간, 임시 확인 목록(계약 확인 필요 탭)에서 빠진다.
       if(p.justImported) delete p.justImported;
       logChange(`${room ? room.number + '호 ' : ''}"${p.name}" 입실자 정보 수정`);
     }
@@ -3160,7 +3160,12 @@ function contractSignature(c){
   // 계약현황 팝업에 실제로 노출되는 항목(계약일/계약기간/계약자/입실료/결제금액/계약구분)만으로
   // 중복 여부를 판단한다. 나머지 항목(입실자/계약상태/보증금 등)까지 모두 같아야 한다고 보면
   // 스프레드시트 원본의 사소한 차이 때문에 눈에 보이는 완전 중복도 못 잡는 경우가 있었다.
-  return [c.roomId, c.contractDate, c.contractPeriod, c.contractor, c.rent, c.paymentAmount, c.contractCategory].join('|');
+  // 날짜는 "2026-01-15"와 "26.01.15"처럼 표기 형식만 다를 뿐 같은 날짜인 경우가 있어서,
+  // 문자열을 그대로 비교하지 않고 정규화한 값으로 비교해야 진짜 중복을 놓치지 않는다.
+  const normDate = normalizeFlexDate(c.contractDate) || (c.contractDate || '').trim();
+  const range = parseContractPeriodRange(c.contractPeriod);
+  const normPeriod = range ? `${range.start}~${range.end}` : (c.contractPeriod || '').trim();
+  return [c.roomId, normDate, normPeriod, c.contractor, c.rent, c.paymentAmount, c.contractCategory].join('|');
 }
 function importContractGrid(headerCells, dataRows, onImported){
   const idx = {};
@@ -3243,20 +3248,25 @@ function importContractGrid(headerCells, dataRows, onImported){
 
   // 호실별로 계약일이 가장 최신인 건 하나만 골라, 빈 방이면 그 계약 정보로 입실자를 새로 등록한다.
   // (한 번에 여러 건의 계약 이력이 붙여넣기 될 수 있으므로, 입실자 등록은 호실당 최신 계약 1건에만 적용)
-  // 이미 입실자가 있는 방은 건드리지 않는다 — 계약 이력만 저장하고, 최신 계약의 종료일과 입실자의
-  // 퇴실예정일이 다르면 "계약현황" 버튼의 기존 하이라이트 기능으로 담당자가 직접 확인하도록 한다.
+  // 이미 입실자가 있는 방은 정보를 건드리지 않는다 — 계약 이력만 저장하고, 담당자가 확인할 수 있도록
+  // "계약 확인 필요" 표시만 남긴다(최신 계약의 종료일과 퇴실예정일이 다르면 "계약현황" 버튼의
+  // 기존 하이라이트도 함께 뜬다). 신규 등록이든 기존 입실자든 지점별로 한 곳에서 모아 볼 수 있다.
   const latestByRoom = new Map();
   newContracts.forEach(c=>{
     const prev = latestByRoom.get(c.roomId);
     if(!prev || (c.contractDate||'') >= (prev.contractDate||'')) latestByRoom.set(c.roomId, c);
   });
   const residentSyncActions = [];
+  const existingResidentsToFlag = [];
   let residentSkipCount = 0;
   latestByRoom.forEach(c=>{
     const room = DB.rooms.find(r=>r.id===c.roomId);
     if(!room) return;
     const roomResidents = DB.residents.filter(p=>p.roomId===room.id);
-    if(roomResidents.length > 0) return;
+    if(roomResidents.length > 0){
+      existingResidentsToFlag.push(...roomResidents);
+      return;
+    }
     const range = parseContractPeriodRange(c.contractPeriod);
     const residentName = c.resident || c.contractor;
     if(!range || !residentName){ residentSkipCount++; return; }
@@ -3275,16 +3285,18 @@ function importContractGrid(headerCells, dataRows, onImported){
       + (duplicateCount ? `\n(이미 등록된 중복 ${duplicateCount}건은 제외됩니다)` : '')
       + (unmatched.length ? `\n(호실을 찾지 못한 ${unmatched.length}건은 제외됩니다)` : '')
       + (residentSyncActions.length ? `\n\n빈 호실 ${residentSyncActions.length}곳에 새 계약자 정보로 입실자를 등록합니다.` : '')
+      + (existingResidentsToFlag.length ? `\n기존 입실자가 있는 호실 ${existingResidentsToFlag.length}곳은 계약 이력만 저장하고 "계약 확인 필요"로 표시합니다.` : '')
       + (residentSkipCount ? `\n(계약기간·입실자 정보가 불명확해 입실자 등록을 건너뛴 호실: ${residentSkipCount}곳)` : ''),
     ()=>{
       DB.contracts.push(...newContracts);
       batchWriteDocs(CONTRACTS_COL, newContracts).catch(e=> console.error('계약 데이터 저장 실패:', e));
       residentSyncActions.forEach(action=> DB.residents.push(action.newResident));
-      logChange(`계약 데이터 가져오기: ${newContracts.length}건 추가${duplicateCount ? ` (중복 ${duplicateCount}건 제외)` : ''}${unmatched.length ? ` (미매칭 ${unmatched.length}건)` : ''}${residentSyncActions.length ? ` / 빈 호실 입실자 등록 ${residentSyncActions.length}건` : ''}`);
+      existingResidentsToFlag.forEach(p=> p.justImported = true);
+      logChange(`계약 데이터 가져오기: ${newContracts.length}건 추가${duplicateCount ? ` (중복 ${duplicateCount}건 제외)` : ''}${unmatched.length ? ` (미매칭 ${unmatched.length}건)` : ''}${residentSyncActions.length ? ` / 빈 호실 입실자 등록 ${residentSyncActions.length}건` : ''}${existingResidentsToFlag.length ? ` / 계약 확인 필요 표시 ${existingResidentsToFlag.length}건` : ''}`);
       scheduleSave(); render();
       if(typeof onImported === 'function') onImported();
       showAlert(`${newContracts.length}건을 가져왔습니다.`
-        + (residentSyncActions.length ? `\n빈 호실에 새 입실자를 등록한 곳: ${residentSyncActions.length}곳\n해당 지점 화면의 "가져온 입실자" 탭에서 확인 후 정보를 수정하면 그 탭에서 사라집니다.` : '')
+        + ((residentSyncActions.length || existingResidentsToFlag.length) ? `\n확인이 필요한 곳: ${residentSyncActions.length + existingResidentsToFlag.length}곳 (신규 등록 ${residentSyncActions.length}곳 + 기존 입실자 ${existingResidentsToFlag.length}곳)\n각 지점 화면의 "계약 확인 필요" 탭 또는 대시보드에서 모아볼 수 있고, 정보를 수정하면 목록에서 사라집니다.` : '')
         + (duplicateCount ? `\n이미 등록되어 제외된 중복 데이터: ${duplicateCount}건` : '')
         + (unmatched.length ? `\n\n호실을 찾지 못한 항목:\n${unmatched.slice(0,20).join('\n')}${unmatched.length>20 ? `\n...외 ${unmatched.length-20}건` : ''}` : ''));
     }
@@ -4458,7 +4470,7 @@ function renderJustImportedStatsCard(){
   const card = document.createElement('div');
   card.className = 'stat-section cleaning-card';
   card.style.borderColor = 'var(--st-imported)';
-  card.innerHTML = `<h3 style="color:var(--st-imported);">계약 가져오기로 등록된 입실자 확인 필요 <span class="cnt-badge" style="background:var(--st-imported-bg);color:var(--st-imported);">${items.length}</span></h3>`;
+  card.innerHTML = `<h3 style="color:var(--st-imported);">계약 가져오기로 계약현황이 업데이트된 입실자 확인 필요 <span class="cnt-badge" style="background:var(--st-imported-bg);color:var(--st-imported);">${items.length}</span></h3>`;
 
   groups.forEach(group=>{
     const groupWrap = document.createElement('div');
@@ -4468,8 +4480,8 @@ function renderJustImportedStatsCard(){
     branchName.textContent = group.branch ? branchLabel(group.branch) : '(지점 정보 없음)';
     if(group.branch){
       branchName.style.cursor = 'pointer';
-      branchName.title = '해당 지점의 "가져온 입실자" 탭으로 이동';
-      branchName.onclick = ()=>{ UI.view = 'branch'; UI.branchId = group.branch.id; UI.roomStatusFilter = '가져온 입실자'; render(); };
+      branchName.title = '해당 지점의 "계약 확인 필요" 탭으로 이동';
+      branchName.onclick = ()=>{ UI.view = 'branch'; UI.branchId = group.branch.id; UI.roomStatusFilter = '계약 확인 필요'; render(); };
     }
     groupWrap.appendChild(branchName);
 
