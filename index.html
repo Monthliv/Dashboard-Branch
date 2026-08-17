@@ -2154,7 +2154,6 @@ function renderResidentEditCard(p, isSecondary, isDraft, room){
       // 계약 데이터 붙여넣기로 자동 생성된 입실자는 담당자가 내용을 확인하고
       // "수정 완료"를 누르는 순간, 임시 확인 목록(계약 확인 필요 탭)에서 빠진다.
       if(p.justImported) delete p.justImported;
-      if(p.pendingContractUpdate) delete p.pendingContractUpdate;
       logChange(`${room ? room.number + '호 ' : ''}"${p.name}" 입실자 정보 수정`);
     }
     scheduleSave(); render();
@@ -2194,57 +2193,6 @@ function renderResidentEditCard(p, isSecondary, isDraft, room){
   acts.appendChild(cancelBtn); acts.appendChild(doneBtn); acts.appendChild(delBtn);
   top.appendChild(acts);
   card.appendChild(top);
-
-  if(!isDraft && !isSecondary && p.pendingContractUpdate){
-    const pu = p.pendingContractUpdate;
-    const diffRows = [
-      ['이름', p.name, pu.name],
-      ['연락처', p.phone, pu.phone],
-      ['입실일', p.moveIn, pu.moveIn],
-      ['퇴실일', p.moveOut, pu.moveOut],
-    ];
-    const panel = document.createElement('div');
-    panel.style.cssText = 'background:var(--st-imported-bg);border:1px solid var(--st-imported);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:13px;';
-    const heading = document.createElement('div');
-    heading.style.cssText = 'font-weight:600;color:var(--st-imported);margin-bottom:6px;';
-    heading.textContent = '새로 가져온 계약 정보가 있습니다';
-    panel.appendChild(heading);
-    const table = document.createElement('div');
-    table.style.cssText = 'display:grid;grid-template-columns:auto 1fr auto 1fr;gap:4px 10px;align-items:center;';
-    diffRows.forEach(([label, cur, next])=>{
-      const changed = (cur||'') !== (next||'');
-      table.insertAdjacentHTML('beforeend', `
-        <div style="color:#8a8377;">${esc(label)}</div>
-        <div>${esc(cur || '-')}</div>
-        <div style="color:#8a8377;">&rarr;</div>
-        <div style="${changed ? 'font-weight:600;color:var(--st-imported);' : ''}">${esc(next || '-')}</div>
-      `);
-    });
-    panel.appendChild(table);
-    const applyBtn = document.createElement('button');
-    applyBtn.type = 'button';
-    applyBtn.className = 'btn small primary';
-    applyBtn.style.marginTop = '8px';
-    applyBtn.textContent = '새 계약 정보로 업데이트';
-    applyBtn.onclick = ()=>{
-      showConfirm(
-        `"${p.name || '이 입실자'}" 정보를 새 계약 데이터로 업데이트할까요?\n\n`
-        + diffRows.map(([label,cur,next])=> `${label}: ${cur||'-'} → ${next||'-'}`).join('\n'),
-        ()=>{
-          if(pu.name) p.name = pu.name;
-          if(pu.phone) p.phone = pu.phone;
-          if(pu.moveIn) p.moveIn = pu.moveIn;
-          if(pu.moveOut) p.moveOut = pu.moveOut;
-          p.resStatus = computeResStatus(p);
-          delete p.pendingContractUpdate;
-          logChange(`${room ? room.number + '호 ' : ''}"${p.name}" 입실자 정보를 새 계약 데이터로 업데이트`);
-          maybeSave(); render();
-        }
-      );
-    };
-    panel.appendChild(applyBtn);
-    card.appendChild(panel);
-  }
 
   const identityGrid = document.createElement('div');
   identityGrid.className = 'redit-grid2';
@@ -2711,6 +2659,11 @@ function parseContractPeriodRange(periodStr){
   const end = normalizeFlexDate(parts[1]);
   if(!start || !end) return null;
   return { start, end };
+}
+function contractProposedResidentData(c){
+  if(!c) return null;
+  const range = parseContractPeriodRange(c.contractPeriod);
+  return { contractId: c.id, name: c.resident || c.contractor || '', phone: c.contractorPhone || '', moveIn: range ? range.start : '', moveOut: range ? range.end : '' };
 }
 function roomContractSegments(room){
   const segments = [];
@@ -3314,17 +3267,16 @@ function importContractGrid(headerCells, dataRows, onImported){
   latestByRoom.forEach(c=>{
     const room = DB.rooms.find(r=>r.id===c.roomId);
     if(!room) return;
-    const range = parseContractPeriodRange(c.contractPeriod);
-    const residentName = c.resident || c.contractor;
     const roomResidents = DB.residents.filter(p=>p.roomId===room.id);
     if(roomResidents.length > 0){
-      // 기존 입실자가 있으면 정보를 자동으로 덮어쓰지 않고, 새 계약의 이름/연락처/입실일/퇴실일을
-      // pendingContractUpdate로 보관해둔다. 담당자가 "계약 확인 필요" 카드에서 기존 값과
-      // 비교해보고, 확인 후 직접 "새 계약 정보로 업데이트"를 눌러야만 실제로 반영된다.
-      const proposed = { contractId: c.id, name: residentName || '', phone: c.contractorPhone || '', moveIn: range ? range.start : '', moveOut: range ? range.end : '' };
-      roomResidents.forEach(p=> existingResidentsToFlag.push({ resident: p, proposed }));
+      // 기존 입실자가 있으면 정보를 자동으로 덮어쓰지 않고 "계약 확인 필요"로만 표시한다.
+      // 담당자가 카드를 열면 해당 호실의 최신 계약(DB.contracts)에서 이름/연락처/입실일/퇴실일을
+      // 그때그때 다시 계산해 기존 값과 비교해서 보여주므로, 여기서 따로 값을 저장해둘 필요는 없다.
+      existingResidentsToFlag.push(...roomResidents);
       return;
     }
+    const range = parseContractPeriodRange(c.contractPeriod);
+    const residentName = c.resident || c.contractor;
     if(!range || !residentName){ residentSkipCount++; return; }
     const newResident = {
       id: uid('p'), roomId: room.id, name: residentName, phone: c.contractorPhone || '',
@@ -3347,7 +3299,7 @@ function importContractGrid(headerCells, dataRows, onImported){
       DB.contracts.push(...newContracts);
       batchWriteDocs(CONTRACTS_COL, newContracts).catch(e=> console.error('계약 데이터 저장 실패:', e));
       residentSyncActions.forEach(action=> DB.residents.push(action.newResident));
-      existingResidentsToFlag.forEach(({resident, proposed})=>{ resident.justImported = true; resident.pendingContractUpdate = proposed; });
+      existingResidentsToFlag.forEach(p=> p.justImported = true);
       logChange(`계약 데이터 가져오기: ${newContracts.length}건 추가${duplicateCount ? ` (중복 ${duplicateCount}건 제외)` : ''}${unmatched.length ? ` (미매칭 ${unmatched.length}건)` : ''}${residentSyncActions.length ? ` / 빈 호실 입실자 등록 ${residentSyncActions.length}건` : ''}${existingResidentsToFlag.length ? ` / 계약 확인 필요 표시 ${existingResidentsToFlag.length}건` : ''}`);
       scheduleSave(); render();
       if(typeof onImported === 'function') onImported();
@@ -3384,13 +3336,42 @@ function showContractHistoryModal(room){
   overlay.className = 'modal-overlay';
   const box = document.createElement('div');
   box.className = 'modal-box';
-  box.style.maxWidth = '720px';
+  box.style.maxWidth = '820px';
   const close = ()=> overlay.remove();
+  const primaryResident = DB.residents.filter(p=>p.roomId===room.id).sort((a,b)=> (a.slotIndex||0)-(b.slotIndex||0))[0] || null;
+  const canApplyUpdate = canEdit() && !!primaryResident;
+
+  function applyContractToResident(c){
+    const pu = contractProposedResidentData(c);
+    const diffRows = [
+      ['이름', primaryResident.name, pu.name],
+      ['연락처', primaryResident.phone, pu.phone],
+      ['입실일', primaryResident.moveIn, pu.moveIn],
+      ['퇴실일', primaryResident.moveOut, pu.moveOut],
+    ];
+    showConfirm(
+      `"${primaryResident.name || '이 입실자'}" 정보를 이 계약(${c.contractDate || '-'}) 내용으로 업데이트할까요?\n\n`
+      + diffRows.map(([label,cur,next])=> `${label}: ${cur||'-'} → ${next||'-'}`).join('\n'),
+      ()=>{
+        if(pu.name) primaryResident.name = pu.name;
+        if(pu.phone) primaryResident.phone = pu.phone;
+        if(pu.moveIn) primaryResident.moveIn = pu.moveIn;
+        if(pu.moveOut) primaryResident.moveOut = pu.moveOut;
+        primaryResident.resStatus = computeResStatus(primaryResident);
+        if(primaryResident.justImported) delete primaryResident.justImported;
+        logChange(`${room.number}호 "${primaryResident.name}" 입실자 정보를 계약(${c.contractDate || '-'}) 내용으로 업데이트`);
+        scheduleSave(); render(); renderBody();
+      }
+    );
+  }
 
   function renderBody(){
     box.innerHTML = '';
     const title = el('div', 'modal-msg', `${room.number}호 계약현황 (${contracts.length}건)`, 'margin-bottom:10px;font-weight:700;');
     box.appendChild(title);
+    if(canApplyUpdate){
+      box.appendChild(el('div', null, '원하는 계약 옆의 "이 계약으로 업데이트"를 누르면 현재 입실자(이름/연락처/입실일/퇴실일)를 그 계약 내용으로 바꿀 수 있습니다.', 'font-size:12px;color:var(--ink-soft);margin-bottom:10px;'));
+    }
 
     if(contracts.length===0){
       box.appendChild(el('div', null, '등록된 계약 이력이 없습니다.', 'font-size:12.5px;color:var(--ink-soft);padding:12px 0;'));
@@ -3404,10 +3385,13 @@ function showContractHistoryModal(room){
         <thead><tr>
           <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);">계약일</th>
           <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);">계약기간</th>
+          <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);">입실자</th>
+          <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);">연락처</th>
           <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);">계약자</th>
           <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);">입실료</th>
           <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);">결제금액</th>
           <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);">계약구분</th>
+          ${canApplyUpdate ? '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);"></th>' : ''}
         </tr></thead>
       `;
       const tbody = document.createElement('tbody');
@@ -3417,11 +3401,24 @@ function showContractHistoryModal(room){
         tr.innerHTML = `
           <td style="padding:6px 8px;border-bottom:1px solid var(--line);">${esc(c.contractDate||'-')}</td>
           <td style="padding:6px 8px;border-bottom:1px solid var(--line);">${esc(c.contractPeriod||'-')}</td>
+          <td style="padding:6px 8px;border-bottom:1px solid var(--line);">${esc(c.resident||'-')}</td>
+          <td style="padding:6px 8px;border-bottom:1px solid var(--line);">${esc(c.contractorPhone||'-')}</td>
           <td style="padding:6px 8px;border-bottom:1px solid var(--line);">${esc(c.contractor||'-')}</td>
           <td style="padding:6px 8px;border-bottom:1px solid var(--line);">${esc(c.rent||'-')}</td>
           <td style="padding:6px 8px;border-bottom:1px solid var(--line);">${esc(c.paymentAmount||'-')}</td>
           <td style="padding:6px 8px;border-bottom:1px solid var(--line);">${esc(c.contractCategory||'-')}</td>
         `;
+        if(canApplyUpdate){
+          const td = document.createElement('td');
+          td.style.cssText = 'padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap;';
+          const applyBtn = document.createElement('button');
+          applyBtn.type = 'button';
+          applyBtn.className = 'btn small primary';
+          applyBtn.textContent = '이 계약으로 업데이트';
+          applyBtn.onclick = ()=> applyContractToResident(c);
+          td.appendChild(applyBtn);
+          tr.appendChild(td);
+        }
         tbody.appendChild(tr);
       });
       table.appendChild(tbody);
