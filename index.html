@@ -3339,31 +3339,67 @@ function showContractHistoryModal(room){
   box.style.maxWidth = '820px';
   const close = ()=> overlay.remove();
   const roomResidents = DB.residents.filter(p=>p.roomId===room.id);
-  const latestContract = contracts[0] || null; // 가장 나중에 생성된(계약일 기준 최신) 계약만 교체 대상
-  const canApplyUpdate = canEdit() && roomResidents.length>0 && !!latestContract;
+  const latestContract = contracts[0] || null; // 가장 나중에 생성된(계약일 기준 최신) 계약만 대상
+  const canApplyUpdate = canEdit() && !!latestContract;
+
+  function buildResidentFromContract(pu, range, c){
+    const newResident = {
+      id: uid('p'), roomId: room.id, name: pu.name, phone: pu.phone,
+      channel: '독립생활', resStatus:'', contractType: c.contractCategory || '신규',
+      moveIn: range.start, moveOut: range.end, originalMoveIn: range.start, scheduledToLeave:false,
+      carNumber:'', memo:'', firstSaveDone:true, slotIndex:0
+    };
+    newResident.resStatus = computeResStatus(newResident);
+    return newResident;
+  }
 
   function replaceResidentsWithContract(c){
     const pu = contractProposedResidentData(c);
     const range = parseContractPeriodRange(c.contractPeriod);
     if(!pu.name || !range){
-      showAlert('이 계약에는 입실자 이름 또는 계약기간 정보가 없어 교체할 수 없습니다.');
+      showAlert('이 계약에는 입실자 이름 또는 계약기간 정보가 없어 처리할 수 없습니다.');
       return;
     }
+    const detail = `이름: ${pu.name}\n연락처: ${pu.phone || '-'}\n입실일: ${pu.moveIn || '-'}\n퇴실일: ${pu.moveOut || '-'}`;
+
+    if(roomResidents.length===0){
+      // 기존 입실자가 없는 빈 방: 새 계약자 정보로 바로 입실 처리
+      showConfirm(
+        `이 계약 내용으로 신규 입실자를 등록할까요?\n\n${detail}`,
+        ()=>{
+          DB.residents.push(buildResidentFromContract(pu, range, c));
+          logChange(`${room.number}호 계약(${c.contractDate || '-'}) 내용으로 신규 입실자 등록: ${pu.name}`);
+          scheduleSave(); render(); close();
+        }
+      );
+      return;
+    }
+
     const oldNames = roomResidents.map(p=> p.name || '(이름 미입력)').join(', ');
+    const anyNotYetDue = roomResidents.some(p=> !isOverdue(p));
+
+    if(anyNotYetDue){
+      // 기존 입실자의 퇴실일이 아직 지나지 않은 경우: 기존 입실자는 퇴실예정으로 두고, 신규 계약자는 입실예정자로 등록
+      showConfirm(
+        `기존 입실자(${oldNames})의 퇴실일이 아직 지나지 않았습니다.\n`
+        + `기존 입실자는 퇴실예정으로 표시하고, 새 계약 내용으로 입실예정자를 등록할까요?\n\n${detail}`,
+        ()=>{
+          roomResidents.forEach(p=>{ p.scheduledToLeave = true; });
+          DB.residents.push(buildResidentFromContract(pu, range, c));
+          logChange(`${room.number}호 계약(${c.contractDate || '-'}) 내용으로 입실예정자 등록 (기존 입실자 ${oldNames} 퇴실예정 처리)`);
+          scheduleSave(); render(); close();
+        }
+      );
+      return;
+    }
+
+    // 기존 입실자의 퇴실일이 이미 지난 경우: 즉시 퇴실 처리 후 신규 입실자 등록
     showConfirm(
-      `기존 입실자(${oldNames || '없음'})를 퇴실 처리하고, 새 계약 내용으로 신규 입실자를 등록할까요?\n\n`
-      + `이름: ${pu.name}\n연락처: ${pu.phone || '-'}\n입실일: ${pu.moveIn || '-'}\n퇴실일: ${pu.moveOut || '-'}`,
+      `기존 입실자(${oldNames})를 퇴실 처리하고, 새 계약 내용으로 신규 입실자를 등록할까요?\n\n${detail}`,
       ()=>{
         roomResidents.forEach(p=> moveResidentToHistory(p));
-        const newResident = {
-          id: uid('p'), roomId: room.id, name: pu.name, phone: pu.phone,
-          channel: '독립생활', resStatus:'', contractType: c.contractCategory || '신규',
-          moveIn: range.start, moveOut: range.end, originalMoveIn: range.start, scheduledToLeave:false,
-          carNumber:'', memo:'', firstSaveDone:true, slotIndex:0
-        };
-        newResident.resStatus = computeResStatus(newResident);
-        DB.residents.push(newResident);
-        logChange(`${room.number}호 계약(${c.contractDate || '-'}) 내용으로 입실자 교체: ${oldNames || '없음'} → ${pu.name}`);
+        DB.residents.push(buildResidentFromContract(pu, range, c));
+        logChange(`${room.number}호 계약(${c.contractDate || '-'}) 내용으로 입실자 교체: ${oldNames} → ${pu.name}`);
         scheduleSave(); render(); close();
       }
     );
@@ -3374,7 +3410,7 @@ function showContractHistoryModal(room){
     const title = el('div', 'modal-msg', `${room.number}호 계약현황 (${contracts.length}건)`, 'margin-bottom:10px;font-weight:700;');
     box.appendChild(title);
     if(canApplyUpdate){
-      box.appendChild(el('div', null, '가장 최근 계약 옆의 ↻ 버튼을 누르면 현재 입실자를 퇴실 처리하고, 그 계약 내용(이름/연락처/입실일/퇴실일)으로 신규 입실자를 등록합니다.', 'font-size:12px;color:var(--ink-soft);margin-bottom:10px;'));
+      box.appendChild(el('div', null, '가장 최근 계약 옆의 ↻ 버튼으로 신규 계약자 정보를 반영합니다. 빈 방이면 바로 입실 처리되고, 기존 입실자가 있으면 퇴실일이 지난 경우 즉시 퇴실 후 신규 입실자를 등록하며, 퇴실일 전이면 기존 입실자를 퇴실예정으로 두고 신규 계약자를 입실예정자로 등록합니다.', 'font-size:12px;color:var(--ink-soft);margin-bottom:10px;'));
     }
 
     if(contracts.length===0){
@@ -3420,7 +3456,7 @@ function showContractHistoryModal(room){
             applyBtn.type = 'button';
             applyBtn.className = 'iconbtn active';
             applyBtn.innerHTML = '&#8635;';
-            applyBtn.title = '이 계약으로 신규 입실자 교체 (기존 입실자는 퇴실 처리)';
+            applyBtn.title = '이 계약 내용으로 입실 처리';
             applyBtn.onclick = ()=> replaceResidentsWithContract(c);
             td.appendChild(applyBtn);
           }
