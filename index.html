@@ -3340,7 +3340,18 @@ function showContractHistoryModal(room){
   const close = ()=> overlay.remove();
   const roomResidents = DB.residents.filter(p=>p.roomId===room.id);
   const latestContract = contracts[0] || null; // 가장 나중에 생성된(계약일 기준 최신) 계약만 대상
-  const canApplyUpdate = canEdit() && !!latestContract;
+  // 입실자가 있는 방은 최신 계약이 "신규"일 때만 교체 대상으로 본다. "연장"은 같은 입실자의
+  // 계약 기간만 늘어난 것이라 퇴실 처리할 대상이 없으므로 아이콘을 아예 노출하지 않는다.
+  // (빈 방은 애초에 퇴실 처리할 기존 입실자가 없으므로 이 조건과 무관하게 노출한다.)
+  // 이미 이 계약으로 입실자 정보를 반영한 적이 있으면(appliedResident) 같은 계약으로
+  // 중복 처리하지 않도록 아이콘을 다시 노출하지 않는다.
+  const canApplyUpdate = canEdit() && !!latestContract && !latestContract.appliedResident
+    && (roomResidents.length===0 || latestContract.contractCategory === '신규');
+
+  function markContractApplied(c){
+    c.appliedResident = true;
+    CONTRACTS_COL.doc(c.id).set(c).catch(e=> console.error('계약 데이터 갱신 실패:', e));
+  }
 
   function buildResidentFromContract(pu, range, c){
     const newResident = {
@@ -3368,6 +3379,7 @@ function showContractHistoryModal(room){
         `이 계약 내용으로 신규 입실자를 등록할까요?\n\n${detail}`,
         ()=>{
           DB.residents.push(buildResidentFromContract(pu, range, c));
+          markContractApplied(c);
           logChange(`${room.number}호 계약(${c.contractDate || '-'}) 내용으로 신규 입실자 등록: ${pu.name}`);
           scheduleSave(); render(); close();
         }
@@ -3386,6 +3398,7 @@ function showContractHistoryModal(room){
         ()=>{
           roomResidents.forEach(p=>{ p.scheduledToLeave = true; });
           DB.residents.push(buildResidentFromContract(pu, range, c));
+          markContractApplied(c);
           logChange(`${room.number}호 계약(${c.contractDate || '-'}) 내용으로 입실예정자 등록 (기존 입실자 ${oldNames} 퇴실예정 처리)`);
           scheduleSave(); render(); close();
         }
@@ -3399,6 +3412,7 @@ function showContractHistoryModal(room){
       ()=>{
         roomResidents.forEach(p=> moveResidentToHistory(p));
         DB.residents.push(buildResidentFromContract(pu, range, c));
+        markContractApplied(c);
         logChange(`${room.number}호 계약(${c.contractDate || '-'}) 내용으로 입실자 교체: ${oldNames} → ${pu.name}`);
         scheduleSave(); render(); close();
       }
