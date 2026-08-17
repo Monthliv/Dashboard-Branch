@@ -3419,6 +3419,20 @@ function showContractHistoryModal(room){
     );
   }
 
+  function deleteContract(c){
+    showConfirm(
+      `이 계약 이력을 삭제할까요?\n\n계약일: ${c.contractDate || '-'}\n계약기간: ${c.contractPeriod || '-'}\n계약자: ${c.contractor || '-'}\n\n삭제 후에는 되돌릴 수 없습니다.`,
+      ()=>{
+        DB.contracts = DB.contracts.filter(x=>x.id!==c.id);
+        CONTRACTS_COL.doc(c.id).delete().catch(e=> console.error('계약 데이터 삭제 실패:', e));
+        logChange(`${room.number}호 계약(${c.contractDate || '-'} / ${c.contractor || '-'}) 이력 삭제`);
+        scheduleSave();
+        close();
+        showContractHistoryModal(room);
+      }
+    );
+  }
+
   function renderBody(){
     box.innerHTML = '';
     const title = el('div', 'modal-msg', `${room.number}호 계약현황 (${contracts.length}건)`, 'margin-bottom:10px;font-weight:700;');
@@ -3445,7 +3459,7 @@ function showContractHistoryModal(room){
           <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);">입실료</th>
           <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);">결제금액</th>
           <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);">계약구분</th>
-          ${canApplyUpdate ? '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);"></th>' : ''}
+          ${canEdit() ? '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);"></th>' : ''}
         </tr></thead>
       `;
       const tbody = document.createElement('tbody');
@@ -3462,18 +3476,28 @@ function showContractHistoryModal(room){
           <td style="padding:6px 8px;border-bottom:1px solid var(--line);">${esc(c.paymentAmount||'-')}</td>
           <td style="padding:6px 8px;border-bottom:1px solid var(--line);">${esc(c.contractCategory||'-')}</td>
         `;
-        if(canApplyUpdate){
+        if(canEdit()){
           const td = document.createElement('td');
           td.style.cssText = 'padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap;';
-          if(c === latestContract){
+          const btnWrap = document.createElement('div');
+          btnWrap.style.cssText = 'display:flex;gap:4px;';
+          if(canApplyUpdate && c === latestContract){
             const applyBtn = document.createElement('button');
             applyBtn.type = 'button';
             applyBtn.className = 'iconbtn active';
             applyBtn.innerHTML = '&#8635;';
             applyBtn.title = '이 계약 내용으로 입실 처리';
             applyBtn.onclick = ()=> replaceResidentsWithContract(c);
-            td.appendChild(applyBtn);
+            btnWrap.appendChild(applyBtn);
           }
+          const delBtn = document.createElement('button');
+          delBtn.type = 'button';
+          delBtn.className = 'iconbtn del';
+          delBtn.innerHTML = '&times;';
+          delBtn.title = '이 계약 이력 삭제';
+          delBtn.onclick = ()=> deleteContract(c);
+          btnWrap.appendChild(delBtn);
+          td.appendChild(btnWrap);
           tr.appendChild(td);
         }
         tbody.appendChild(tr);
