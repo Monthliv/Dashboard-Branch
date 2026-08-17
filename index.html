@@ -3338,29 +3338,33 @@ function showContractHistoryModal(room){
   box.className = 'modal-box';
   box.style.maxWidth = '820px';
   const close = ()=> overlay.remove();
-  const primaryResident = DB.residents.filter(p=>p.roomId===room.id).sort((a,b)=> (a.slotIndex||0)-(b.slotIndex||0))[0] || null;
-  const canApplyUpdate = canEdit() && !!primaryResident;
+  const roomResidents = DB.residents.filter(p=>p.roomId===room.id);
+  const latestContract = contracts[0] || null; // 가장 나중에 생성된(계약일 기준 최신) 계약만 교체 대상
+  const canApplyUpdate = canEdit() && roomResidents.length>0 && !!latestContract;
 
-  function applyContractToResident(c){
+  function replaceResidentsWithContract(c){
     const pu = contractProposedResidentData(c);
-    const diffRows = [
-      ['이름', primaryResident.name, pu.name],
-      ['연락처', primaryResident.phone, pu.phone],
-      ['입실일', primaryResident.moveIn, pu.moveIn],
-      ['퇴실일', primaryResident.moveOut, pu.moveOut],
-    ];
+    const range = parseContractPeriodRange(c.contractPeriod);
+    if(!pu.name || !range){
+      showAlert('이 계약에는 입실자 이름 또는 계약기간 정보가 없어 교체할 수 없습니다.');
+      return;
+    }
+    const oldNames = roomResidents.map(p=> p.name || '(이름 미입력)').join(', ');
     showConfirm(
-      `"${primaryResident.name || '이 입실자'}" 정보를 이 계약(${c.contractDate || '-'}) 내용으로 업데이트할까요?\n\n`
-      + diffRows.map(([label,cur,next])=> `${label}: ${cur||'-'} → ${next||'-'}`).join('\n'),
+      `기존 입실자(${oldNames || '없음'})를 퇴실 처리하고, 새 계약 내용으로 신규 입실자를 등록할까요?\n\n`
+      + `이름: ${pu.name}\n연락처: ${pu.phone || '-'}\n입실일: ${pu.moveIn || '-'}\n퇴실일: ${pu.moveOut || '-'}`,
       ()=>{
-        if(pu.name) primaryResident.name = pu.name;
-        if(pu.phone) primaryResident.phone = pu.phone;
-        if(pu.moveIn) primaryResident.moveIn = pu.moveIn;
-        if(pu.moveOut) primaryResident.moveOut = pu.moveOut;
-        primaryResident.resStatus = computeResStatus(primaryResident);
-        if(primaryResident.justImported) delete primaryResident.justImported;
-        logChange(`${room.number}호 "${primaryResident.name}" 입실자 정보를 계약(${c.contractDate || '-'}) 내용으로 업데이트`);
-        scheduleSave(); render(); renderBody();
+        roomResidents.forEach(p=> moveResidentToHistory(p));
+        const newResident = {
+          id: uid('p'), roomId: room.id, name: pu.name, phone: pu.phone,
+          channel: '독립생활', resStatus:'', contractType: c.contractCategory || '신규',
+          moveIn: range.start, moveOut: range.end, originalMoveIn: range.start, scheduledToLeave:false,
+          carNumber:'', memo:'', firstSaveDone:true, slotIndex:0
+        };
+        newResident.resStatus = computeResStatus(newResident);
+        DB.residents.push(newResident);
+        logChange(`${room.number}호 계약(${c.contractDate || '-'}) 내용으로 입실자 교체: ${oldNames || '없음'} → ${pu.name}`);
+        scheduleSave(); render(); close();
       }
     );
   }
@@ -3370,7 +3374,7 @@ function showContractHistoryModal(room){
     const title = el('div', 'modal-msg', `${room.number}호 계약현황 (${contracts.length}건)`, 'margin-bottom:10px;font-weight:700;');
     box.appendChild(title);
     if(canApplyUpdate){
-      box.appendChild(el('div', null, '원하는 계약 옆의 "이 계약으로 업데이트"를 누르면 현재 입실자(이름/연락처/입실일/퇴실일)를 그 계약 내용으로 바꿀 수 있습니다.', 'font-size:12px;color:var(--ink-soft);margin-bottom:10px;'));
+      box.appendChild(el('div', null, '가장 최근 계약 옆의 ↻ 버튼을 누르면 현재 입실자를 퇴실 처리하고, 그 계약 내용(이름/연락처/입실일/퇴실일)으로 신규 입실자를 등록합니다.', 'font-size:12px;color:var(--ink-soft);margin-bottom:10px;'));
     }
 
     if(contracts.length===0){
@@ -3411,12 +3415,15 @@ function showContractHistoryModal(room){
         if(canApplyUpdate){
           const td = document.createElement('td');
           td.style.cssText = 'padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap;';
-          const applyBtn = document.createElement('button');
-          applyBtn.type = 'button';
-          applyBtn.className = 'btn small primary';
-          applyBtn.textContent = '이 계약으로 업데이트';
-          applyBtn.onclick = ()=> applyContractToResident(c);
-          td.appendChild(applyBtn);
+          if(c === latestContract){
+            const applyBtn = document.createElement('button');
+            applyBtn.type = 'button';
+            applyBtn.className = 'iconbtn active';
+            applyBtn.innerHTML = '&#8635;';
+            applyBtn.title = '이 계약으로 신규 입실자 교체 (기존 입실자는 퇴실 처리)';
+            applyBtn.onclick = ()=> replaceResidentsWithContract(c);
+            td.appendChild(applyBtn);
+          }
           tr.appendChild(td);
         }
         tbody.appendChild(tr);
