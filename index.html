@@ -4203,7 +4203,7 @@ function renderDataBackupPanel(){
   return box;
 }
 
-const ADMIN_PANEL_TOGGLE_FLAGS = ['addingBranch','addingRoom','managingRoom','managingTypePrice'];
+const ADMIN_PANEL_TOGGLE_FLAGS = ['addingBranch','addingRoom','managingRoom','managingTypePrice','matchingRoomType'];
 function renderBranchRoomManagePanel(){
   const box = document.createElement('div');
   box.className = 'stat-section';
@@ -4228,12 +4228,14 @@ function renderBranchRoomManagePanel(){
   btnRow.appendChild(toggleBtn('addingBranch', '+ 지점 추가', '지점 추가 취소', 'primary'));
   btnRow.appendChild(toggleBtn('addingRoom', '+ 호실 추가', '호실 추가 취소', 'primary'));
   btnRow.appendChild(toggleBtn('managingTypePrice', '타입별 가격 관리', '타입별 가격 관리 취소', 'primary'));
+  btnRow.appendChild(toggleBtn('matchingRoomType', '호실-타입 매칭', '호실-타입 매칭 취소', 'primary'));
   btnRow.appendChild(toggleBtn('managingRoom', '호실 삭제', '호실 삭제 취소', 'danger'));
   box.appendChild(btnRow);
 
   if(UI.addingBranch) box.appendChild(renderAdminAddBranchForm());
   else if(UI.addingRoom) box.appendChild(renderAdminAddRoomForm());
   else if(UI.managingTypePrice) box.appendChild(renderTypePriceManageForm());
+  else if(UI.matchingRoomType) box.appendChild(renderRoomTypeMatchForm());
   else if(UI.managingRoom) box.appendChild(renderAdminRoomManageForm());
   else if(UI.editingBranchId) box.appendChild(renderAdminEditBranchForm(DB.branches.find(b=>b.id===UI.editingBranchId)));
   else box.appendChild(renderBranchOrderBody());
@@ -4338,6 +4340,80 @@ function renderAdminRoomManageForm(){
         scheduleSave(); render();
       });
     };
+  },0);
+  return form;
+}
+
+function renderRoomTypeMatchForm(){
+  const form = document.createElement('div');
+  form.className = 'admin-add-form';
+  if(DB.branches.length===0){
+    form.innerHTML = `<div class="fld">등록된 지점이 없습니다.</div>`;
+    return form;
+  }
+  form.innerHTML = `
+    <div class="fld" style="grid-column:1/-1;"><label class="field-label">지점 *</label>
+      <select id="rtBranch">${DB.branches.map(b=>`<option value="${b.id}">${esc(b.name)}</option>`).join('')}</select></div>
+    <div id="rtRoomList" style="grid-column:1/-1;"></div>
+    <div style="grid-column:1/-1;font-size:11.5px;color:var(--ink-soft);">호실마다 타입을 선택하면 바로 저장됩니다. 타입 목록 자체를 추가/삭제하려면 "타입별 가격 관리"를 이용하세요.</div>
+    <div class="btn-row">
+      <button class="btn" id="rtCancel">닫기</button>
+    </div>
+  `;
+  setTimeout(()=>{
+    const branchSel = document.getElementById('rtBranch');
+    const listWrap = document.getElementById('rtRoomList');
+    const renderList = ()=>{
+      const branch = DB.branches.find(b=>b.id===branchSel.value);
+      listWrap.innerHTML = '';
+      if(!branch) return;
+      const rms = DB.rooms.filter(r=>r.branchId===branch.id)
+        .sort((a,b)=> a.number.localeCompare(b.number,'ko',{numeric:true}));
+      if(rms.length===0){
+        listWrap.appendChild(el('div', null, '등록된 호실이 없습니다.', 'font-size:12.5px;color:var(--ink-soft);padding:8px 0;'));
+        return;
+      }
+      const types = branchRoomTypes(branch);
+      const listBox = document.createElement('div');
+      listBox.style.cssText = 'display:flex;flex-direction:column;gap:6px;max-height:440px;overflow-y:auto;';
+      rms.forEach(r=>{
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:5px 0;border-bottom:1px solid var(--line);';
+
+        const label = document.createElement('span');
+        label.style.cssText = 'width:64px;flex-shrink:0;font-weight:600;';
+        label.textContent = r.number + '호';
+        row.appendChild(label);
+
+        const sel = document.createElement('select');
+        sel.style.flex = '1';
+        // 등록된 타입 목록에 없는 값(오타·미등록 등)이면 맨 앞에 "(미등록)"으로 표시해 눈에 띄게 한다
+        const optionHtml = types.map(t=>`<option ${t===r.type?'selected':''}>${esc(t)}</option>`).join('');
+        sel.innerHTML = types.includes(r.type)
+          ? optionHtml
+          : `<option value="${esc(r.type||'')}" selected>${esc(r.type || '(타입 없음)')} — 미등록</option>${optionHtml}`;
+        row.appendChild(sel);
+
+        const priceHint = document.createElement('span');
+        priceHint.style.cssText = 'font-size:11.5px;color:var(--ink-soft);white-space:nowrap;min-width:80px;text-align:right;';
+        priceHint.textContent = formatWon((branch.typePrices && branch.typePrices[r.type]) || 0);
+        row.appendChild(priceHint);
+
+        sel.addEventListener('change', ()=>{
+          if(sel.value === r.type) return;
+          logChange(`${r.number}호 타입 변경: ${r.type} → ${sel.value}`);
+          r.type = sel.value;
+          scheduleSave();
+          renderList();
+        });
+
+        listBox.appendChild(row);
+      });
+      listWrap.appendChild(listBox);
+    };
+    renderList();
+    branchSel.onchange = renderList;
+    document.getElementById('rtCancel').onclick = ()=>{ UI.matchingRoomType=false; render(); };
   },0);
   return form;
 }
