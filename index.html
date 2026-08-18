@@ -1710,14 +1710,14 @@ function branchActiveCarCount(branch, excludeResidentId){
   ).length;
 }
 function effectiveRoomStatus(room){
-  // "이용중"/"이용중판매"/"단기판매"는 오늘 날짜 기준 재실·예약 여부로 자동 판정하며 수동 설정 불가.
-  // 재실(또는 예약) 중에 관리자가 판매 상태를 "판매중"으로 지정해두면, 지금 실제로 거주 중인
-  // 입실자가 있으면 "이용중판매", 미래 입실예정자만 있으면 "단기판매"로 표시됩니다.
-  // 단기판매는 입실예정일이 SHORT_SALE_SOON_DAYS일 이내로 다가오면 실제로 "이용중"으로 전환됩니다.
+  // "이용중"/"단기판매"는 오늘 날짜 기준 재실·예약 여부로 자동 판정하며 수동 설정 불가.
+  // 입실 당일 이후 실제로 거주 중인 입실자가 있으면 판매 상태와 무관하게 퇴실 전까지는 그냥
+  // "이용중"입니다. 미래 입실예정자만 있는 상태에서 판매중으로 지정해두면 "단기판매"로 표시되며,
+  // 입실예정일이 SHORT_SALE_SOON_DAYS일 이내로 다가오면 실제로 "이용중"으로 전환됩니다.
   if(roomHasActiveResident(room)){
-    if(room.saleStatus !== '판매중') return '이용중';
     const hasCurrent = DB.residents.some(p => p.roomId===room.id && isCurrentlyResiding(p));
-    if(hasCurrent) return '이용중판매';
+    if(hasCurrent) return '이용중';
+    if(room.saleStatus !== '판매중') return '이용중';
     return shortSaleMoveInSoon(room) ? '이용중' : '단기판매';
   }
   return room.saleStatus;
@@ -1994,6 +1994,7 @@ function renderResidentView(p, room, isSecondary){
 /* ---------------- room info: edit mode (방 정보만) ---------------- */
 function renderRoomEditForm(room){
   const wrap = document.createElement('div');
+  const branch = DB.branches.find(b=>b.id===room.branchId);
 
   const grid = document.createElement('div');
   grid.className = 'edit-grid';
@@ -2002,9 +2003,15 @@ function renderRoomEditForm(room){
       <label class="field-label">판매 상태</label>
       <select data-f="saleStatus">${STATUS_LIST_MANUAL.map(s=>`<option ${s===room.saleStatus?'selected':''}>${s}</option>`).join('')}</select>
     </div>
+    <div>
+      <label class="field-label">호실 타입</label>
+      <select data-f="type">${branch ? branchRoomTypes(branch).map(t=>`<option ${t===room.type?'selected':''}>${esc(t)}</option>`).join('') : ''}</select>
+    </div>
   `;
   const saleStatusSel = grid.querySelector('[data-f="saleStatus"]');
   if(saleStatusSel) saleStatusSel.addEventListener('change', (e)=>{ logChange(`${room.number}호 판매상태 변경: ${room.saleStatus} → ${e.target.value}`); room.saleStatus = e.target.value; scheduleSave(); render(); });
+  const typeSel = grid.querySelector('[data-f="type"]');
+  if(typeSel) typeSel.addEventListener('change', (e)=>{ logChange(`${room.number}호 타입 변경: ${room.type} → ${e.target.value}`); room.type = e.target.value; scheduleSave(); render(); });
   wrap.appendChild(grid);
 
   const chipRow = document.createElement('div');
