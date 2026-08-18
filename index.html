@@ -1727,7 +1727,6 @@ function renderRoomCard(room, sectionStatus){
   const maintDateSuffix = room.maintenanceDate ? ` · ${room.maintenanceDate.slice(5)}` : '';
   const reserveMeta = statusMeta('예약');
   const isDouble = roomHasDoubleOccupancy(room);
-  const doubleMeta = statusMeta('2인 거주');
   const priceBranch = DB.branches.find(b=>b.id===room.branchId);
   const priceTitle = isDouble
     ? `기존 방 가격 ${formatWon((priceBranch && priceBranch.typePrices && priceBranch.typePrices[room.type]) || 0)} + 1인 추가금 ${formatWon(branchDoubleOccupancyFee(priceBranch))}`
@@ -1736,7 +1735,6 @@ function renderRoomCard(room, sectionStatus){
     <span class="badge" style="background:${meta.bg};color:${meta.fg}">${effStatus}</span>
     ${maintBadgeHtml(roomCardMaintKind(room), maintDateSuffix)}
     ${room.reserved ? `<span class="badge" style="background:${reserveMeta.bg};color:${reserveMeta.fg}">예약${room.reservationMoveIn ? ' · '+room.reservationMoveIn.slice(5) : ''}</span>` : ''}
-    ${isDouble ? `<span class="badge" style="background:${doubleMeta.bg};color:${doubleMeta.fg}">2인 거주</span>` : ''}
   `;
 
   const header = document.createElement('div');
@@ -1889,7 +1887,8 @@ function renderResidentView(p, room, isSecondary){
   const block = document.createElement('div');
   block.className = 'resident-block';
 
-  if(!isSecondary && (p.channel !== '독립생활' || isOverdue(p) || p.scheduledToLeave || isUpcoming(p) || p.pendingRoomMove || p.justImported)){
+  if(!isSecondary && (p.channel !== '독립생활' || isOverdue(p) || p.scheduledToLeave || isUpcoming(p) || p.pendingRoomMove || p.justImported || p.doubleOccupancy)){
+    const doubleMeta = statusMeta('2인 거주');
     const flagsLine = document.createElement('div');
     flagsLine.className = 'resident-flags';
     flagsLine.innerHTML = `
@@ -1898,6 +1897,7 @@ function renderResidentView(p, room, isSecondary){
       ${p.scheduledToLeave ? '<span class="badge res-status leaving">퇴실예정</span>' : ''}
       ${p.pendingRoomMove ? `<span class="badge res-status moving">방이동예정 (${esc(p.pendingRoomMove.date)})</span>` : ''}
       ${p.justImported ? `<span class="badge" style="background:var(--st-imported-bg);color:var(--st-imported)">계약 확인 필요</span>` : ''}
+      ${p.doubleOccupancy ? `<span class="badge" style="background:${doubleMeta.bg};color:${doubleMeta.fg}">2인 거주</span>` : ''}
       ${p.channel !== '독립생활' ? `<span class="badge" style="background:#F1EFE8;color:${channelColor(p.channel)}">${esc(p.channel)}</span>` : ''}
     `;
     block.appendChild(flagsLine);
