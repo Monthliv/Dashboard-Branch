@@ -3513,6 +3513,7 @@ function showContractHistoryModal(room){
       table.style.cssText = 'width:100%;border-collapse:collapse;font-size:12px;';
       table.innerHTML = `
         <thead><tr>
+          ${canEdit() ? '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);"></th>' : ''}
           <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);">계약일</th>
           <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);">계약기간</th>
           <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);">입실자</th>
@@ -3521,7 +3522,6 @@ function showContractHistoryModal(room){
           <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);">입실료</th>
           <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);">결제금액</th>
           <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);">계약구분</th>
-          ${canEdit() ? '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);"></th>' : ''}
         </tr></thead>
       `;
       const tbody = document.createElement('tbody');
@@ -3560,7 +3560,7 @@ function showContractHistoryModal(room){
           delBtn.onclick = ()=> deleteContract(c);
           btnWrap.appendChild(delBtn);
           td.appendChild(btnWrap);
-          tr.appendChild(td);
+          tr.insertBefore(td, tr.firstChild);
         }
         tbody.appendChild(tr);
       });
