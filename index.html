@@ -648,20 +648,28 @@ function roomPrice(room){
   if(roomHasDoubleOccupancy(room)) return base + branchDoubleOccupancyFee(branch);
   return base;
 }
-function computeTypePriceDefaults(branch){
+// 타입은 지점마다 고정된 목록이 아니라 자유롭게 추가/삭제할 수 있다(관리자 설정 > 타입별 가격 관리).
+// ROOM_TYPE_LIST는 새 지점이 생겼을 때 쓰는 초기값일 뿐이다.
+function branchRoomTypes(branch){
+  return (branch.roomTypes && branch.roomTypes.length) ? branch.roomTypes : ROOM_TYPE_LIST;
+}
+function registerRoomType(branch, type){
+  if(!type) return;
+  if(!branch.roomTypes || !branch.roomTypes.length) branch.roomTypes = [...ROOM_TYPE_LIST];
+  if(!branch.roomTypes.includes(type)) branch.roomTypes.push(type);
+  if(!branch.typePrices) branch.typePrices = {};
+  if(!(type in branch.typePrices)) branch.typePrices[type] = 0;
+}
+function computeTypeDefaultPrice(branch, t){
   // 타입별 가격 관리를 처음 도입할 때, 기존에 호실마다 따로 등록돼 있던 가격 중
   // 지점·타입별로 가장 많이 쓰인(최빈값) 가격을 그 타입의 기준가로 채워준다.
-  const map = {};
-  ROOM_TYPE_LIST.forEach(t=>{
-    const prices = DB.rooms.filter(r=>r.branchId===branch.id && r.type===t && r.price).map(r=>r.price);
-    if(prices.length===0){ map[t] = 0; return; }
-    const freq = new Map();
-    prices.forEach(p=> freq.set(p, (freq.get(p)||0)+1));
-    let best = prices[0], bestCount = 0;
-    freq.forEach((count, price)=>{ if(count>bestCount || (count===bestCount && price>best)){ best=price; bestCount=count; } });
-    map[t] = best;
-  });
-  return map;
+  const prices = DB.rooms.filter(r=>r.branchId===branch.id && r.type===t && r.price).map(r=>r.price);
+  if(prices.length===0) return 0;
+  const freq = new Map();
+  prices.forEach(p=> freq.set(p, (freq.get(p)||0)+1));
+  let best = prices[0], bestCount = 0;
+  freq.forEach((count, price)=>{ if(count>bestCount || (count===bestCount && price>best)){ best=price; bestCount=count; } });
+  return best;
 }
 
 /* 호실 청소 상태: 퇴실청소(자동+수동)/리터치(수동)/추가청소(수동) 중 하나만 켤 수 있다 */
@@ -2819,6 +2827,8 @@ function downloadBranchRoomUpdateTemplate(){
     ['5. 인실구분: 1인실 / 2인실'],
     ['6. 방 가격은 개별 호실이 아니라 "타입별가격" 시트에서 지점·타입별로 관리합니다. (같은 지점의 같은 타입 호실은 모두 같은 가격)'],
     ['7. 청소비 / 타입별가격 금액은 숫자만 입력하세요. (예: 50000). 주차비용 / 1인추가금은 자유롭게 텍스트로 입력할 수 있습니다.'],
+    ['8. "타입별가격" 시트의 타입 열(블레스/그레이스 등)은 고정 목록이 아닙니다. 지점명 열을 제외한 나머지 열 이름이 곧 타입명이므로,'],
+    ['   열을 자유롭게 추가/삭제/이름변경 할 수 있습니다. "호실정보" 시트의 "타입" 값도 여기 없는 이름이면 0원으로 자동 등록됩니다.'],
   ];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(guideRows), '안내');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([{
@@ -2848,7 +2858,7 @@ function downloadBranchRoomCurrentData(){
   }));
   const priceRows = DB.branches.map(b=>{
     const row = { 지점명: b.name };
-    ROOM_TYPE_LIST.forEach(t=> row[t] = (b.typePrices && b.typePrices[t]) || 0);
+    branchRoomTypes(b).forEach(t=> row[t] = (b.typePrices && b.typePrices[t]) || 0);
     return row;
   });
   const roomRows = DB.rooms.map(r=>{
@@ -2882,10 +2892,17 @@ function handleBranchRoomBulkUpdateFile(file){
       const pendingBranchUpdates = [];
       const pendingRoomUpdates = [];
       const pendingTypePrices = new Map(); // branchId -> { branch, patch:{type:price} }
+      const roomTypesToRegister = new Map(); // branchId -> { branch, types:Set }
       const touchedBranches = new Set();
       const touchedRooms = new Set();
       const invalidRows = [];
       const unmatchedBranchRows = [];
+
+      function trackRoomType(branch, type){
+        if(!branch || !type) return;
+        if(!roomTypesToRegister.has(branch.id)) roomTypesToRegister.set(branch.id, { branch, types: new Set() });
+        roomTypesToRegister.get(branch.id).types.add(type);
+      }
 
       function findBranch(nameRaw){
         const resolvedName = BRANCH_NAME_ALIASES[nameRaw] || nameRaw;
@@ -2912,7 +2929,7 @@ function handleBranchRoomBulkUpdateFile(file){
         const isNewBranch = !branch;
         if(!branch){
           branch = { id: uid('b'), name: resolvedName, shortName: shortNameRaw, address:'', elevator:'', heatingType:'', hairDryer:'',
-            cleaningFee:0, doubleOccupancyFee:'', sharedKitchenLocation:'', trashBagLocation:'', parkingCapacity:0, parkingFee:'', doorPasscode:'', memo:'', typePrices:{} };
+            cleaningFee:0, doubleOccupancyFee:'', sharedKitchenLocation:'', trashBagLocation:'', parkingCapacity:0, parkingFee:'', doorPasscode:'', memo:'', typePrices:{}, roomTypes:[...ROOM_TYPE_LIST] };
           newBranches.push(branch);
           result.branchesCreated++;
         } else {
@@ -2947,11 +2964,15 @@ function handleBranchRoomBulkUpdateFile(file){
         }
         if(!pendingTypePrices.has(branch.id)) pendingTypePrices.set(branch.id, { branch, patch:{} });
         const entry = pendingTypePrices.get(branch.id);
-        ROOM_TYPE_LIST.forEach(t=>{
+        // 타입은 고정 열이 아니라 지점마다 자유롭게 추가할 수 있으므로, "지점명"을 제외한
+        // 모든 열을 타입명으로 보고 그대로 반영한다(엑셀에서 열을 추가/삭제해도 그대로 동작).
+        Object.keys(row).forEach(t=>{
+          if(t==='지점명') return;
           const v = get(row, t);
           if(v==='') return;
           entry.patch[t] = Number(v)||0;
           result.pricesUpdated++;
+          trackRoomType(branch, t);
         });
       });
 
@@ -2978,6 +2999,7 @@ function handleBranchRoomBulkUpdateFile(file){
           return;
         }
         const occValue = (occRaw==='2' || occRaw==='2인실') ? '2인실' : '1인실';
+        trackRoomType(branch, typeRaw);
 
         let room = DB.rooms.find(r=> r.branchId===branch.id && normalizeRoomNo(r.number)===normalizeRoomNo(roomRaw))
           || newRooms.find(r=> r.branchId===branch.id && normalizeRoomNo(r.number)===normalizeRoomNo(roomRaw));
@@ -3026,6 +3048,9 @@ function handleBranchRoomBulkUpdateFile(file){
           DB.rooms.push(...newRooms);
           pendingBranchUpdates.forEach(u=> u.branch[u.field] = u.value);
           pendingRoomUpdates.forEach(u=> u.room[u.field] = u.value);
+          // 새로 등장한 타입은 지점의 타입 목록에 먼저 등록해둔다(가격이 없으면 0원으로).
+          // 그 다음 "타입별가격" 시트에 실제 값이 있었다면 그 값으로 덮어쓴다.
+          roomTypesToRegister.forEach(({branch, types})=> types.forEach(t=> registerRoomType(branch, t)));
           pendingTypePrices.forEach(({branch, patch})=>{
             branch.typePrices = Object.assign({}, branch.typePrices, patch);
           });
@@ -4304,8 +4329,8 @@ function renderTypePriceManageForm(){
   form.innerHTML = `
     <div class="fld" style="grid-column:1/-1;"><label class="field-label">지점 *</label>
       <select id="tpBranch">${DB.branches.map(b=>`<option value="${b.id}">${esc(b.name)}</option>`).join('')}</select></div>
-    <div id="tpPriceFields" style="grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;"></div>
-    <div style="grid-column:1/-1;font-size:11.5px;color:var(--ink-soft);">같은 지점·같은 타입 호실은 모두 이 가격을 사용합니다. 개별 호실마다 다른 가격을 지정할 수는 없습니다.</div>
+    <div id="tpPriceFields" style="grid-column:1/-1;"></div>
+    <div style="grid-column:1/-1;font-size:11.5px;color:var(--ink-soft);">같은 지점·같은 타입 호실은 모두 이 가격을 사용합니다. 개별 호실마다 다른 가격을 지정할 수는 없습니다. 타입은 지점마다 자유롭게 추가/삭제할 수 있습니다.</div>
     <div class="btn-row">
       <button class="btn" id="tpCancel">닫기</button>
     </div>
@@ -4317,9 +4342,15 @@ function renderTypePriceManageForm(){
       const branch = DB.branches.find(b=>b.id===branchSel.value);
       fieldsWrap.innerHTML = '';
       if(!branch) return;
-      ROOM_TYPE_LIST.forEach(t=>{
+
+      const list = document.createElement('div');
+      list.style.cssText = 'display:flex;flex-direction:column;gap:8px;margin-bottom:12px;';
+      branchRoomTypes(branch).forEach(t=>{
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;gap:8px;align-items:flex-end;';
         const fld = document.createElement('div');
         fld.className = 'fld';
+        fld.style.flex = '1';
         fld.innerHTML = `<label class="field-label">${esc(t)}</label><input type="number" min="0" step="10000">`;
         const input = fld.querySelector('input');
         input.value = (branch.typePrices && branch.typePrices[t]) || 0;
@@ -4331,8 +4362,57 @@ function renderTypePriceManageForm(){
           branch.typePrices = Object.assign({}, branch.typePrices, { [t]: newPrice });
           scheduleSave();
         });
-        fieldsWrap.appendChild(fld);
+        row.appendChild(fld);
+
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'iconbtn del';
+        delBtn.innerHTML = '&times;';
+        delBtn.title = '이 타입 삭제';
+        delBtn.onclick = ()=>{
+          const inUse = DB.rooms.some(r=> r.branchId===branch.id && r.type===t);
+          const msg = inUse
+            ? `"${t}" 타입을 삭제할까요?\n이미 이 타입으로 등록된 호실이 있습니다. 그 호실들의 타입 값은 그대로 남지만, 이 목록에서 사라지고 방 가격도 0원으로 표시됩니다.`
+            : `"${t}" 타입을 삭제할까요?`;
+          showConfirm(msg, ()=>{
+            branch.roomTypes = branchRoomTypes(branch).filter(x=>x!==t);
+            logChange(`"${branch.name}" 타입 삭제: ${t}`);
+            scheduleSave();
+            renderFields();
+          });
+        };
+        row.appendChild(delBtn);
+        list.appendChild(row);
       });
+      fieldsWrap.appendChild(list);
+
+      const addRow = document.createElement('div');
+      addRow.style.cssText = 'display:flex;gap:8px;';
+      const nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.placeholder = '새 타입 이름 (예: 디럭스룸)';
+      nameInput.style.flex = '1';
+      const addBtn = document.createElement('button');
+      addBtn.type = 'button';
+      addBtn.className = 'btn small primary';
+      addBtn.textContent = '+ 타입 추가';
+      const doAdd = ()=>{
+        const name = nameInput.value.trim();
+        if(!name) return;
+        if(branchRoomTypes(branch).some(x=>x.toLowerCase()===name.toLowerCase())){
+          showAlert('이미 있는 타입명입니다.');
+          return;
+        }
+        registerRoomType(branch, name);
+        logChange(`"${branch.name}" 타입 추가: ${name}`);
+        scheduleSave();
+        nameInput.value = '';
+        renderFields();
+      };
+      addBtn.onclick = doAdd;
+      nameInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') doAdd(); });
+      addRow.appendChild(nameInput); addRow.appendChild(addBtn);
+      fieldsWrap.appendChild(addRow);
     };
     renderFields();
     branchSel.onchange = renderFields;
@@ -4390,7 +4470,7 @@ function renderAdminAddBranchForm(){
         doorPasscode: document.getElementById('nbDoor').value.trim(),
         parkingCapacity: Number(document.getElementById('nbCap').value) || 0,
         memo: document.getElementById('nbMemo').value,
-        typePrices: {}
+        typePrices: {}, roomTypes: [...ROOM_TYPE_LIST]
       };
       DB.branches.push(nb);
       logChange(`"${name}" 지점 신규 등록`);
@@ -4452,7 +4532,7 @@ function renderAdminAddRoomForm(){
       <select id="nrBranch">${DB.branches.map(b=>`<option value="${b.id}">${esc(b.name)}</option>`).join('')}</select></div>
     <div class="fld"><label class="field-label">호실 번호 *</label><input type="text" id="nrNumber" placeholder="예: 305"></div>
     <div class="fld"><label class="field-label">호실 타입</label>
-      <select id="nrType">${ROOM_TYPE_LIST.map(t=>`<option>${t}</option>`).join('')}</select></div>
+      <select id="nrType"></select></div>
     <div class="fld"><label class="field-label">인실 구분 *</label>
       <select id="nrOccupancy">${OCCUPANCY_LIST.map(t=>`<option>${t}</option>`).join('')}</select></div>
     <div class="fld"><label class="field-label">초기 상태</label>
@@ -4464,6 +4544,14 @@ function renderAdminAddRoomForm(){
   `;
   setTimeout(()=>{
     document.getElementById('nrNumber').focus();
+    const branchSel = document.getElementById('nrBranch');
+    const typeSel = document.getElementById('nrType');
+    const refreshTypeOptions = ()=>{
+      const branch = DB.branches.find(b=>b.id===branchSel.value);
+      typeSel.innerHTML = branch ? branchRoomTypes(branch).map(t=>`<option>${esc(t)}</option>`).join('') : '';
+    };
+    refreshTypeOptions();
+    branchSel.addEventListener('change', refreshTypeOptions);
     document.getElementById('nrCancel').onclick = ()=>{ UI.addingRoom=false; render(); };
     document.getElementById('nrSubmit').onclick = ()=>{
       const branchId = document.getElementById('nrBranch').value;
@@ -5421,12 +5509,29 @@ async function initApp(user){
     }
   });
   if(canEdit() && statusFixed) scheduleSave();
+  let roomTypesFilled = false;
+  DB.branches.forEach(branch=>{
+    if(!branch.roomTypes || !branch.roomTypes.length){
+      // 기존 타입별가격에 저장된 타입과, 엑셀 일괄업로드 등으로 이미 호실에 쓰이고 있는
+      // 타입 값을 모두 합쳐서 초기 목록으로 삼는다. (호실 타입은 고정 목록이 아니라
+      // 지점마다 자유롭게 추가/삭제 가능 — 여기서 없던 타입이 나중에 발견되면 그냥 놓치고
+      // 있었던 것이므로, 최초 1회에 한해 실제 사용 이력에서 복구한다)
+      const fromPrices = branch.typePrices ? Object.keys(branch.typePrices) : [];
+      const fromRooms = DB.rooms.filter(r=>r.branchId===branch.id).map(r=>r.type).filter(Boolean);
+      branch.roomTypes = Array.from(new Set([...ROOM_TYPE_LIST, ...fromPrices, ...fromRooms]));
+      roomTypesFilled = true;
+    }
+  });
+  if(canEdit() && roomTypesFilled) scheduleSave();
   let typePricesFilled = false;
   DB.branches.forEach(branch=>{
-    if(!branch.typePrices){
-      branch.typePrices = computeTypePriceDefaults(branch);
-      typePricesFilled = true;
-    }
+    if(!branch.typePrices) branch.typePrices = {};
+    branchRoomTypes(branch).forEach(t=>{
+      if(!(t in branch.typePrices)){
+        branch.typePrices[t] = computeTypeDefaultPrice(branch, t);
+        typePricesFilled = true;
+      }
+    });
   });
   if(canEdit() && typePricesFilled) scheduleSave();
   if(canEdit()) maybeCreateDailyBackup();
