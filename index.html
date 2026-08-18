@@ -27,6 +27,7 @@
     --st-proxy:#2E8B57;    --st-proxy-bg:#E4F3EA;
     --st-reserved:#A67C00; --st-reserved-bg:#FBF0D6;
     --st-imported:#1789A6; --st-imported-bg:#E1F4F8;
+    --st-double:#8A56C7;   --st-double-bg:#F0E9FA;
 
     --ch-indep:#5B4FCF; --ch-33m2:#B5459A; --ch-liveany:#D6673E; --ch-etc:#7A8790;
   }
@@ -634,10 +635,18 @@ const DEFAULT_CHANNEL_LIST = ['독립생활','삼삼엠투','리브애니','기�
 const ROOM_TYPE_LIST = ['블레스','그레이스','트리니티','기타'];
 const OCCUPANCY_LIST = ['1인실','2인실'];
 function occupancyCapacity(room){ return (room.occupancy === '1인실') ? 1 : 2; }
-/* 방 가격은 호실별이 아니라 지점+타입별로 관리한다. 같은 지점의 같은 타입 호실은 항상 같은 가격을 쓴다. */
+function branchDoubleOccupancyFee(branch){
+  if(!branch) return 0;
+  const digits = String(branch.doubleOccupancyFee||'').replace(/[^0-9]/g,'');
+  return digits ? Number(digits) : 0;
+}
+/* 방 가격은 호실별이 아니라 지점+타입별로 관리한다. 같은 지점의 같은 타입 호실은 항상 같은 가격을 쓴다.
+   입실자가 "2인 거주"로 체크되어 있으면 지점에 설정된 2인 추가금을 더해서 보여준다. */
 function roomPrice(room){
   const branch = DB.branches.find(b=>b.id===room.branchId);
-  return (branch && branch.typePrices && branch.typePrices[room.type]) || 0;
+  const base = (branch && branch.typePrices && branch.typePrices[room.type]) || 0;
+  if(roomHasDoubleOccupancy(room)) return base + branchDoubleOccupancyFee(branch);
+  return base;
 }
 function computeTypePriceDefaults(branch){
   // 타입별 가격 관리를 처음 도입할 때, 기존에 호실마다 따로 등록돼 있던 가격 중
@@ -874,6 +883,7 @@ function statusMeta(s){
     '대리결제':    { fg:'var(--st-proxy)',    bg:'var(--st-proxy-bg)' },
     '예약':        { fg:'var(--st-reserved)', bg:'var(--st-reserved-bg)' },
     '계약 확인 필요': { fg:'var(--st-imported)', bg:'var(--st-imported-bg)' },
+    '2인 거주':    { fg:'var(--st-double)',   bg:'var(--st-double-bg)' },
   };
   return m[s] || m['공실'];
 }
@@ -1429,12 +1439,16 @@ function roomHasPaymentProxy(room){
 function roomHasJustImportedResident(room){
   return DB.residents.some(p=> p.roomId===room.id && p.justImported);
 }
-const ROOM_TAB_LIST = [...STATUS_LIST_STATS, '대리결제', '예약'];
+function roomHasDoubleOccupancy(room){
+  return DB.residents.some(p=> p.roomId===room.id && p.doubleOccupancy);
+}
+const ROOM_TAB_LIST = [...STATUS_LIST_STATS, '대리결제', '예약', '2인 거주'];
 function roomsInFilterTab(rooms, s){
   if(s === '퇴실예정') return rooms.filter(roomIsLeavingSoon);
   if(s === '대리결제') return rooms.filter(roomHasPaymentProxy);
   if(s === '예약') return rooms.filter(r=> r.reserved);
   if(s === '계약 확인 필요') return rooms.filter(roomHasJustImportedResident);
+  if(s === '2인 거주') return rooms.filter(roomHasDoubleOccupancy);
   return rooms.filter(r=> roomTabs(r).includes(s));
 }
 function renderRoomsSection(branch){
@@ -1704,17 +1718,24 @@ function renderRoomCard(room, sectionStatus){
 
   const maintDateSuffix = room.maintenanceDate ? ` · ${room.maintenanceDate.slice(5)}` : '';
   const reserveMeta = statusMeta('예약');
+  const isDouble = roomHasDoubleOccupancy(room);
+  const doubleMeta = statusMeta('2인 거주');
+  const priceBranch = DB.branches.find(b=>b.id===room.branchId);
+  const priceTitle = isDouble
+    ? `기존 방 가격 ${formatWon((priceBranch && priceBranch.typePrices && priceBranch.typePrices[room.type]) || 0)} + 2인 추가금 ${formatWon(branchDoubleOccupancyFee(priceBranch))}`
+    : '';
   const headerRight = `
     <span class="badge" style="background:${meta.bg};color:${meta.fg}">${effStatus}</span>
     ${maintBadgeHtml(roomCardMaintKind(room), maintDateSuffix)}
     ${room.reserved ? `<span class="badge" style="background:${reserveMeta.bg};color:${reserveMeta.fg}">예약${room.reservationMoveIn ? ' · '+room.reservationMoveIn.slice(5) : ''}</span>` : ''}
+    ${isDouble ? `<span class="badge" style="background:${doubleMeta.bg};color:${doubleMeta.fg}">2인 거주</span>` : ''}
   `;
 
   const header = document.createElement('div');
   header.className = 'rc-header';
   header.innerHTML = `
     <div class="rc-header-top">
-      <div class="rc-title"><span class="roomno">${esc(room.number)}</span><span class="roomtype">${esc(room.type)}</span><span class="room-price">${formatWon(roomPrice(room))}</span></div>
+      <div class="rc-title"><span class="roomno">${esc(room.number)}</span><span class="roomtype">${esc(room.type)}</span><span class="room-price"${priceTitle ? ` title="${esc(priceTitle)}"` : ''}>${formatWon(roomPrice(room))}</span></div>
     </div>
     <div class="rc-header-badges">${headerRight}</div>
   `;
@@ -2288,6 +2309,22 @@ function renderResidentEditCard(p, isSecondary, isDraft, room){
       return carInput;
     });
   }
+
+  const doubleRow = document.createElement('div');
+  doubleRow.className = 'redit-proxy-row';
+  const doubleCheckbox = document.createElement('input');
+  doubleCheckbox.type = 'checkbox';
+  doubleCheckbox.id = 'double-' + p.id;
+  doubleCheckbox.checked = !!p.doubleOccupancy;
+  doubleCheckbox.addEventListener('change', ()=>{
+    p.doubleOccupancy = doubleCheckbox.checked;
+    maybeSave(); render();
+  });
+  const doubleLabel = document.createElement('label');
+  doubleLabel.htmlFor = doubleCheckbox.id;
+  doubleLabel.textContent = '2인 거주 (방 가격에 2인 추가금 반영)';
+  doubleRow.appendChild(doubleCheckbox); doubleRow.appendChild(doubleLabel);
+  identityGrid.appendChild(doubleRow);
 
   card.appendChild(identityGrid);
 
