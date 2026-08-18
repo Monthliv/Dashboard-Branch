@@ -974,13 +974,23 @@ function scrollToRoomCard(room){
 
 /* ---------------- 상단 통합 검색 ---------------- */
 function buildGlobalSearchIndex(){
-  return DB.residents.map(p=>{
+  // 현재 입실중/입실예정 입실자는 DB.residents에 그대로 있고(퇴실일이 미래인 경우도 포함),
+  // 이미 퇴실 처리된 입실자는 DB.residentHistory로 옮겨져 있으므로 둘 다 합쳐서 검색 대상으로 삼는다.
+  const current = DB.residents.map(p=>{
     const room = DB.rooms.find(r=>r.id===p.roomId);
     if(!room) return null;
     const branch = DB.branches.find(b=>b.id===room.branchId);
     if(!branch || !hasBranchAccess(branch.id)) return null;
-    return { p, room, branch };
+    return { p, room, branch, isHistory:false };
   }).filter(Boolean);
+  const past = DB.residentHistory.map(h=>{
+    const room = DB.rooms.find(r=>r.id===h.roomId);
+    if(!room) return null;
+    const branch = DB.branches.find(b=>b.id===room.branchId);
+    if(!branch || !hasBranchAccess(branch.id)) return null;
+    return { p:h, room, branch, isHistory:true };
+  }).filter(Boolean);
+  return [...current, ...past];
 }
 function globalSearchHaystack(item){
   const { p, room, branch } = item;
@@ -1004,21 +1014,24 @@ function renderGlobalSearchResults(query){
   if(results.length===0){
     box.appendChild(el('div', 'header-search-empty', '검색 결과가 없습니다.'));
   } else {
-    results.forEach(({ p, room, branch })=>{
+    results.forEach(({ p, room, branch, isHistory })=>{
       const row = document.createElement('div');
       row.className = 'header-search-item';
 
       const top = document.createElement('div'); top.className = 'hs-top';
       top.appendChild(el('span', null, maskViewerName(p.name) || '이름 미입력'));
-      const isUpcoming = computeResStatus(p) === '입실예정';
-      top.appendChild(el('span', 'badge' + (isUpcoming ? ' muted' : ''), isUpcoming ? '입실예정' : '입실중'));
+      const isUpcoming = !isHistory && computeResStatus(p) === '입실예정';
+      const statusLabel = isHistory ? '퇴실' : (isUpcoming ? '입실예정' : '입실중');
+      top.appendChild(el('span', 'badge' + (isHistory || isUpcoming ? ' muted' : ''), statusLabel));
       row.appendChild(top);
 
-      row.appendChild(el('div', 'hs-sub', `${p.phone || '연락처 미입력'} · ${branchLabel(branch)} ${room.number}호`));
+      const periodText = isHistory ? ` (${p.moveIn || '?'} ~ ${p.moveOut || '?'})` : '';
+      row.appendChild(el('div', 'hs-sub', `${p.phone || '연락처 미입력'} · ${branchLabel(branch)} ${room.number}호${periodText}`));
 
       row.addEventListener('click', ()=>{
         UI.view = 'branch';
         UI.branchId = branch.id;
+        if(isHistory) UI.historyOpen[room.id] = true;
         scrollToRoomCard(room);
         const input = document.getElementById('globalSearchInput');
         if(input) input.value = '';
@@ -3522,6 +3535,7 @@ function showContractHistoryModal(room){
           <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);">입실료</th>
           <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);">결제금액</th>
           <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);">계약구분</th>
+          ${canApplyUpdate ? '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);"></th>' : ''}
         </tr></thead>
       `;
       const tbody = document.createElement('tbody');
@@ -3539,28 +3553,30 @@ function showContractHistoryModal(room){
           <td style="padding:6px 8px;border-bottom:1px solid var(--line);">${esc(c.contractCategory||'-')}</td>
         `;
         if(canEdit()){
-          const td = document.createElement('td');
-          td.style.cssText = 'padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap;';
-          const btnWrap = document.createElement('div');
-          btnWrap.style.cssText = 'display:flex;gap:4px;';
-          if(canApplyUpdate && c === latestContract){
-            const applyBtn = document.createElement('button');
-            applyBtn.type = 'button';
-            applyBtn.className = 'iconbtn active';
-            applyBtn.innerHTML = '&#8635;';
-            applyBtn.title = '이 계약 내용으로 입실 처리';
-            applyBtn.onclick = ()=> replaceResidentsWithContract(c);
-            btnWrap.appendChild(applyBtn);
-          }
+          const delTd = document.createElement('td');
+          delTd.style.cssText = 'padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap;';
           const delBtn = document.createElement('button');
           delBtn.type = 'button';
           delBtn.className = 'iconbtn del';
           delBtn.innerHTML = '&times;';
           delBtn.title = '이 계약 이력 삭제';
           delBtn.onclick = ()=> deleteContract(c);
-          btnWrap.appendChild(delBtn);
-          td.appendChild(btnWrap);
-          tr.insertBefore(td, tr.firstChild);
+          delTd.appendChild(delBtn);
+          tr.insertBefore(delTd, tr.firstChild);
+        }
+        if(canApplyUpdate){
+          const updTd = document.createElement('td');
+          updTd.style.cssText = 'padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap;';
+          if(c === latestContract){
+            const applyBtn = document.createElement('button');
+            applyBtn.type = 'button';
+            applyBtn.className = 'iconbtn active';
+            applyBtn.innerHTML = '&#8635;';
+            applyBtn.title = '이 계약 내용으로 입실 처리';
+            applyBtn.onclick = ()=> replaceResidentsWithContract(c);
+            updTd.appendChild(applyBtn);
+          }
+          tr.appendChild(updTd);
         }
         tbody.appendChild(tr);
       });
