@@ -1994,7 +1994,6 @@ function renderResidentView(p, room, isSecondary){
 /* ---------------- room info: edit mode (방 정보만) ---------------- */
 function renderRoomEditForm(room){
   const wrap = document.createElement('div');
-  const branch = DB.branches.find(b=>b.id===room.branchId);
 
   const grid = document.createElement('div');
   grid.className = 'edit-grid';
@@ -2003,15 +2002,9 @@ function renderRoomEditForm(room){
       <label class="field-label">판매 상태</label>
       <select data-f="saleStatus">${STATUS_LIST_MANUAL.map(s=>`<option ${s===room.saleStatus?'selected':''}>${s}</option>`).join('')}</select>
     </div>
-    <div>
-      <label class="field-label">호실 타입</label>
-      <select data-f="type">${branch ? branchRoomTypes(branch).map(t=>`<option ${t===room.type?'selected':''}>${esc(t)}</option>`).join('') : ''}</select>
-    </div>
   `;
   const saleStatusSel = grid.querySelector('[data-f="saleStatus"]');
   if(saleStatusSel) saleStatusSel.addEventListener('change', (e)=>{ logChange(`${room.number}호 판매상태 변경: ${room.saleStatus} → ${e.target.value}`); room.saleStatus = e.target.value; scheduleSave(); render(); });
-  const typeSel = grid.querySelector('[data-f="type"]');
-  if(typeSel) typeSel.addEventListener('change', (e)=>{ logChange(`${room.number}호 타입 변경: ${room.type} → ${e.target.value}`); room.type = e.target.value; scheduleSave(); render(); });
   wrap.appendChild(grid);
 
   const chipRow = document.createElement('div');
