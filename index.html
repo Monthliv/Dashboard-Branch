@@ -1710,13 +1710,18 @@ function branchActiveCarCount(branch, excludeResidentId){
   ).length;
 }
 function effectiveRoomStatus(room){
-  // "이용중"/"단기판매"는 오늘 날짜 기준 재실·예약 여부로 자동 판정하며 수동 설정 불가.
-  // 입실 당일 이후 실제로 거주 중인 입실자가 있으면 판매 상태와 무관하게 퇴실 전까지는 그냥
-  // "이용중"입니다. 미래 입실예정자만 있는 상태에서 판매중으로 지정해두면 "단기판매"로 표시되며,
-  // 입실예정일이 SHORT_SALE_SOON_DAYS일 이내로 다가오면 실제로 "이용중"으로 전환됩니다.
+  // "이용중"/"이용중판매"/"단기판매"는 오늘 날짜 기준 재실·예약 여부로 자동 판정하며 수동 설정 불가.
+  // 실제로 거주 중인 입실자가 있으면 기본은 "이용중"입니다. 다만 그 입실자가 퇴실 예정(scheduledToLeave)
+  // 상태이고 판매 상태가 "판매중"이면 다음 입실자를 미리 구하는 중이라는 뜻이므로 "이용중판매"로
+  // 표시합니다(이용중/판매중 탭 모두에 노출, roomTabs 참고). 미래 입실예정자만 있는 상태에서
+  // 판매중으로 지정해두면 "단기판매"로 표시되며, 입실예정일이 SHORT_SALE_SOON_DAYS일 이내로
+  // 다가오면 실제로 "이용중"으로 전환됩니다.
   if(roomHasActiveResident(room)){
     const hasCurrent = DB.residents.some(p => p.roomId===room.id && isCurrentlyResiding(p));
-    if(hasCurrent) return '이용중';
+    if(hasCurrent){
+      if(room.saleStatus === '판매중' && roomHasScheduledLeaveResident(room)) return '이용중판매';
+      return '이용중';
+    }
     if(room.saleStatus !== '판매중') return '이용중';
     return shortSaleMoveInSoon(room) ? '이용중' : '단기판매';
   }
