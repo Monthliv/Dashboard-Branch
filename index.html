@@ -601,7 +601,7 @@ let DB = null;
 let UI = {
   view:'stats', branchId:null, branchTab:'rooms',
   roomEditMode:{}, residentEditMode:{}, roomSnapshots:{}, residentSnapshots:{}, draftResident:{}, parkingListOpen:{}, residentFieldEdit:{},
-  branchEditMode:{}, branchSnapshots:{}, branchInfoOpen:{}, historyOpen:{}, addingBranch:false, addingRoom:false, managingRoom:false, managingTypePrice:false, editingBranchId:null,
+  branchEditMode:{}, branchSnapshots:{}, branchInfoOpen:{}, historyOpen:{}, addingBranch:false, addingRoom:false, managingRoom:false, managingTypePrice:false, editingBranchId:null, branchOrderOpen:false,
   tlYear:null, tlMonth:null, roomStatusFilter:'전체', cleanWeekStart:null, overdueTabKey:null,
   cleanTodayPage:1, cleanFuturePage:1, shortcutSelectedId:null
 };
@@ -4375,7 +4375,18 @@ function renderBranchRoomManagePanel(){
   else if(UI.matchingRoomType) box.appendChild(renderRoomTypeMatchForm());
   else if(UI.managingRoom) box.appendChild(renderAdminRoomManageForm());
   else if(UI.editingBranchId) box.appendChild(renderAdminEditBranchForm(DB.branches.find(b=>b.id===UI.editingBranchId)));
-  else box.appendChild(renderBranchOrderBody());
+  else {
+    // 지점 수가 많아지면 목록이 길어져 화면을 다 차지하므로, 기본은 접어두고 필요할 때만
+    // 펼쳐서 순서 변경·정보 수정을 하도록 한다.
+    const toggleHead = document.createElement('div');
+    toggleHead.className = 'branch-title-toggle';
+    toggleHead.style.cssText = 'font-weight:700; font-size:13px; margin-bottom:4px;';
+    toggleHead.innerHTML = `<span>지점 순서·정보 수정 (${DB.branches.length}개 지점)</span><span class="branch-title-chevron">${UI.branchOrderOpen ? '▾' : '▸'}</span>`;
+    toggleHead.title = UI.branchOrderOpen ? '클릭하여 접기' : '클릭하여 펼치기';
+    toggleHead.onclick = ()=>{ UI.branchOrderOpen = !UI.branchOrderOpen; render(); };
+    box.appendChild(toggleHead);
+    if(UI.branchOrderOpen) box.appendChild(renderBranchOrderBody());
+  }
 
   return box;
 }
