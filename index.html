@@ -245,6 +245,17 @@
   .rc-title .roomno{ font-family:'JetBrains Mono',monospace; font-weight:700; font-size:15px; white-space:nowrap; }
   .rc-title .roomtype{ font-size:11.5px; color:var(--ink-soft); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .rc-title .room-price{ font-size:11.5px; color:var(--accent-ink); font-weight:700; white-space:nowrap; }
+  .rc-door-lock{
+    border:none; background:none; padding:2px; margin:0; flex:none; align-self:center;
+    display:inline-flex; color:var(--ink-soft); border-radius:5px; cursor:default;
+  }
+  .rc-door-lock.editable{ cursor:pointer; }
+  .rc-door-lock.editable:hover{ background:var(--st-vacant-bg); }
+  .rc-door-lock.unlocked{
+    color:#fff; background:var(--st-hold); padding:2px 4px;
+    animation:overduePulse 1.8s ease-in-out infinite;
+  }
+  .rc-door-lock.unlocked.editable:hover{ background:var(--st-hold); opacity:.85; }
   .rc-header-badges{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
   .history-btn{
     font-size:10px; font-weight:700; padding:3px 8px; border-radius:20px; border:1px solid var(--line);
@@ -591,7 +602,7 @@ let UI = {
   view:'stats', branchId:null, branchTab:'rooms',
   roomEditMode:{}, residentEditMode:{}, roomSnapshots:{}, residentSnapshots:{}, draftResident:{}, parkingListOpen:{}, residentFieldEdit:{},
   branchEditMode:{}, branchSnapshots:{}, branchInfoOpen:{}, historyOpen:{}, addingBranch:false, addingRoom:false, managingRoom:false, managingTypePrice:false, editingBranchId:null,
-  tlYear:null, tlMonth:null, roomStatusFilter:'전체', cleanWeekStart:null, overdueTabKey:null,
+  tlYear:null, tlMonth:null, roomStatusFilter:'전체', cleanWeekStart:null, overdueTabKey:null, doorUnlinkedTabKey:null,
   cleanTodayPage:1, cleanFuturePage:1, shortcutSelectedId:null
 };
 
@@ -1833,6 +1844,28 @@ function renderRoomCard(room, sectionStatus){
     </div>
     <div class="rc-header-badges">${headerRight}</div>
   `;
+  // 원격 출입문 제어 시스템(잇소키) 연동 여부 토글. 값이 아예 없으면(과거 데이터, 신규 호실)
+  // 정상(연동)으로 간주해서, 실제로 미연결인 곳만 담당자가 따로 체크해서 표시하면 되도록 한다.
+  const doorLinked = room.doorLinked !== false;
+  const doorLockBtn = document.createElement('button');
+  doorLockBtn.type = 'button';
+  doorLockBtn.className = 'rc-door-lock' + (doorLinked ? '' : ' unlocked') + (canEdit() ? ' editable' : '');
+  doorLockBtn.title = doorLinked
+    ? '잇소키 연결됨 (정상)' + (canEdit() ? ' · 클릭 시 미연결로 표시' : '')
+    : '잇소키 미연결 (확인 필요)' + (canEdit() ? ' · 클릭 시 연결로 표시' : '');
+  doorLockBtn.innerHTML = doorLinked
+    ? `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="5" y="11" width="14" height="10" rx="2" fill="currentColor"/><path d="M8 11V7a4 4 0 0 1 8 0v4" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round"/></svg>`
+    : `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="5" y="11" width="14" height="10" rx="2" fill="currentColor"/><path d="M8 11V7a4 4 0 0 1 7.3-2.2" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round"/></svg>`;
+  if(canEdit()){
+    doorLockBtn.onclick = ()=>{
+      const next = !doorLinked;
+      logChange(`${room.number}호 잇소키 ${next ? '연결' : '미연결'}로 표시`);
+      room.doorLinked = next;
+      scheduleSave(); render();
+    };
+  }
+  header.querySelector('.rc-title').appendChild(doorLockBtn);
+
   const historyOpen = !!UI.historyOpen[room.id];
   const historyBtn = document.createElement('button');
   historyBtn.className = 'history-btn' + (historyOpen ? ' active' : '');
@@ -5124,7 +5157,75 @@ function renderCleaningCards(){
 
   wrap.appendChild(renderTodayCleaningCard(todayList));
   wrap.appendChild(renderCleaningCard('청소 예정방 (7일 이내)', futureList, true));
+  wrap.appendChild(renderDoorUnlinkedCard());
   return wrap;
+}
+
+/* 잇소키(원격 출입문) 미연결 호실을 지점 탭으로 모아 보여준다. renderOverdueStatsCard와
+   같은 지점별 탭+칩 패턴을 그대로 따른다. */
+function renderDoorUnlinkedCard(){
+  const items = [];
+  DB.rooms.filter(room=> hasBranchAccess(room.branchId) && room.doorLinked===false).forEach(room=>{
+    const branch = DB.branches.find(b=>b.id===room.branchId);
+    items.push({ room, branch });
+  });
+
+  const card = document.createElement('div');
+  card.className = 'stat-section cleaning-card overdue-stats-card';
+  card.style.gridColumn = '1 / -1';
+
+  if(items.length===0){
+    card.innerHTML = `<h3>잇소키 미 연결 룸 <span class="cnt-badge overdue-cnt-badge">${items.length}</span></h3>`;
+    card.appendChild(el('div','cleaning-empty','전체 지점에 잇소키 미연결 호실이 없습니다.'));
+    return card;
+  }
+
+  const groupMap = new Map();
+  items.forEach(item=>{
+    const key = item.branch ? item.branch.id : '__none__';
+    if(!groupMap.has(key)) groupMap.set(key, { key, branch: item.branch, entries: [] });
+    groupMap.get(key).entries.push(item);
+  });
+  const groups = [...groupMap.values()];
+  groups.forEach(g=> g.entries.sort((a,b)=> a.room.number.localeCompare(b.room.number,'ko',{numeric:true})));
+  groups.sort((a,b)=> (a.branch?branchLabel(a.branch):'').localeCompare(b.branch?branchLabel(b.branch):''));
+
+  if(!groups.some(g=> g.key===UI.doorUnlinkedTabKey)) UI.doorUnlinkedTabKey = groups[0].key;
+  const activeGroup = groups.find(g=> g.key===UI.doorUnlinkedTabKey);
+
+  card.innerHTML = `<h3>잇소키 미 연결 룸 <span class="cnt-badge overdue-cnt-badge">${items.length}</span></h3>`;
+
+  const tabs = document.createElement('div');
+  tabs.className = 'subnav';
+  tabs.style.margin = '0 0 12px';
+  groups.forEach(group=>{
+    const tab = document.createElement('button');
+    tab.type = 'button';
+    tab.className = group.key===UI.doorUnlinkedTabKey ? 'active' : '';
+    tab.textContent = `${group.branch ? branchLabel(group.branch) : '(지점 정보 없음)'} (${group.entries.length})`;
+    tab.onclick = ()=>{ UI.doorUnlinkedTabKey = group.key; render(); };
+    tabs.appendChild(tab);
+  });
+  card.appendChild(tabs);
+
+  const chipRow = document.createElement('div');
+  chipRow.className = 'overdue-room-chips overdue-tab-chips';
+  activeGroup.entries.forEach(item=>{
+    const chip = document.createElement('span');
+    chip.className = 'badge overdue-badge overdue-room-chip';
+    chip.textContent = `${item.room.number}호`;
+    chip.title = '해당 호실로 이동';
+    chip.onclick = ()=>{
+      if(!item.branch) return;
+      UI.view = 'branch';
+      UI.branchId = item.branch.id;
+      scrollToRoomCard(item.room);
+    };
+    chipRow.appendChild(chip);
+  });
+  card.appendChild(chipRow);
+
+  return card;
 }
 
 const CLEANING_CARD_PAGE_SIZE = 4;
