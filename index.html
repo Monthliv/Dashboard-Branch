@@ -2826,10 +2826,11 @@ function renderTimelineSection(branch){
        <span class="nm" style="color:${rowMeta.fg};font-weight:700;"><span class="tl-status-dot" style="background:${rowMeta.fg}"></span>${esc(rowStatusLabel)}</span>`,
       [], null);
   }
-  // 계약/입실자/과거 퇴실자 세 가지 출처를 전부 {range, meta, name, memo}로 통일해서 다루고,
-  // 같은 방의 항목들은 (아래에서) 한 행 안에 막대 여러 개로 이어 붙인다.
-  function contractTimelineEntry(x, room){
+  // 계약/입실자/과거 퇴실자 세 가지 출처를 전부 {range, meta, name, memo, room}로 통일해서 다루고,
+  // 같은 호실번호의 항목들은 (아래에서) 한 행 안에 막대 여러 개로 이어 붙인다.
+  function contractTimelineEntry(x, group){
     const c = x.contract, range = x.range;
+    const room = group.rooms.find(r=> r.id===c.roomId) || group.rooms[0];
     // 이 계약으로 생성/연결된 입실자 레코드가 있으면(sourceContractId) 우선 쓰고, 없어도(기존
     // 입실자에게 계약만 추가로 등록된 경우가 훨씬 흔함) 같은 방에서 이 계약 기간과 거주 기간이
     // 겹치는 입실자를 찾아 그 카드의 실거주자명·메모·퇴실예정 여부를 그대로 따른다. 아무도
@@ -2837,7 +2838,7 @@ function renderTimelineSection(branch){
     let matched = DB.residents.find(p=>p.sourceContractId===c.id) || null;
     if(!matched){
       matched = DB.residents.find(p=>{
-        if(p.roomId!==room.id || !p.moveIn) return false;
+        if(!group.roomIds.has(p.roomId) || !p.moveIn) return false;
         const pOut = p.moveOut || '9999-12-31';
         return p.moveIn <= range.end && pOut >= range.start;
       }) || null;
@@ -2850,25 +2851,33 @@ function renderTimelineSection(branch){
     else if(matched && matched.scheduledToLeave) meta = timelineStatusMeta('퇴실예정');
     else meta = timelineStatusMeta('이용중');
     const rawName = matched ? residentDisplayName(matched) : (c.resident || c.contractor);
-    return { range, meta, name: maskViewerName(rawName) || '이름 미입력', memo: matched ? (matched.memo||'') : '' };
+    // "오늘 이용중인 사람이 미리 등록해 둔 연장 계약"인지 나중에 판별하기 위한 식별자.
+    // 연장 계약은 아직 입실자 레코드의 moveIn/moveOut이 새 계약 기간으로 갱신되기 전이라
+    // matched(입실자 레코드) 기준으로는 서로 다른 사람처럼 보일 수 있어서, 입실자가 아니라
+    // 계약서에 적힌 입실자/계약자명 자체를 기준으로 같은 사람 여부를 비교한다.
+    const contractOccupantName = String(c.resident || c.contractor || '').trim();
+    const matchKey = contractOccupantName ? ('n:'+contractOccupantName) : (matched ? ('id:'+matched.id) : null);
+    return { range, meta, name: maskViewerName(rawName) || '이름 미입력', memo: matched ? (matched.memo||'') : '', room, matchKey };
   }
   function residentTimelineEntry(p, room){
     return {
       range: { start: p.moveIn, end: p.moveOut || '9999-12-31' },
       meta: residentTimelineMeta(p, room),
       name: maskViewerName(residentDisplayName(p)) || '이름 미입력',
-      memo: p.memo || ''
+      memo: p.memo || '',
+      room
     };
   }
-  function historyTimelineEntry(h){
+  function historyTimelineEntry(h, room){
     return {
       range: { start: h.moveIn, end: h.moveOut || h.moveIn },
       meta: timelineStatusMeta('퇴실'),
       name: maskViewerName(h.name) || '이름 미입력',
-      memo: ''
+      memo: '',
+      room
     };
   }
-  function buildTimelineBar(entry, room){
+  function buildTimelineBar(entry){
     const inD = new Date(entry.range.start);
     const outD = new Date(entry.range.end);
     if(outD < monthStart || inD > monthEnd) return null;
@@ -2887,15 +2896,27 @@ function renderTimelineSection(branch){
     bar.innerHTML = `<span class="tl-bar-name">${esc(entry.name)}</span>${memoText}`;
     bar.title = `${entry.name} · ${entry.meta.key} · ${entry.range.start} ~ ${entry.range.end}${entry.memo ? ' · ' + entry.memo : ''} (클릭 시 호실로 이동)`;
     bar.style.cursor = 'pointer';
-    bar.onclick = ()=> scrollToRoomCard(room);
+    bar.onclick = ()=> scrollToRoomCard(entry.room);
     return bar;
   }
 
+  // 같은 호실번호를 쓰는 방 레코드가 여러 건 존재해도(예: 호실 삭제 후 재등록 등) 타임라인에는
+  // 호실당 정확히 한 행만 나와야 하므로, DB.rooms의 id가 아니라 화면에 보이는 호실번호로 묶는다.
+  const roomGroups = [];
+  const groupMap = new Map();
   rooms.forEach(room=>{
-    // 계약현황(DB.contracts)에 이 방의 계약 기록이 하나라도 있으면 계약 기준으로 표시하고,
-    // 계약 기록이 전혀 없는 방만 입실자 카드(DB.residents/History) 기준으로 대체 표시한다.
+    let g = groupMap.get(room.number);
+    if(!g){ g = { number: room.number, rooms: [], roomIds: new Set() }; groupMap.set(room.number, g); roomGroups.push(g); }
+    g.rooms.push(room);
+    g.roomIds.add(room.id);
+  });
+
+  roomGroups.forEach(group=>{
+    const primaryRoom = group.rooms[0];
+    // 계약현황(DB.contracts)에 이 호실의 계약 기록이 하나라도 있으면 계약 기준으로 표시하고,
+    // 계약 기록이 전혀 없는 호실만 입실자 카드(DB.residents/History) 기준으로 대체 표시한다.
     const roomContracts = DB.contracts
-      .filter(c=>c.roomId===room.id)
+      .filter(c=> group.roomIds.has(c.roomId))
       .map(c=> ({ contract:c, range: parseContractPeriodRange(c.contractPeriod) }))
       .filter(x=> x.range);
 
@@ -2908,10 +2929,23 @@ function renderTimelineSection(branch){
           && y.range.start <= x.range.start && y.range.end >= x.range.end
           && (y.range.start < x.range.start || y.range.end > x.range.end))
       );
-      const monthContracts = visible
-        .filter(x=> new Date(x.range.end) >= monthStart && new Date(x.range.start) <= monthEnd)
+      // 이미 이용중인 입실자가 미리 등록해 둔 연장 계약(미래 시작)은 새 입실 예정자가 아니라
+      // 같은 사람이 계속 거주하는 것인데, 그 연장 계약만 보이는 미래 달을 보고 있으면 "오늘"
+      // 걸쳐 있는 원래 계약은 이번 달 표시 대상(monthContracts)에서 이미 빠져 있어 비교 대상이
+      // 없어진다. 그래서 이번 달로 자르기 전, 호실의 계약 전체를 기준으로 먼저 판별한다.
+      const allContractEntries = visible
+        .map(x=> contractTimelineEntry(x, group))
         .sort((a,b)=> a.range.start.localeCompare(b.range.start));
-      entries = monthContracts.map(x=> contractTimelineEntry(x, room));
+      const today0 = todayISO();
+      const activeToday = allContractEntries.find(e=> e.matchKey && e.range.start<=today0 && e.range.end>=today0);
+      if(activeToday){
+        allContractEntries.forEach(e=>{
+          if(e!==activeToday && e.matchKey===activeToday.matchKey && e.range.start>today0){
+            e.meta = activeToday.meta;
+          }
+        });
+      }
+      entries = allContractEntries.filter(e=> new Date(e.range.end) >= monthStart && new Date(e.range.start) <= monthEnd);
     } else {
       // 현재 입실자가 퇴실예정으로 확정되면 다음 입실자를 미리 등록해둘 수 있어서(관리자 설정과
       // 무관하게 언제나 가능), 실제로는 동시에 거주하지 않는데도 DB.residents에 그 방 레코드가
@@ -2919,39 +2953,39 @@ function renderTimelineSection(branch){
       // 자리에 있는 사람은 하나뿐이므로, "지금 이미 입실한(이용중/퇴실예정)" 레코드가 있으면
       // 그것만 보여주고 아직 입실 전인 예정자는 그 사람이 실제로 입실할 때(=더 이상 예정자가
       // 아니게 될 때)까지는 별도로 노출하지 않는다.
-      const allResidents = DB.residents.filter(p=>p.roomId===room.id);
+      const allResidents = DB.residents.filter(p=> group.roomIds.has(p.roomId));
       const currentResidents = allResidents.filter(p=> !isUpcoming(p));
       const residents = currentResidents.length > 0 ? currentResidents : allResidents;
       // 과거 퇴실자는 이번 달과 겹치는 기간의 기록만 보여준다 — 그렇지 않으면 오래 운영한 방일수록
       // 목록이 한없이 길어진다.
       const history = DB.residentHistory.filter(h=>{
-        if(h.roomId!==room.id || !h.moveIn) return false;
+        if(!group.roomIds.has(h.roomId) || !h.moveIn) return false;
         const hIn = new Date(h.moveIn);
         const hOut = new Date(h.moveOut || h.moveIn);
         return hOut >= monthStart && hIn <= monthEnd;
       });
       entries = [
-        ...residents.map(p=> residentTimelineEntry(p, room)),
-        ...history.map(h=> historyTimelineEntry(h))
+        ...residents.map(p=> residentTimelineEntry(p, group.rooms.find(r=>r.id===p.roomId) || primaryRoom)),
+        ...history.map(h=> historyTimelineEntry(h, group.rooms.find(r=>r.id===h.roomId) || primaryRoom))
       ].sort((a,b)=> a.range.start.localeCompare(b.range.start));
     }
 
-    if(entries.length===0){ appendEmptyRoomRow(room); return; }
+    if(entries.length===0){ appendEmptyRoomRow(primaryRoom); return; }
 
-    // 같은 방의 여러 항목(계약 갱신, 입실자 교체 등)은 한 행 안에 막대 여러 개로 이어 붙인다.
+    // 같은 호실의 여러 항목(계약 갱신, 입실자 교체 등)은 한 행 안에 막대 여러 개로 이어 붙인다.
     // 라벨의 상태 색은 "오늘"에 걸쳐 있는 항목을 우선 쓰고, 없으면 가장 가까운 미래 항목,
     // 그것도 없으면(전부 과거) 가장 최근 항목을 쓴다.
     const today = todayISO();
     const labelEntry = entries.find(e=> e.range.start<=today && e.range.end>=today)
       || entries.find(e=> e.range.start>today)
       || entries[entries.length-1];
-    const bars = entries.map(e=> buildTimelineBar(e, room));
+    const bars = entries.map(e=> buildTimelineBar(e));
 
     appendRow(labelEntry.meta,
-      `<span class="rm">${esc(room.number)}</span>
+      `<span class="rm">${esc(group.number)}</span>
        <span class="nm"><span class="tl-status-dot" style="background:${labelEntry.meta.fg}"></span>${esc(labelEntry.meta.key)}</span>`,
       bars,
-      ()=> scrollToRoomCard(room)
+      ()=> scrollToRoomCard(primaryRoom)
     );
   });
 
