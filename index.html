@@ -880,9 +880,11 @@ async function loadState(){
   return base;
 }
 let saveTimer = null;
+let saveInFlight = false;
 async function saveState(){
   const note = document.getElementById('savedNote');
   if(note) note.textContent = '저장 중…';
+  saveInFlight = true;
   try{
     const core = { branches: DB.branches, rooms: DB.rooms, residents: DB.residents, channelList: DB.channelList, shortcuts: DB.shortcuts };
     const nowIso = new Date().toISOString();
@@ -925,6 +927,11 @@ async function saveState(){
         ? '\n\n저장하려는 데이터가 문서 용량 제한을 넘은 것으로 보입니다. 개발팀에 문의해주세요.'
         : '\n\n네트워크를 확인한 뒤 다시 시도하거나, 계속되면 개발팀에 이 오류 메시지를 전달해주세요.')
     );
+  } finally {
+    saveInFlight = false;
+    // 저장이 진행되는 동안 반영을 미뤄뒀던 실시간 동기화 데이터가 있으면, 다음 사용자 조작을
+    // 기다리지 않고 저장이 끝나는 즉시 반영한다(안전 여부는 render() 안에서 다시 확인함).
+    if(pendingRemoteApply && !anyEditInProgress()) render();
   }
 }
 
@@ -948,8 +955,17 @@ function applyLoadedCore(parsed){
 // 반영하지 않는다. 그 상태에서 DB를 통째로 바꾸면 화면이 다시 그려지면서 방금 입력하던 내용이
 // 그대로 사라져버리기 때문이다. 대신 pendingRemoteApply에 담아두고, 그 편집이 끝나 다음 render()가
 // 호출되는 시점에 안전하게 반영한다.
+//
+// 편집 패널이 열려 있는지만 확인하면 안 된다 — 잇소키 자물쇠 토글처럼 편집 모드 없이 바로
+// 클릭 한 번으로 DB를 바꾸고 scheduleSave()만 거는 동작들도 있고, 그런 경우 클릭 직후부터
+// 실제 저장이 끝나기까지(디바운스 250ms + 네트워크 왕복) 사이에 원격 갱신이 끼어들면 DB.rooms/
+// residents 등이 통째로 "저장되기 전" 서버 데이터로 교체되면서 방금 한 수정이 통째로 사라지고,
+// 그 상태 그대로 다음 저장이 실행돼 없어진 수정 내용이 그대로 서버에 다시 저장돼버린다("저장은
+// 됐는데 새로고침하면 예전 데이터로 돌아가 있다"는 증상의 원인). 그래서 저장 타이머가 걸려있거나
+// 저장이 진행 중인 동안(saveTimer/saveInFlight)도 반드시 편집 중으로 간주해야 한다.
 function anyEditInProgress(){
-  return Object.values(UI.roomEditMode).some(Boolean)
+  return saveTimer !== null || saveInFlight
+    || Object.values(UI.roomEditMode).some(Boolean)
     || Object.values(UI.residentEditMode).some(Boolean)
     || Object.values(UI.residentFieldEdit).some(Boolean)
     || Object.values(UI.branchEditMode).some(Boolean)
@@ -959,7 +975,10 @@ function anyEditInProgress(){
 }
 let pendingRemoteApply = null;
 let firestoreUnsubscribe = null;
-function scheduleSave(){ clearTimeout(saveTimer); saveTimer = setTimeout(saveState, 250); }
+function scheduleSave(){
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(()=>{ saveTimer = null; saveState(); }, 250);
+}
 
 function statusMeta(s){
   const m = {
