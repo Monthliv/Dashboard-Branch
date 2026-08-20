@@ -5790,7 +5790,7 @@ function esc(s){
 
 async function initApp(user){
   CURRENT_USER = { uid: user.uid, email: user.email };
-  lastActivityAt = Date.now();
+  lastSeenLocalDate = localDateKey();
   idleLoggedOut = false;
   indexEmail(user.email); // 기존 계정(이 색인 기능 도입 이전 가입)도 로그인 시 자동으로 채워 넣습니다.
 
@@ -6135,33 +6135,35 @@ firebase.auth().onAuthStateChanged(user=>{
 // 백업이 있는지 확인해서, 탭을 계속 켜둔 세션에서도 날짜가 바뀌면 자동으로 새 백업을 만든다.
 setInterval(()=>{ if(canEdit()) maybeCreateDailyBackup(); }, 60*60*1000);
 
-// 관제센터 특성상 PC를 끄지 않고 탭을 며칠씩 열어두는 경우가 많다. 그렇게 오래 열린 세션은
-// 로그인 시점에 불러온(=시간이 지날수록 점점 오래된) 데이터를 그대로 메모리에 들고 있다가,
-// 아주 사소한 수정 한 번만 저장해도 그 사이 다른 곳에서 이미 저장된 변경사항을 되돌릴 위험이
-// 있다(저장 시 충돌 감지로 최악의 경우는 막아뒀지만, 애초에 방치된 세션은 다음 사용 시점에
-// 로그인부터 다시 하게 만들어 최신 데이터를 새로 받아오게 하는 편이 근본적으로 더 안전하다).
-// 일반적인 업무용 웹앱의 유휴 세션 타임아웃 기준은 OWASP 권장 15~30분이지만, 관제센터
-// 운영 특성상(자리를 오래 비웠다가 다시 보는 경우가 잦음) 너무 자주 로그아웃되면 오히려
-// 불편하다는 피드백에 따라 3시간으로 늘려서 사용한다. 마우스/키보드/터치 조작이 3시간
-// 동안 전혀 없으면 자동으로 로그아웃한다.
-const IDLE_TIMEOUT_MS = 3 * 60 * 60 * 1000;
-let lastActivityAt = Date.now();
+// 관제센터 특성상 PC를 끄지 않고 탭을 며칠씩 열어두는 경우가 많다. 예전에는 그렇게 오래 열린
+// 세션이 로그인 시점의(=시간이 지날수록 오래된) 데이터를 계속 들고 있다가 저장 시 다른 곳의
+// 변경사항을 되돌릴 위험이 있어 유휴 시간 기준으로 주기적으로 로그아웃시켰는데, 지금은 실시간
+// 동기화(onSnapshot)가 열려 있는 모든 탭의 데이터를 계속 최신으로 유지해주므로 그 목적은 이미
+// 해결되었다. 그런데 재로그인마다 계약/이력 등을 다시 불러오는 비용도 있어(Firestore 무료
+// 요금제 일일 읽기 한도 문제, 관련 캐시 도입 참고) 너무 자주 재로그인시키는 건 오히려 손해다.
+// 그래서 유휴 시간이 아니라 "날짜가 바뀌는 시점(자정)"에만 하루 한 번 세션을 초기화한다.
+// todayISO()는 UTC 기준이라 그대로 쓰면 한국 시간 자정이 아니라 오전 9시에 바뀌어버리므로,
+// 반드시 이 브라우저의 로컬 시간 기준 날짜로 비교해야 한다.
+function localDateKey(){
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+let lastSeenLocalDate = localDateKey();
 let idleLoggedOut = false;
-['mousedown','mousemove','keydown','touchstart','wheel'].forEach(evt=>{
-  document.addEventListener(evt, ()=>{ lastActivityAt = Date.now(); }, { passive:true });
-});
-function checkIdleTimeout(){
+function checkDailySessionReset(){
   if(!CURRENT_USER || idleLoggedOut) return;
-  if(Date.now() - lastActivityAt < IDLE_TIMEOUT_MS) return;
+  const today = localDateKey();
+  if(today === lastSeenLocalDate) return;
+  lastSeenLocalDate = today;
   idleLoggedOut = true;
   firebase.auth().signOut().then(()=>{
-    showAlert('장시간 사용하지 않아 자동으로 로그아웃되었습니다. 다시 로그인해주세요.');
+    showAlert('날짜가 바뀌어 세션이 초기화되었습니다. 다시 로그인해주세요.');
   });
 }
-setInterval(checkIdleTimeout, 60*1000);
-// 백그라운드 탭에는 이벤트가 안 쌓이므로, 다시 화면을 보는 순간(visible로 전환) 바로 한 번
-// 더 확인해서 최대 1분까지 지연되지 않고 즉시 로그아웃 처리되게 한다.
-document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') checkIdleTimeout(); });
+setInterval(checkDailySessionReset, 60*1000);
+// 백그라운드 탭에는 타이머 정확도가 떨어질 수 있으므로, 다시 화면을 보는 순간(visible로 전환)
+// 바로 한 번 더 확인한다.
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') checkDailySessionReset(); });
 </script>
 </body>
 </html>
