@@ -930,8 +930,9 @@ async function saveState(){
   } finally {
     saveInFlight = false;
     // 저장이 진행되는 동안 반영을 미뤄뒀던 실시간 동기화 데이터가 있으면, 다음 사용자 조작을
-    // 기다리지 않고 저장이 끝나는 즉시 반영한다(안전 여부는 render() 안에서 다시 확인함).
-    if(pendingRemoteApply && !anyEditInProgress()) render();
+    // 기다리지 않고 저장이 끝나는 즉시 반영한다(방금 우리가 저장한 것보다 더 오래된 데이터면
+    // tryApplyPendingRemoteUpdate가 알아서 무시함).
+    if(tryApplyPendingRemoteUpdate()) render();
   }
 }
 
@@ -975,6 +976,20 @@ function anyEditInProgress(){
 }
 let pendingRemoteApply = null;
 let firestoreUnsubscribe = null;
+// pendingRemoteApply를 안전할 때(편집 중이 아닐 때) 반영한다. 큐에 담긴 뒤로 우리 자신이 먼저
+// 저장을 끝냈을 수 있으므로(예: 방 카드를 편집하는 동안 받은 원격 갱신을, 편집을 마치고 저장까지
+// 끝낸 뒤에야 이 함수로 반영하려는 경우) updatedAt이 지금 알고 있는 값보다 실제로 더 최신일 때만
+// 적용한다 — 그렇지 않으면 방금 우리가 저장한 최신 데이터를 큐에 있던 오래된 데이터로 덮어써서
+// "저장했는데 잠시 후 사라진다"는 문제가 생긴다. 반영했으면 true를 반환한다.
+function tryApplyPendingRemoteUpdate(){
+  if(!pendingRemoteApply || anyEditInProgress()) return false;
+  const { parsed, updatedAt } = pendingRemoteApply;
+  pendingRemoteApply = null;
+  if(lastKnownUpdatedAt && updatedAt <= lastKnownUpdatedAt) return false;
+  applyLoadedCore(parsed);
+  lastKnownUpdatedAt = updatedAt;
+  return true;
+}
 function scheduleSave(){
   clearTimeout(saveTimer);
   saveTimer = setTimeout(()=>{ saveTimer = null; saveState(); }, 250);
@@ -1012,12 +1027,7 @@ function channelColor(c){
 function render(){
   // 편집 중이라 미뤄뒀던 실시간 동기화 데이터가 있고, 이제는 편집이 끝나 안전하게 반영할 수
   // 있으면 화면을 그리기 직전에 적용한다.
-  if(pendingRemoteApply && !anyEditInProgress()){
-    const { parsed, updatedAt } = pendingRemoteApply;
-    pendingRemoteApply = null;
-    applyLoadedCore(parsed);
-    lastKnownUpdatedAt = updatedAt;
-  }
+  tryApplyPendingRemoteUpdate();
   renderTopNav();
   const main = document.getElementById('main');
   main.innerHTML = '';
