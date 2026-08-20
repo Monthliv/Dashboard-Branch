@@ -17,6 +17,7 @@
     --accent-ink:#0B5457;
     --accent-soft:#E1F1F1;
 
+    --st-all:#4B5563;      --st-all-bg:#E9EAEC;
     --st-vacant:#8B96A0;   --st-vacant-bg:#EEF0F2;
     --st-forsale:#2F6FED;  --st-forsale-bg:#E8EFFD;
     --st-occupied:#10767A; --st-occupied-bg:#E1F1F1;
@@ -590,7 +591,7 @@ let UI = {
   view:'stats', branchId:null, branchTab:'rooms',
   roomEditMode:{}, residentEditMode:{}, roomSnapshots:{}, residentSnapshots:{}, draftResident:{}, parkingListOpen:{}, residentFieldEdit:{},
   branchEditMode:{}, branchSnapshots:{}, branchInfoOpen:{}, historyOpen:{}, addingBranch:false, addingRoom:false, managingRoom:false, managingTypePrice:false, editingBranchId:null,
-  tlYear:null, tlMonth:null, roomStatusFilter:'이용중', cleanWeekStart:null, overdueTabKey:null,
+  tlYear:null, tlMonth:null, roomStatusFilter:'전체', cleanWeekStart:null, overdueTabKey:null,
   cleanTodayPage:1, cleanFuturePage:1, shortcutSelectedId:null
 };
 
@@ -908,6 +909,7 @@ function scheduleSave(){ clearTimeout(saveTimer); saveTimer = setTimeout(saveSta
 
 function statusMeta(s){
   const m = {
+    '전체':        { fg:'var(--st-all)',      bg:'var(--st-all-bg)' },
     '공실':        { fg:'var(--st-vacant)',   bg:'var(--st-vacant-bg)' },
     '판매중':      { fg:'var(--st-forsale)',  bg:'var(--st-forsale-bg)' },
     '이용중':      { fg:'var(--st-occupied)', bg:'var(--st-occupied-bg)' },
@@ -960,7 +962,7 @@ function renderTopNav(){
   });
   sel.onchange = ()=>{
     if(!sel.value) return;
-    UI.view='branch'; UI.branchId = sel.value; UI.roomStatusFilter='이용중'; render();
+    UI.view='branch'; UI.branchId = sel.value; UI.roomStatusFilter='전체'; render();
   };
 
   const cleaningBtn = document.getElementById('cleaningBtn');
@@ -1490,8 +1492,9 @@ function roomHasJustImportedResident(room){
 function roomHasDoubleOccupancy(room){
   return DB.residents.some(p=> p.roomId===room.id && p.doubleOccupancy);
 }
-const ROOM_TAB_LIST = [...STATUS_LIST_STATS, '대리결제', '예약', '2인 거주'];
+const ROOM_TAB_LIST = ['전체', ...STATUS_LIST_STATS, '대리결제', '예약', '2인 거주'];
 function roomsInFilterTab(rooms, s){
+  if(s === '전체') return rooms;
   if(s === '퇴실예정') return rooms.filter(roomIsLeavingSoon);
   if(s === '대리결제') return rooms.filter(roomHasPaymentProxy);
   if(s === '예약') return rooms.filter(r=> r.reserved);
@@ -1503,7 +1506,7 @@ function renderRoomsSection(branch){
   const wrap = document.createElement('div');
   const rooms = DB.rooms.filter(r=>r.branchId===branch.id);
 
-  const status = UI.roomStatusFilter || '이용중';
+  const status = UI.roomStatusFilter || '전체';
   const meta = statusMeta(status);
 
   const toolbar = document.createElement('div');
@@ -1762,6 +1765,10 @@ function renderRoomCard(room, sectionStatus){
   card.className = 'room-card';
   card.id = 'room-card-' + room.id;
   card.style.borderLeftColor = meta.fg;
+  // "전체" 탭처럼 여러 상태의 호실이 한 화면에 섞여 보일 때, 이용중이 아닌 호실을 한눈에
+  // 구분할 수 있도록 해당 상태 색상의 옅은 배경을 깔아준다. 이용중은 가장 흔한 기본 상태라
+  // 굳이 색을 넣지 않는다.
+  if(effStatus !== '이용중') card.style.background = meta.bg;
 
   const residents = DB.residents.filter(p=>p.roomId===room.id);
   const draft = UI.draftResident[room.id] || null;
@@ -4111,7 +4118,7 @@ function renderStatsView(){
       : '-';
     const tabCell = (tab, content)=> `<td><a href="#" data-goto="${b.id}" data-tab="${tab}" class="stat-cell-link">${content}</a></td>`;
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td><a href="#" data-goto="${b.id}" data-tab="이용중" style="color:var(--accent-ink);font-weight:700;text-decoration:none;">${esc(branchLabel(b))}</a></td>
+    tr.innerHTML = `<td><a href="#" data-goto="${b.id}" data-tab="전체" style="color:var(--accent-ink);font-weight:700;text-decoration:none;">${esc(branchLabel(b))}</a></td>
       <td>${total}</td>${tabCell('이용중', occupied)}${tabCell('판매중', forSale)}<td style="color:${occColor};font-weight:700;">${occRate}%</td>${tabCell('예약', reserved)}${tabCell('판매보류', holdText)}`;
     tbody.appendChild(tr);
   });
@@ -4127,7 +4134,7 @@ function renderStatsView(){
   wrap.appendChild(branchSection);
 
   wrap.querySelectorAll('[data-goto]').forEach(a=>{
-    a.addEventListener('click', (e)=>{ e.preventDefault(); UI.view='branch'; UI.branchId = a.dataset.goto; UI.branchTab='rooms'; UI.roomStatusFilter=a.dataset.tab || '이용중'; render(); });
+    a.addEventListener('click', (e)=>{ e.preventDefault(); UI.view='branch'; UI.branchId = a.dataset.goto; UI.branchTab='rooms'; UI.roomStatusFilter=a.dataset.tab || '전체'; render(); });
   });
 
   return wrap;
@@ -4306,7 +4313,7 @@ function renderBranchOrderBody(){
     row.dataset.id = b.id;
     row.innerHTML = `<span class="branch-order-handle">&#9776;</span><span class="branch-order-name" title="클릭 시 해당 지점으로 이동">${b.shortName ? esc(b.shortName)+' · ' : ''}${esc(b.name)}</span>`;
     row.querySelector('.branch-order-name').addEventListener('click', ()=>{
-      UI.view = 'branch'; UI.branchId = b.id; UI.branchTab = 'rooms'; UI.roomStatusFilter = '이용중'; render();
+      UI.view = 'branch'; UI.branchId = b.id; UI.branchTab = 'rooms'; UI.roomStatusFilter = '전체'; render();
     });
     const editBtn = document.createElement('button');
     editBtn.className = 'btn small';
@@ -4954,7 +4961,7 @@ function completeCleaningEntry(room, type){
 }
 
 function goToBranchRooms(branchId){
-  UI.view='branch'; UI.branchId = branchId; UI.branchTab='rooms'; UI.roomStatusFilter='이용중'; render();
+  UI.view='branch'; UI.branchId = branchId; UI.branchTab='rooms'; UI.roomStatusFilter='전체'; render();
 }
 
 function mondayOf(dateStr){
