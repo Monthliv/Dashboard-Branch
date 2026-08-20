@@ -2801,7 +2801,7 @@ function renderTimelineSection(branch){
     return days;
   }
 
-  function appendRow(meta, labelHtml, title, bar, onLabelClick){
+  function appendRow(meta, labelHtml, bars, onLabelClick){
     const row = document.createElement('div');
     row.className = 'tl-row';
     const lbl = document.createElement('div');
@@ -2809,11 +2809,10 @@ function renderTimelineSection(branch){
     lbl.style.borderLeft = `4px solid ${meta.fg}`;
     lbl.style.background = meta.bg;
     lbl.innerHTML = labelHtml;
-    if(title){ lbl.style.cursor = 'pointer'; lbl.title = title; }
     if(onLabelClick){ lbl.style.cursor = 'pointer'; lbl.onclick = onLabelClick; }
     row.appendChild(lbl);
     const days = buildDayCells();
-    if(bar) days.appendChild(bar);
+    bars.forEach(bar=>{ if(bar) days.appendChild(bar); });
     row.appendChild(days);
     gridWrap.appendChild(row);
   }
@@ -2825,7 +2824,71 @@ function renderTimelineSection(branch){
     appendRow(rowMeta,
       `<span class="rm">${esc(room.number)}</span>
        <span class="nm" style="color:${rowMeta.fg};font-weight:700;"><span class="tl-status-dot" style="background:${rowMeta.fg}"></span>${esc(rowStatusLabel)}</span>`,
-      null, null);
+      [], null);
+  }
+  // 계약/입실자/과거 퇴실자 세 가지 출처를 전부 {range, meta, name, memo}로 통일해서 다루고,
+  // 같은 방의 항목들은 (아래에서) 한 행 안에 막대 여러 개로 이어 붙인다.
+  function contractTimelineEntry(x, room){
+    const c = x.contract, range = x.range;
+    // 이 계약으로 생성/연결된 입실자 레코드가 있으면(sourceContractId) 우선 쓰고, 없어도(기존
+    // 입실자에게 계약만 추가로 등록된 경우가 훨씬 흔함) 같은 방에서 이 계약 기간과 거주 기간이
+    // 겹치는 입실자를 찾아 그 카드의 실거주자명·메모·퇴실예정 여부를 그대로 따른다. 아무도
+    // 못 찾으면 계약 데이터의 입실자/계약자명만으로 표시한다.
+    let matched = DB.residents.find(p=>p.sourceContractId===c.id) || null;
+    if(!matched){
+      matched = DB.residents.find(p=>{
+        if(p.roomId!==room.id || !p.moveIn) return false;
+        const pOut = p.moveOut || '9999-12-31';
+        return p.moveIn <= range.end && pOut >= range.start;
+      }) || null;
+    }
+    const today = todayISO();
+    let meta;
+    if(range.end < today) meta = timelineStatusMeta('퇴실');
+    else if(range.start > today) meta = timelineStatusMeta('입실예정');
+    else if(matched && isOverdue(matched)) meta = timelineStatusMeta('연체');
+    else if(matched && matched.scheduledToLeave) meta = timelineStatusMeta('퇴실예정');
+    else meta = timelineStatusMeta('이용중');
+    const rawName = matched ? residentDisplayName(matched) : (c.resident || c.contractor);
+    return { range, meta, name: maskViewerName(rawName) || '이름 미입력', memo: matched ? (matched.memo||'') : '' };
+  }
+  function residentTimelineEntry(p, room){
+    return {
+      range: { start: p.moveIn, end: p.moveOut || '9999-12-31' },
+      meta: residentTimelineMeta(p, room),
+      name: maskViewerName(residentDisplayName(p)) || '이름 미입력',
+      memo: p.memo || ''
+    };
+  }
+  function historyTimelineEntry(h){
+    return {
+      range: { start: h.moveIn, end: h.moveOut || h.moveIn },
+      meta: timelineStatusMeta('퇴실'),
+      name: maskViewerName(h.name) || '이름 미입력',
+      memo: ''
+    };
+  }
+  function buildTimelineBar(entry, room){
+    const inD = new Date(entry.range.start);
+    const outD = new Date(entry.range.end);
+    if(outD < monthStart || inD > monthEnd) return null;
+    const clampIn = inD < monthStart ? monthStart : inD;
+    const clampOut = outD > monthEnd ? monthEnd : outD;
+    const startDay = clampIn.getDate();
+    const endDay = clampOut.getDate();
+    const leftPct = ((startDay-1)/daysInMonth)*100;
+    const widthPct = Math.max(((endDay-startDay+1)/daysInMonth)*100, (1/daysInMonth)*100);
+    const bar = document.createElement('div');
+    bar.className = 'tl-bar';
+    bar.style.left = leftPct + '%';
+    bar.style.width = widthPct + '%';
+    bar.style.background = entry.meta.fg;
+    const memoText = entry.memo ? ` <span class="tl-bar-memo">${esc(entry.memo)}</span>` : '';
+    bar.innerHTML = `<span class="tl-bar-name">${esc(entry.name)}</span>${memoText}`;
+    bar.title = `${entry.name} · ${entry.meta.key} · ${entry.range.start} ~ ${entry.range.end}${entry.memo ? ' · ' + entry.memo : ''} (클릭 시 호실로 이동)`;
+    bar.style.cursor = 'pointer';
+    bar.onclick = ()=> scrollToRoomCard(room);
+    return bar;
   }
 
   rooms.forEach(room=>{
@@ -2836,6 +2899,7 @@ function renderTimelineSection(branch){
       .map(c=> ({ contract:c, range: parseContractPeriodRange(c.contractPeriod) }))
       .filter(x=> x.range);
 
+    let entries;
     if(roomContracts.length > 0){
       // 한 계약 기간이 다른 계약 기간에 완전히 포함되면(예: 9/1~9/30 계약이 있는데 9/3 하루짜리
       // 단기 계약이 그 안에 또 있는 경우), 포함되는 더 짧은 쪽은 표시하지 않는다.
@@ -2844,93 +2908,51 @@ function renderTimelineSection(branch){
           && y.range.start <= x.range.start && y.range.end >= x.range.end
           && (y.range.start < x.range.start || y.range.end > x.range.end))
       );
-      const monthEntries = visible
+      const monthContracts = visible
         .filter(x=> new Date(x.range.end) >= monthStart && new Date(x.range.start) <= monthEnd)
         .sort((a,b)=> a.range.start.localeCompare(b.range.start));
-
-      if(monthEntries.length===0){ appendEmptyRoomRow(room); return; }
-
-      monthEntries.forEach(x=>{
-        const c = x.contract, range = x.range;
-        // 이 계약으로 생성/연결된 입실자 레코드가 있으면(sourceContractId) 그 카드의 실거주자명·
-        // 메모·퇴실예정 여부를 그대로 따르고, 없으면 계약 데이터의 입실자/계약자명만으로 표시한다.
-        const matched = DB.residents.find(p=>p.sourceContractId===c.id) || null;
-        const today = todayISO();
-        let meta;
-        if(range.end < today) meta = timelineStatusMeta('퇴실');
-        else if(range.start > today) meta = timelineStatusMeta('입실예정');
-        else if(matched && isOverdue(matched)) meta = timelineStatusMeta('연체');
-        else if(matched && matched.scheduledToLeave) meta = timelineStatusMeta('퇴실예정');
-        else meta = timelineStatusMeta('이용중');
-
-        const rawName = matched ? residentDisplayName(matched) : (c.resident || c.contractor);
-        const name = maskViewerName(rawName) || '이름 미입력';
-        const memo = matched ? matched.memo : '';
-
-        appendRow(meta,
-          `<span class="rm">${esc(room.number)}</span>
-           <span class="nm"><span class="tl-status-dot" style="background:${meta.fg}"></span>${esc(meta.key)}</span>`,
-          `${name} · ${meta.key} · ${range.start} ~ ${range.end}${memo ? ' · ' + memo : ''} (클릭 시 호실로 이동)`,
-          buildContractPeriodBar(range, meta, name, memo, room, monthStart, daysInMonth),
-          ()=> scrollToRoomCard(room)
-        );
+      entries = monthContracts.map(x=> contractTimelineEntry(x, room));
+    } else {
+      // 현재 입실자가 퇴실예정으로 확정되면 다음 입실자를 미리 등록해둘 수 있어서(관리자 설정과
+      // 무관하게 언제나 가능), 실제로는 동시에 거주하지 않는데도 DB.residents에 그 방 레코드가
+      // 2건(퇴실예정 중인 사람 + 아직 입실 전인 예정자) 존재하는 경우가 있다. 실제로 지금 그
+      // 자리에 있는 사람은 하나뿐이므로, "지금 이미 입실한(이용중/퇴실예정)" 레코드가 있으면
+      // 그것만 보여주고 아직 입실 전인 예정자는 그 사람이 실제로 입실할 때(=더 이상 예정자가
+      // 아니게 될 때)까지는 별도로 노출하지 않는다.
+      const allResidents = DB.residents.filter(p=>p.roomId===room.id);
+      const currentResidents = allResidents.filter(p=> !isUpcoming(p));
+      const residents = currentResidents.length > 0 ? currentResidents : allResidents;
+      // 과거 퇴실자는 이번 달과 겹치는 기간의 기록만 보여준다 — 그렇지 않으면 오래 운영한 방일수록
+      // 목록이 한없이 길어진다.
+      const history = DB.residentHistory.filter(h=>{
+        if(h.roomId!==room.id || !h.moveIn) return false;
+        const hIn = new Date(h.moveIn);
+        const hOut = new Date(h.moveOut || h.moveIn);
+        return hOut >= monthStart && hIn <= monthEnd;
       });
-      return;
+      entries = [
+        ...residents.map(p=> residentTimelineEntry(p, room)),
+        ...history.map(h=> historyTimelineEntry(h))
+      ].sort((a,b)=> a.range.start.localeCompare(b.range.start));
     }
-
-    // 현재 입실자가 퇴실예정으로 확정되면 다음 입실자를 미리 등록해둘 수 있어서(관리자 설정과
-    // 무관하게 언제나 가능), 실제로는 동시에 거주하지 않는데도 DB.residents에 그 방 레코드가
-    // 2건(퇴실예정 중인 사람 + 아직 입실 전인 예정자) 존재하는 경우가 있다. 실제로 지금 그
-    // 자리에 있는 사람은 하나뿐이므로, "지금 이미 입실한(이용중/퇴실예정)" 레코드가 있으면
-    // 그것만 보여주고 아직 입실 전인 예정자는 그 사람이 실제로 입실할 때(=더 이상 예정자가
-    // 아니게 될 때)까지는 별도 행으로 노출하지 않는다.
-    const allResidents = DB.residents.filter(p=>p.roomId===room.id);
-    const currentResidents = allResidents.filter(p=> !isUpcoming(p));
-    const residents = currentResidents.length > 0 ? currentResidents : allResidents;
-    // 과거 퇴실자는 이번 달과 겹치는 기간의 기록만 보여준다 — 그렇지 않으면 오래 운영한 방일수록
-    // 목록이 한없이 길어진다.
-    const history = DB.residentHistory.filter(h=>{
-      if(h.roomId!==room.id || !h.moveIn) return false;
-      const hIn = new Date(h.moveIn);
-      const hOut = new Date(h.moveOut || h.moveIn);
-      return hOut >= monthStart && hIn <= monthEnd;
-    });
-
-    // 이용중/퇴실예정/입실예정(현재 DB.residents) + 과거 퇴실자(DB.residentHistory)를 모두
-    // 한 목록으로 모아서, 각자의 상태에 맞는 색으로 표시한다. 메모는 입실자에게만 있고
-    // 히스토리 기록에는 애초에 저장되지 않으므로, 과거 퇴실자는 자연히 메모 없이 표시된다.
-    const entries = [
-      ...residents.map(p=> ({ type:'resident', p, meta: residentTimelineMeta(p, room) })),
-      ...history.map(h=> ({ type:'history', h, meta: timelineStatusMeta('퇴실') }))
-    ];
 
     if(entries.length===0){ appendEmptyRoomRow(room); return; }
 
-    entries.forEach(entry=>{
-      // 호실·입실자가 같이 나오는 라벨 영역에는 호실번호와 상태만 보여준다. 입실자 이름·메모는
-      // 타임라인 막대(buildBar/buildHistoryBar) 안에만 표시한다.
-      if(entry.type==='resident'){
-        const p = entry.p;
-        const name = maskViewerName(residentDisplayName(p)) || '이름 미입력';
-        appendRow(entry.meta,
-          `<span class="rm">${esc(room.number)}</span>
-           <span class="nm"><span class="tl-status-dot" style="background:${entry.meta.fg}"></span>${esc(entry.meta.key)}</span>`,
-          `${name} · ${entry.meta.key} · ${p.channel} · ${p.moveIn} ~ ${p.moveOut || '미정'}${p.memo ? ' · ' + p.memo : ''} (클릭 시 호실로 이동)`,
-          entry.p.moveIn ? buildBar(entry.p, room, monthStart, daysInMonth) : null,
-          ()=> scrollToRoomCard(room)
-        );
-      } else {
-        const h = entry.h;
-        const name = maskViewerName(h.name) || '이름 미입력';
-        appendRow(entry.meta,
-          `<span class="rm">${esc(room.number)}</span>
-           <span class="nm"><span class="tl-status-dot" style="background:${entry.meta.fg}"></span>퇴실</span>`,
-          `${name} · 퇴실 · ${h.moveIn} ~ ${h.moveOut || '-'} (클릭 시 호실로 이동)`,
-          buildHistoryBar(entry.h, room, monthStart, daysInMonth),
-          ()=> scrollToRoomCard(room)
-        );
-      }
-    });
+    // 같은 방의 여러 항목(계약 갱신, 입실자 교체 등)은 한 행 안에 막대 여러 개로 이어 붙인다.
+    // 라벨의 상태 색은 "오늘"에 걸쳐 있는 항목을 우선 쓰고, 없으면 가장 가까운 미래 항목,
+    // 그것도 없으면(전부 과거) 가장 최근 항목을 쓴다.
+    const today = todayISO();
+    const labelEntry = entries.find(e=> e.range.start<=today && e.range.end>=today)
+      || entries.find(e=> e.range.start>today)
+      || entries[entries.length-1];
+    const bars = entries.map(e=> buildTimelineBar(e, room));
+
+    appendRow(labelEntry.meta,
+      `<span class="rm">${esc(room.number)}</span>
+       <span class="nm"><span class="tl-status-dot" style="background:${labelEntry.meta.fg}"></span>${esc(labelEntry.meta.key)}</span>`,
+      bars,
+      ()=> scrollToRoomCard(room)
+    );
   });
 
   tlWrap.appendChild(gridWrap);
@@ -2963,84 +2985,6 @@ function residentTimelineMeta(p, room){
   if(isUpcoming(p)) return timelineStatusMeta('입실예정');
   return timelineStatusMeta('이용중');
 }
-function buildBar(p, room, monthStart, daysInMonth){
-  const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth(), daysInMonth);
-  const inD = new Date(p.moveIn);
-  const outD = p.moveOut ? new Date(p.moveOut) : new Date(monthStart.getFullYear(), monthStart.getMonth()+2, 0);
-  if(outD < monthStart || inD > monthEnd) return null;
-  const clampIn = inD < monthStart ? monthStart : inD;
-  const clampOut = outD > monthEnd ? monthEnd : outD;
-  const startDay = clampIn.getDate();
-  const endDay = clampOut.getDate();
-  const leftPct = ((startDay-1)/daysInMonth)*100;
-  const widthPct = Math.max(((endDay-startDay+1)/daysInMonth)*100, (1/daysInMonth)*100);
-  const bar = document.createElement('div');
-  bar.className = 'tl-bar';
-  bar.style.left = leftPct + '%';
-  bar.style.width = widthPct + '%';
-  const meta = residentTimelineMeta(p, room);
-  bar.style.background = meta.fg;
-  const displayName = maskViewerName(residentDisplayName(p)) || '이름 미입력';
-  const nameText = esc(displayName || p.resStatus);
-  const memoText = p.memo ? ` <span class="tl-bar-memo">${esc(p.memo)}</span>` : '';
-  bar.innerHTML = `<span class="tl-bar-name">${nameText}</span>${memoText}`;
-  bar.title = `${displayName} · ${meta.key} · ${p.channel} · ${p.moveIn} ~ ${p.moveOut || '미정'}${p.memo ? ' · ' + p.memo : ''} (클릭 시 호실로 이동)`;
-  bar.style.cursor = 'pointer';
-  bar.onclick = ()=> scrollToRoomCard(room);
-  return bar;
-}
-// 과거 퇴실자(DB.residentHistory)용 막대. 메모는 히스토리에 애초에 저장되지 않으므로 표시하지
-// 않는다 — 이용중/퇴실예정/입실예정 입실자만 메모를 보여준다는 요구사항과도 자연히 맞아떨어진다.
-function buildHistoryBar(h, room, monthStart, daysInMonth){
-  const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth(), daysInMonth);
-  const inD = new Date(h.moveIn);
-  const outD = new Date(h.moveOut || h.moveIn);
-  if(outD < monthStart || inD > monthEnd) return null;
-  const clampIn = inD < monthStart ? monthStart : inD;
-  const clampOut = outD > monthEnd ? monthEnd : outD;
-  const startDay = clampIn.getDate();
-  const endDay = clampOut.getDate();
-  const leftPct = ((startDay-1)/daysInMonth)*100;
-  const widthPct = Math.max(((endDay-startDay+1)/daysInMonth)*100, (1/daysInMonth)*100);
-  const bar = document.createElement('div');
-  bar.className = 'tl-bar';
-  bar.style.left = leftPct + '%';
-  bar.style.width = widthPct + '%';
-  const meta = timelineStatusMeta('퇴실');
-  bar.style.background = meta.fg;
-  const nameText = esc(maskViewerName(h.name) || '이름 미입력');
-  bar.innerHTML = `<span class="tl-bar-name">${nameText}</span>`;
-  bar.title = `${maskViewerName(h.name) || '이름 미입력'} · 퇴실 · ${h.moveIn} ~ ${h.moveOut || '-'} (클릭 시 호실로 이동)`;
-  bar.style.cursor = 'pointer';
-  bar.onclick = ()=> scrollToRoomCard(room);
-  return bar;
-}
-// 계약현황(DB.contracts) 기준으로 그리는 막대. name/memo는 호출부에서 이미 실거주자 우선으로
-// 계산해서 넘겨준다(연결된 입실자 카드가 있으면 그 값, 없으면 계약의 입실자/계약자명).
-function buildContractPeriodBar(range, meta, name, memo, room, monthStart, daysInMonth){
-  const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth(), daysInMonth);
-  const inD = new Date(range.start);
-  const outD = new Date(range.end);
-  if(outD < monthStart || inD > monthEnd) return null;
-  const clampIn = inD < monthStart ? monthStart : inD;
-  const clampOut = outD > monthEnd ? monthEnd : outD;
-  const startDay = clampIn.getDate();
-  const endDay = clampOut.getDate();
-  const leftPct = ((startDay-1)/daysInMonth)*100;
-  const widthPct = Math.max(((endDay-startDay+1)/daysInMonth)*100, (1/daysInMonth)*100);
-  const bar = document.createElement('div');
-  bar.className = 'tl-bar';
-  bar.style.left = leftPct + '%';
-  bar.style.width = widthPct + '%';
-  bar.style.background = meta.fg;
-  const memoText = memo ? ` <span class="tl-bar-memo">${esc(memo)}</span>` : '';
-  bar.innerHTML = `<span class="tl-bar-name">${esc(name)}</span>${memoText}`;
-  bar.title = `${name} · ${meta.key} · ${range.start} ~ ${range.end}${memo ? ' · ' + memo : ''} (클릭 시 호실로 이동)`;
-  bar.style.cursor = 'pointer';
-  bar.onclick = ()=> scrollToRoomCard(room);
-  return bar;
-}
-
 function normalizeFlexDate(s){
   const c = String(s||'').trim().replace(/[./]/g,'-');
   const m = c.match(/^(\d{2,4})-(\d{1,2})-(\d{1,2})$/);
