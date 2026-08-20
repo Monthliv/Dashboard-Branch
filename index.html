@@ -1862,6 +1862,15 @@ function renderRoomCard(room, sectionStatus){
     card.appendChild(chip);
   }
 
+  const cardMaintKind = roomCardMaintKind(room);
+  if(!roomEditOn && cardMaintKind && room.maintenanceMemo){
+    const chip = document.createElement('div');
+    chip.className = 'rc-note-chip';
+    chip.textContent = `${MAINT_KIND_META[cardMaintKind].label} 메모: ${room.maintenanceMemo}`;
+    chip.title = room.maintenanceMemo;
+    card.appendChild(chip);
+  }
+
   card.appendChild(document.createElement('hr')).className = 'rc-divider';
 
   const body = document.createElement('div');
