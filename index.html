@@ -836,6 +836,33 @@ async function writeChangeLog(summary){
 // 서버의 현재 updatedAt과 이 값을 비교해서, 이 탭을 열어둔 사이 다른 곳(다른 담당자/다른 탭)이
 // 먼저 저장한 게 있는지 감지하는 데 쓴다.
 let lastKnownUpdatedAt = null;
+
+// Firestore 무료 요금제 일일 읽기 한도(Quota exceeded)에 걸리는 걸 막기 위한 로컬 캐시.
+// 계약 이력·퇴실 이력 컬렉션은 로그인할 때마다 컬렉션 전체를 통째로 읽어오는데, 문서 수가
+// 쌓일수록 이 비용이 커지고, 관제센터 특성상 유휴 타임아웃(3시간)마다 재로그인이 일어나
+// 하루에도 여러 번 반복된다. 이 두 컬렉션은 실시간으로 자주 바뀌는 데이터가 아니므로,
+// 브라우저 localStorage에 최근 읽은 내용을 캐시해두고 일정 시간 안에는 재로그인해도 다시
+// 읽지 않는다. 이 탭에서 직접 계약/이력을 추가·삭제할 때는 caches를 즉시 갱신해 최신 상태를
+// 유지한다(아래 각 변경 지점의 refreshContractsCache/refreshHistoryCache 호출 참고).
+const COLLECTION_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6시간
+function readCachedCollection(key){
+  try{
+    const raw = localStorage.getItem(key);
+    if(!raw) return null;
+    const parsed = JSON.parse(raw);
+    if(!parsed || !Array.isArray(parsed.data) || typeof parsed.cachedAt !== 'number') return null;
+    if(Date.now() - parsed.cachedAt > COLLECTION_CACHE_TTL_MS) return null;
+    return parsed.data;
+  }catch(e){ return null; }
+}
+function writeCachedCollection(key, data){
+  try{ localStorage.setItem(key, JSON.stringify({ data, cachedAt: Date.now() })); }catch(e){ /* localStorage 사용 불가 시 캐시 없이 매번 새로 읽음 */ }
+}
+const CONTRACTS_CACHE_KEY = 'monthliv_contracts_cache_v1';
+const HISTORY_CACHE_KEY = 'monthliv_residentHistory_cache_v1';
+function refreshContractsCache(){ writeCachedCollection(CONTRACTS_CACHE_KEY, DB.contracts); }
+function refreshHistoryCache(){ writeCachedCollection(HISTORY_CACHE_KEY, DB.residentHistory); }
+
 async function loadState(){
   let base;
   try{
@@ -851,13 +878,21 @@ async function loadState(){
   // 대한 Firestore 권한 설정 누락 등) 이미 정상적으로 불러온 지점/호실/입실자 같은 핵심 데이터를
   // 절대 통째로 버리면 안 되므로, 메인 문서 로딩과는 별도의 try/catch로 완전히 분리한다.
   try{
-    const contractsSnap = await CONTRACTS_COL.get();
-    const contractsFromCol = contractsSnap.docs.map(d=>d.data());
+    const cachedContracts = readCachedCollection(CONTRACTS_CACHE_KEY);
+    let contractsFromCol;
+    if(cachedContracts){
+      contractsFromCol = cachedContracts;
+    } else {
+      const contractsSnap = await CONTRACTS_COL.get();
+      contractsFromCol = contractsSnap.docs.map(d=>d.data());
+      writeCachedCollection(CONTRACTS_CACHE_KEY, contractsFromCol);
+    }
     // 예전 버전은 계약 이력을 메인 문서 안에 배열로 통째로 저장했다(문서 용량 제한 초과의 원인).
     // 새 컬렉션이 아직 비어있고 메인 문서에 예전 데이터가 남아있으면, 딱 한 번 그 데이터를 새
     // 컬렉션 구조로 옮겨 쓴다. 그 뒤로는 컬렉션 쪽 데이터가 항상 기준이 된다.
     if(contractsFromCol.length===0 && Array.isArray(base.contracts) && base.contracts.length>0){
       await batchWriteDocs(CONTRACTS_COL, base.contracts);
+      writeCachedCollection(CONTRACTS_CACHE_KEY, base.contracts);
     } else {
       base.contracts = contractsFromCol;
     }
@@ -866,10 +901,18 @@ async function loadState(){
     base.contracts = Array.isArray(base.contracts) ? base.contracts : [];
   }
   try{
-    const historySnap = await RESIDENT_HISTORY_COL.get();
-    const historyFromCol = historySnap.docs.map(d=>d.data());
+    const cachedHistory = readCachedCollection(HISTORY_CACHE_KEY);
+    let historyFromCol;
+    if(cachedHistory){
+      historyFromCol = cachedHistory;
+    } else {
+      const historySnap = await RESIDENT_HISTORY_COL.get();
+      historyFromCol = historySnap.docs.map(d=>d.data());
+      writeCachedCollection(HISTORY_CACHE_KEY, historyFromCol);
+    }
     if(historyFromCol.length===0 && Array.isArray(base.residentHistory) && base.residentHistory.length>0){
       await batchWriteDocs(RESIDENT_HISTORY_COL, base.residentHistory);
+      writeCachedCollection(HISTORY_CACHE_KEY, base.residentHistory);
     } else {
       base.residentHistory = historyFromCol;
     }
@@ -1732,6 +1775,7 @@ function moveResidentToHistory(p, moveOutOverride){
   };
   DB.residentHistory.push(historyEntry);
   RESIDENT_HISTORY_COL.doc(historyEntry.id).set(historyEntry).catch(e=> console.error('퇴실 이력 저장 실패:', e));
+  refreshHistoryCache();
   DB.residents = DB.residents.filter(x=>x.id!==p.id);
   delete UI.residentEditMode[p.id];
   delete UI.residentSnapshots[p.id];
@@ -1773,6 +1817,7 @@ function restoreFromHistory(h){
     DB.residents.push(p);
     DB.residentHistory = DB.residentHistory.filter(x=>x.id!==h.id);
     RESIDENT_HISTORY_COL.doc(h.id).delete().catch(e=> console.error('퇴실 이력 삭제 실패:', e));
+    refreshHistoryCache();
     UI.historyOpen[room.id] = false;
     logChange(`"${h.name}" 님을 ${room.number}호 입실자로 복원`);
     scheduleSave(); render();
@@ -1965,6 +2010,7 @@ function renderRoomCard(room, sectionStatus){
             showConfirm(`"${h.name}" 님의 히스토리 기록을 완전히 삭제할까요? 이 작업은 되돌릴 수 없습니다.`, ()=>{
               DB.residentHistory = DB.residentHistory.filter(x=>x.id!==h.id);
               RESIDENT_HISTORY_COL.doc(h.id).delete().catch(e=> console.error('퇴실 이력 삭제 실패:', e));
+              refreshHistoryCache();
               logChange(`"${h.name}" 히스토리 기록 삭제`);
               scheduleSave(); render();
             });
@@ -3328,6 +3374,7 @@ function dedupeContracts(){
   showConfirm(`완전히 동일한 중복 계약 이력 ${removedContracts.length}건을 찾았습니다. 각 그룹에서 1건만 남기고 삭제할까요?`, ()=>{
     DB.contracts = deduped;
     batchDeleteDocs(CONTRACTS_COL, removedContracts.map(c=>c.id)).catch(e=> console.error('중복 계약 삭제 실패:', e));
+    refreshContractsCache();
     logChange(`중복 계약 이력 정리: ${removedContracts.length}건 삭제`);
     scheduleSave(); render();
     showAlert(`중복 계약 이력 ${removedContracts.length}건을 삭제했습니다.`);
@@ -3555,6 +3602,7 @@ function importContractGrid(headerCells, dataRows, onImported){
     ()=>{
       DB.contracts.push(...newContracts);
       batchWriteDocs(CONTRACTS_COL, newContracts).catch(e=> console.error('계약 데이터 저장 실패:', e));
+      refreshContractsCache();
       residentSyncActions.forEach(action=> DB.residents.push(action.newResident));
       existingResidentsToFlag.forEach(p=> p.justImported = true);
       logChange(`계약 데이터 가져오기: ${newContracts.length}건 추가${duplicateCount ? ` (중복 ${duplicateCount}건 제외)` : ''}${unmatched.length ? ` (미매칭 ${unmatched.length}건)` : ''}${residentSyncActions.length ? ` / 빈 호실 입실자 등록 ${residentSyncActions.length}건` : ''}${existingResidentsToFlag.length ? ` / 계약 확인 필요 표시 ${existingResidentsToFlag.length}건` : ''}`);
@@ -3608,6 +3656,7 @@ function showContractHistoryModal(room){
   function markContractApplied(c){
     c.appliedResident = true;
     CONTRACTS_COL.doc(c.id).set(c).catch(e=> console.error('계약 데이터 갱신 실패:', e));
+    refreshContractsCache();
   }
 
   function buildResidentFromContract(pu, range, c){
@@ -3682,6 +3731,7 @@ function showContractHistoryModal(room){
       ()=>{
         DB.contracts = DB.contracts.filter(x=>x.id!==c.id);
         CONTRACTS_COL.doc(c.id).delete().catch(e=> console.error('계약 데이터 삭제 실패:', e));
+        refreshContractsCache();
         logChange(`${room.number}호 계약(${c.contractDate || '-'} / ${c.contractor || '-'}) 이력 삭제`);
         scheduleSave();
         close();
