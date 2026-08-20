@@ -3250,16 +3250,28 @@ function handleContractExcelFile(file, onImported){
   reader.readAsArrayBuffer(file);
 }
 
+function normalizeAmountStr(s){
+  const digits = String(s||'').replace(/[^0-9]/g,'');
+  return digits ? String(parseInt(digits,10)) : '';
+}
 function contractSignature(c){
   // 계약현황 팝업에 실제로 노출되는 항목(계약일/계약기간/계약자/입실료/결제금액/계약구분)만으로
   // 중복 여부를 판단한다. 나머지 항목(입실자/계약상태/보증금 등)까지 모두 같아야 한다고 보면
   // 스프레드시트 원본의 사소한 차이 때문에 눈에 보이는 완전 중복도 못 잡는 경우가 있었다.
   // 날짜는 "2026-01-15"와 "26.01.15"처럼 표기 형식만 다를 뿐 같은 날짜인 경우가 있어서,
   // 문자열을 그대로 비교하지 않고 정규화한 값으로 비교해야 진짜 중복을 놓치지 않는다.
+  // 입실료/결제금액도 원본 스프레드시트의 천단위 콤마·통화기호 유무가 붙여넣을 때마다 달라질 수
+  // 있고(예: "450000" vs "450,000"), 계약자명 등 텍스트 항목에는 복사 과정에서 눈에 안 보이는
+  // 폭 없는 공백(zero-width space)이 섞여 들어오는 경우가 있어, 그대로 비교하면 완전히 같은
+  // 계약을 다른 계약으로 오인해 재붙여넣기할 때마다 중복 등록되는 문제가 있었다.
   const normDate = normalizeFlexDate(c.contractDate) || (c.contractDate || '').trim();
   const range = parseContractPeriodRange(c.contractPeriod);
   const normPeriod = range ? `${range.start}~${range.end}` : (c.contractPeriod || '').trim();
-  return [c.roomId, normDate, normPeriod, c.contractor, c.rent, c.paymentAmount, c.contractCategory].join('|');
+  const normContractor = cleanKeyLoose(c.contractor);
+  const normCategory = cleanKeyLoose(c.contractCategory);
+  const normRent = normalizeAmountStr(c.rent);
+  const normPayment = normalizeAmountStr(c.paymentAmount);
+  return [c.roomId, normDate, normPeriod, normContractor, normRent, normPayment, normCategory].join('|');
 }
 function importContractGrid(headerCells, dataRows, onImported){
   const idx = {};
