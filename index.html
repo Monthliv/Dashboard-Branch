@@ -602,7 +602,7 @@ let UI = {
   view:'stats', branchId:null, branchTab:'rooms',
   roomEditMode:{}, residentEditMode:{}, roomSnapshots:{}, residentSnapshots:{}, draftResident:{}, parkingListOpen:{}, residentFieldEdit:{},
   branchEditMode:{}, branchSnapshots:{}, branchInfoOpen:{}, historyOpen:{}, addingBranch:false, addingRoom:false, managingRoom:false, managingTypePrice:false, editingBranchId:null,
-  tlYear:null, tlMonth:null, roomStatusFilter:'전체', cleanWeekStart:null, overdueTabKey:null, doorUnlinkedTabKey:null,
+  tlYear:null, tlMonth:null, roomStatusFilter:'전체', cleanWeekStart:null, overdueTabKey:null,
   cleanTodayPage:1, cleanFuturePage:1, shortcutSelectedId:null
 };
 
@@ -912,8 +912,19 @@ async function saveState(){
     pendingChangeSummary = '';
     writeChangeLog(summary);
   }catch(e){
-    if(note) note.textContent = '저장 실패 — 네트워크 또는 Firebase 설정을 확인해주세요';
+    // 예전에는 오류를 콘솔에만 남기고 화면엔 뭉뚱그린 문구만 보여줬는데, 그러면 실제로 저장이
+    // 실패해도 담당자가 알아채기 어렵고(방금 한 수정이 조용히 사라진 것처럼 보임), 진짜 원인(용량
+    // 초과인지 네트워크 문제인지 등)도 알 수 없었다. 그래서 실제 오류 메시지를 그대로 화면에 노출한다.
     console.error(e);
+    const detail = (e && e.message) ? e.message : String(e);
+    const looksLikeSizeLimit = /longer than|exceeds|too large|maximum size/i.test(detail);
+    if(note) note.textContent = '⚠ 저장 실패 — ' + detail;
+    showAlert(
+      `저장에 실패했습니다. 방금 하신 수정이 저장되지 않았을 수 있습니다.\n\n오류 내용: ${detail}` +
+      (looksLikeSizeLimit
+        ? '\n\n저장하려는 데이터가 문서 용량 제한을 넘은 것으로 보입니다. 개발팀에 문의해주세요.'
+        : '\n\n네트워크를 확인한 뒤 다시 시도하거나, 계속되면 개발팀에 이 오류 메시지를 전달해주세요.')
+    );
   }
 }
 
@@ -5157,75 +5168,7 @@ function renderCleaningCards(){
 
   wrap.appendChild(renderTodayCleaningCard(todayList));
   wrap.appendChild(renderCleaningCard('청소 예정방 (7일 이내)', futureList, true));
-  wrap.appendChild(renderDoorUnlinkedCard());
   return wrap;
-}
-
-/* 잇소키(원격 출입문) 미연결 호실을 지점 탭으로 모아 보여준다. renderOverdueStatsCard와
-   같은 지점별 탭+칩 패턴을 그대로 따른다. */
-function renderDoorUnlinkedCard(){
-  const items = [];
-  DB.rooms.filter(room=> hasBranchAccess(room.branchId) && room.doorLinked===false).forEach(room=>{
-    const branch = DB.branches.find(b=>b.id===room.branchId);
-    items.push({ room, branch });
-  });
-
-  const card = document.createElement('div');
-  card.className = 'stat-section cleaning-card overdue-stats-card';
-  card.style.gridColumn = '1 / -1';
-
-  if(items.length===0){
-    card.innerHTML = `<h3>잇소키 미 연결 룸 <span class="cnt-badge overdue-cnt-badge">${items.length}</span></h3>`;
-    card.appendChild(el('div','cleaning-empty','전체 지점에 잇소키 미연결 호실이 없습니다.'));
-    return card;
-  }
-
-  const groupMap = new Map();
-  items.forEach(item=>{
-    const key = item.branch ? item.branch.id : '__none__';
-    if(!groupMap.has(key)) groupMap.set(key, { key, branch: item.branch, entries: [] });
-    groupMap.get(key).entries.push(item);
-  });
-  const groups = [...groupMap.values()];
-  groups.forEach(g=> g.entries.sort((a,b)=> a.room.number.localeCompare(b.room.number,'ko',{numeric:true})));
-  groups.sort((a,b)=> (a.branch?branchLabel(a.branch):'').localeCompare(b.branch?branchLabel(b.branch):''));
-
-  if(!groups.some(g=> g.key===UI.doorUnlinkedTabKey)) UI.doorUnlinkedTabKey = groups[0].key;
-  const activeGroup = groups.find(g=> g.key===UI.doorUnlinkedTabKey);
-
-  card.innerHTML = `<h3>잇소키 미 연결 룸 <span class="cnt-badge overdue-cnt-badge">${items.length}</span></h3>`;
-
-  const tabs = document.createElement('div');
-  tabs.className = 'subnav';
-  tabs.style.margin = '0 0 12px';
-  groups.forEach(group=>{
-    const tab = document.createElement('button');
-    tab.type = 'button';
-    tab.className = group.key===UI.doorUnlinkedTabKey ? 'active' : '';
-    tab.textContent = `${group.branch ? branchLabel(group.branch) : '(지점 정보 없음)'} (${group.entries.length})`;
-    tab.onclick = ()=>{ UI.doorUnlinkedTabKey = group.key; render(); };
-    tabs.appendChild(tab);
-  });
-  card.appendChild(tabs);
-
-  const chipRow = document.createElement('div');
-  chipRow.className = 'overdue-room-chips overdue-tab-chips';
-  activeGroup.entries.forEach(item=>{
-    const chip = document.createElement('span');
-    chip.className = 'badge overdue-badge overdue-room-chip';
-    chip.textContent = `${item.room.number}호`;
-    chip.title = '해당 호실로 이동';
-    chip.onclick = ()=>{
-      if(!item.branch) return;
-      UI.view = 'branch';
-      UI.branchId = item.branch.id;
-      scrollToRoomCard(item.room);
-    };
-    chipRow.appendChild(chip);
-  });
-  card.appendChild(chipRow);
-
-  return card;
 }
 
 const CLEANING_CARD_PAGE_SIZE = 4;
