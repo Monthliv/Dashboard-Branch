@@ -1765,10 +1765,6 @@ function renderRoomCard(room, sectionStatus){
   card.className = 'room-card';
   card.id = 'room-card-' + room.id;
   card.style.borderLeftColor = meta.fg;
-  // "전체" 탭처럼 여러 상태의 호실이 한 화면에 섞여 보일 때, 이용중이 아닌 호실을 한눈에
-  // 구분할 수 있도록 해당 상태 색상의 옅은 배경을 깔아준다. 이용중은 가장 흔한 기본 상태라
-  // 굳이 색을 넣지 않는다.
-  if(effStatus !== '이용중') card.style.background = meta.bg;
 
   const residents = DB.residents.filter(p=>p.roomId===room.id);
   const draft = UI.draftResident[room.id] || null;
@@ -1909,6 +1905,10 @@ function renderRoomCard(room, sectionStatus){
 
   const body = document.createElement('div');
   body.className = 'rc-body';
+  // 방 정보(상단 헤더)는 색을 넣지 않고, 입실자 카드가 놓이는 하단 영역만 상태 색상을 옅게
+  // 깔아서 "전체" 탭처럼 여러 상태가 섞여 보일 때 이용중이 아닌 호실을 한눈에 구분할 수 있게
+  // 한다. 기존 배지/탭에 쓰는 -bg 색보다 한 번 더 흐리게 보이도록 흰색과 50%씩 섞는다.
+  if(effStatus !== '이용중') body.style.background = `color-mix(in srgb, ${meta.bg} 50%, white)`;
 
   if(roomEditOn){
     body.appendChild(renderRoomEditForm(room));
