@@ -905,6 +905,38 @@ async function saveState(){
     console.error(e);
   }
 }
+
+// 실시간 동기화(onSnapshot)로 받아온 최신 데이터를, 저장할 때 쓰는 core와 같은 모양으로
+// DB에 반영한다. 로그인 시 최초 로딩에도 같은 정규화(누락 필드 채우기·상태 재계산)를
+// 그대로 쓰기 위해 공용 함수로 뺐다.
+function applyLoadedCore(parsed){
+  DB.branches = parsed.branches;
+  DB.rooms = parsed.rooms;
+  DB.residents = parsed.residents;
+  DB.channelList = (parsed.channelList && parsed.channelList.length) ? parsed.channelList : [...DEFAULT_CHANNEL_LIST];
+  DB.shortcuts = parsed.shortcuts || [];
+  DB.residents.forEach(p => {
+    if(p.originalMoveIn == null) p.originalMoveIn = p.moveIn || '';
+    if(p.scheduledToLeave == null) p.scheduledToLeave = false;
+    p.resStatus = computeResStatus(p);
+  });
+}
+// 실시간 동기화로 받은 데이터가 있어도, 지금 화면 어딘가에서 아직 저장 안 된 입력(방/입실자
+// 수정 패널, 신규 입실자 작성 중, 관리자 화면의 지점/호실 추가·관리 폼 등)이 진행 중이면 바로
+// 반영하지 않는다. 그 상태에서 DB를 통째로 바꾸면 화면이 다시 그려지면서 방금 입력하던 내용이
+// 그대로 사라져버리기 때문이다. 대신 pendingRemoteApply에 담아두고, 그 편집이 끝나 다음 render()가
+// 호출되는 시점에 안전하게 반영한다.
+function anyEditInProgress(){
+  return Object.values(UI.roomEditMode).some(Boolean)
+    || Object.values(UI.residentEditMode).some(Boolean)
+    || Object.values(UI.residentFieldEdit).some(Boolean)
+    || Object.values(UI.branchEditMode).some(Boolean)
+    || Object.keys(UI.draftResident).length > 0
+    || ADMIN_PANEL_TOGGLE_FLAGS.some(f=> UI[f])
+    || !!UI.editingBranchId;
+}
+let pendingRemoteApply = null;
+let firestoreUnsubscribe = null;
 function scheduleSave(){ clearTimeout(saveTimer); saveTimer = setTimeout(saveState, 250); }
 
 function statusMeta(s){
@@ -937,6 +969,14 @@ function channelColor(c){
 
 /* ---------------- root render ---------------- */
 function render(){
+  // 편집 중이라 미뤄뒀던 실시간 동기화 데이터가 있고, 이제는 편집이 끝나 안전하게 반영할 수
+  // 있으면 화면을 그리기 직전에 적용한다.
+  if(pendingRemoteApply && !anyEditInProgress()){
+    const { parsed, updatedAt } = pendingRemoteApply;
+    pendingRemoteApply = null;
+    applyLoadedCore(parsed);
+    lastKnownUpdatedAt = updatedAt;
+  }
   renderTopNav();
   const main = document.getElementById('main');
   main.innerHTML = '';
@@ -5647,17 +5687,11 @@ async function initApp(user){
   if(loggedInAs) loggedInAs.textContent = `${user.email} (${roleLabel})`;
 
   DB = await loadState();
-  DB.shortcuts = DB.shortcuts || [];
-  DB.channelList = (DB.channelList && DB.channelList.length) ? DB.channelList : [...DEFAULT_CHANNEL_LIST];
   // 과거 버전에서 "완료" 없이 새로고침 등으로 남겨졌을 수 있는 미확정 입실자(이름 미입력 등) 정리
   const beforeCount = DB.residents.length;
   DB.residents = DB.residents.filter(p => p.firstSaveDone !== false);
   if(canEdit() && DB.residents.length !== beforeCount) scheduleSave();
-  DB.residents.forEach(p => {
-    if(p.originalMoveIn == null) p.originalMoveIn = p.moveIn || '';
-    if(p.scheduledToLeave == null) p.scheduledToLeave = false;
-    p.resStatus = computeResStatus(p);
-  });
+  applyLoadedCore(DB);
   if(canEdit()) processScheduledLeaves();
   if(canEdit()) processPendingRoomMoves();
   let statusFixed = false;
@@ -5701,6 +5735,30 @@ async function initApp(user){
   document.getElementById('savedNote').textContent = '자동 저장됨 · 이 대시보드를 사용하는 모든 사람에게 공유됩니다';
 
   if(isSuperAdmin()) checkPendingRequests();
+
+  // 관제센터 특성상 여러 명이 각자 다른 탭/PC에서 동시에 이 대시보드를 켜두고 편집하는 일이
+  // 잦다. 로그인 시 한 번만 불러오고 저장 시에만 충돌을 감지하던 기존 방식으로는, 누군가
+  // 저장한 뒤 새로고침하기 전까지는 여전히 화면에 오래된 데이터가 보이고 있었다(그 상태에서
+  // 다시 저장하면 최신 데이터가 사라질 위험도 있었음). 그래서 이 상태 문서를 실시간으로
+  // 구독해서, 다른 곳에서 저장이 일어나는 즉시 이 탭의 화면에도 반영한다.
+  if(firestoreUnsubscribe) firestoreUnsubscribe();
+  firestoreUnsubscribe = FIRESTORE_DOC.onSnapshot(snap=>{
+    if(!CURRENT_USER) return;
+    if(snap.metadata.hasPendingWrites) return; // 이 탭 자신이 방금 쓴 낙관적 반영이면 무시
+    if(!snap.exists) return;
+    const data = snap.data();
+    if(!data || !data.json || data.updatedAt === lastKnownUpdatedAt) return; // 이미 반영된 내용
+    let parsed;
+    try{ parsed = JSON.parse(data.json); }catch(e){ console.error('실시간 동기화 데이터 파싱 실패:', e); return; }
+    if(anyEditInProgress()){
+      // 지금 뭔가 편집 중이면 화면을 다시 그리지 않고 대기시킨다 — 다음 render()에서 반영됨
+      pendingRemoteApply = { parsed, updatedAt: data.updatedAt };
+      return;
+    }
+    applyLoadedCore(parsed);
+    lastKnownUpdatedAt = data.updatedAt;
+    render();
+  }, err=> console.error('실시간 동기화 구독 실패:', err));
 }
 
 async function checkPendingRequests(){
@@ -5923,7 +5981,11 @@ let suppressAuthHandling = false;
 firebase.auth().onAuthStateChanged(user=>{
   if(suppressAuthHandling) return;
   if(user){ initApp(user); }
-  else { CURRENT_USER = null; USER_ROLE = null; showLoginScreen(); }
+  else {
+    CURRENT_USER = null; USER_ROLE = null;
+    if(firestoreUnsubscribe){ firestoreUnsubscribe(); firestoreUnsubscribe = null; }
+    showLoginScreen();
+  }
 });
 // PC를 계속 켜둔 채 로그인 화면을 새로고침 없이 며칠씩 열어두면 initApp()이 다시 실행되지
 // 않아 날짜가 바뀌어도 자동 백업이 안 생긴다. 그래서 별도로 주기적으로(1시간마다) 오늘
