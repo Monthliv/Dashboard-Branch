@@ -820,11 +820,17 @@ async function writeChangeLog(summary){
   }catch(e){ console.error('변경 로그 기록 실패:', e); }
 }
 
+// 이 탭이 마지막으로 불러오거나 저장했을 때의 서버 updatedAt. saveState()가 저장 직전에
+// 서버의 현재 updatedAt과 이 값을 비교해서, 이 탭을 열어둔 사이 다른 곳(다른 담당자/다른 탭)이
+// 먼저 저장한 게 있는지 감지하는 데 쓴다.
+let lastKnownUpdatedAt = null;
 async function loadState(){
   let base;
   try{
     const snap = await FIRESTORE_DOC.get();
-    base = (snap.exists && snap.data() && snap.data().json) ? JSON.parse(snap.data().json) : seedState();
+    const data = snap.exists ? snap.data() : null;
+    lastKnownUpdatedAt = (data && data.updatedAt) || null;
+    base = (data && data.json) ? JSON.parse(data.json) : seedState();
   }catch(e){
     console.error('불러오기 실패:', e);
     return seedState();
@@ -867,7 +873,28 @@ async function saveState(){
   if(note) note.textContent = '저장 중…';
   try{
     const core = { branches: DB.branches, rooms: DB.rooms, residents: DB.residents, channelList: DB.channelList, shortcuts: DB.shortcuts };
-    await FIRESTORE_DOC.set({ json: JSON.stringify(core), updatedAt: new Date().toISOString() });
+    const nowIso = new Date().toISOString();
+    // 이 상태 문서는 통째로 덮어써서 저장하는 구조라, 이 탭이 불러온 뒤로 다른 곳에서 이미 저장이
+    // 일어났는데도 그냥 저장하면 이 탭이 들고 있는(=오래된) 데이터로 그 변경사항을 통째로 지워버리게
+    // 된다. 그래서 트랜잭션 안에서 저장 직전 서버의 updatedAt을 다시 확인해, 우리가 불러온/마지막으로
+    // 저장한 시점 이후로 바뀌었으면(=다른 곳이 먼저 저장함) 이 탭의 오래된 데이터를 쓰지 않고
+    // 저장을 건너뛴다. 사용자는 새로고침 후 방금 한 수정을 다시 적용해야 한다.
+    let conflict = false;
+    await firestoreDB.runTransaction(async (tx)=>{
+      const snap = await tx.get(FIRESTORE_DOC);
+      const serverUpdatedAt = snap.exists ? snap.data().updatedAt : null;
+      if(lastKnownUpdatedAt && serverUpdatedAt && serverUpdatedAt !== lastKnownUpdatedAt){
+        conflict = true;
+        return;
+      }
+      tx.set(FIRESTORE_DOC, { json: JSON.stringify(core), updatedAt: nowIso });
+    });
+    if(conflict){
+      if(note) note.textContent = '⚠ 저장 건너뜀 · 다른 곳에서 방금 저장된 내용이 있어요 · 새로고침 필요';
+      showAlert('다른 담당자(또는 다른 탭/기기)가 방금 이 대시보드를 먼저 저장했습니다.\n이 상태로 저장하면 그 변경사항이 사라질 수 있어 이번 저장은 건너뛰었습니다.\n\n페이지를 새로고침한 뒤, 방금 하신 수정을 다시 적용해주세요.');
+      return;
+    }
+    lastKnownUpdatedAt = nowIso;
     if(note) note.textContent = '자동 저장됨 · 이 대시보드를 사용하는 모든 사람에게 공유됩니다';
     const summary = pendingChangeSummary || '정보 수정';
     pendingChangeSummary = '';
