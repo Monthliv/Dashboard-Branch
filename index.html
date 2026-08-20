@@ -803,6 +803,11 @@ let USER_BRANCH_SCOPE = 'all'; // 'all' | 'selected' — superadmin is always ef
 let USER_BRANCH_IDS = null;    // array of branch ids, only meaningful when scope === 'selected'
 function canEdit(){ return USER_ROLE === 'editor' || USER_ROLE === 'superadmin'; }
 function isSuperAdmin(){ return USER_ROLE === 'superadmin'; }
+/* 대리결제(paymentProxy)인 경우 계약자명(name) 대신 실제 거주자명(actualResidentName)을
+   우선 표시한다. 입실자 카드(renderResidentView)와 타임라인이 이 기준을 공유한다. */
+function residentDisplayName(p){
+  return (p.paymentProxy && p.actualResidentName) ? p.actualResidentName : p.name;
+}
 /* 보기 권한(viewer) 계정에는 입실자 이름 앞 두 글자만 보여주고 나머지는 마스킹한다. */
 function maskViewerName(name){
   if(!name || USER_ROLE !== 'viewer') return name;
@@ -2129,7 +2134,7 @@ function renderResidentView(p, room, isSecondary){
   nameWrap.style.cssText = 'display:flex;align-items:center;gap:4px;min-width:0;';
   const nm = document.createElement('span');
   nm.className = 'nm';
-  const displayName = (p.paymentProxy && p.actualResidentName) ? p.actualResidentName : p.name;
+  const displayName = residentDisplayName(p);
   nm.textContent = maskViewerName(displayName) || '(이름 미입력)';
   if(canEdit()){
     nm.classList.add('nm-clickable');
@@ -2796,7 +2801,15 @@ function renderTimelineSection(branch){
   }
 
   rooms.forEach(room=>{
-    const residents = DB.residents.filter(p=>p.roomId===room.id);
+    // 현재 입실자가 퇴실예정으로 확정되면 다음 입실자를 미리 등록해둘 수 있어서(관리자 설정과
+    // 무관하게 언제나 가능), 실제로는 동시에 거주하지 않는데도 DB.residents에 그 방 레코드가
+    // 2건(퇴실예정 중인 사람 + 아직 입실 전인 예정자) 존재하는 경우가 있다. 실제로 지금 그
+    // 자리에 있는 사람은 하나뿐이므로, "지금 이미 입실한(이용중/퇴실예정)" 레코드가 있으면
+    // 그것만 보여주고 아직 입실 전인 예정자는 그 사람이 실제로 입실할 때(=더 이상 예정자가
+    // 아니게 될 때)까지는 별도 행으로 노출하지 않는다.
+    const allResidents = DB.residents.filter(p=>p.roomId===room.id);
+    const currentResidents = allResidents.filter(p=> !isUpcoming(p));
+    const residents = currentResidents.length > 0 ? currentResidents : allResidents;
     // 과거 퇴실자는 이번 달과 겹치는 기간의 기록만 보여준다 — 그렇지 않으면 오래 운영한 방일수록
     // 목록이 한없이 길어진다.
     const history = DB.residentHistory.filter(h=>{
@@ -2841,21 +2854,23 @@ function renderTimelineSection(branch){
       lbl.style.borderLeft = `4px solid ${entry.meta.fg}`;
       lbl.style.background = entry.meta.bg;
 
+      // 호실·입실자가 같이 나오는 라벨 영역에는 호실번호와 상태만 보여준다. 입실자 이름·메모는
+      // 타임라인 막대(buildBar/buildHistoryBar) 안에만 표시한다.
       if(entry.type==='resident'){
         const p = entry.p;
-        const personOverdue = isOverdue(p);
-        const memoText = p.memo ? ` · ${esc(p.memo)}` : '';
+        const name = maskViewerName(residentDisplayName(p)) || '이름 미입력';
         lbl.innerHTML = `<span class="rm">${esc(room.number)}</span>
-           <span class="nm"><span class="tl-status-dot" style="background:${entry.meta.fg}"></span>${esc(maskViewerName(p.name) || '이름 미입력')}${personOverdue ? ' ⚠' : ''} · ${p.channel}${memoText}</span>`;
+           <span class="nm"><span class="tl-status-dot" style="background:${entry.meta.fg}"></span>${esc(entry.meta.key)}</span>`;
         lbl.style.cursor = 'pointer';
-        lbl.title = `${maskViewerName(p.name) || '이름 미입력'} · ${entry.meta.key} · ${p.channel} · ${p.moveIn} ~ ${p.moveOut || '미정'}${p.memo ? ' · ' + p.memo : ''} (클릭 시 호실로 이동)`;
+        lbl.title = `${name} · ${entry.meta.key} · ${p.channel} · ${p.moveIn} ~ ${p.moveOut || '미정'}${p.memo ? ' · ' + p.memo : ''} (클릭 시 호실로 이동)`;
         lbl.onclick = ()=> scrollToRoomCard(room);
       } else {
         const h = entry.h;
+        const name = maskViewerName(h.name) || '이름 미입력';
         lbl.innerHTML = `<span class="rm">${esc(room.number)}</span>
-           <span class="nm"><span class="tl-status-dot" style="background:${entry.meta.fg}"></span>${esc(maskViewerName(h.name) || '이름 미입력')} · 퇴실</span>`;
+           <span class="nm"><span class="tl-status-dot" style="background:${entry.meta.fg}"></span>퇴실</span>`;
         lbl.style.cursor = 'pointer';
-        lbl.title = `${maskViewerName(h.name) || '이름 미입력'} · 퇴실 · ${h.moveIn} ~ ${h.moveOut || '-'} (클릭 시 호실로 이동)`;
+        lbl.title = `${name} · 퇴실 · ${h.moveIn} ~ ${h.moveOut || '-'} (클릭 시 호실로 이동)`;
         lbl.onclick = ()=> scrollToRoomCard(room);
       }
       row.appendChild(lbl);
@@ -2917,10 +2932,11 @@ function buildBar(p, room, monthStart, daysInMonth){
   bar.style.width = widthPct + '%';
   const meta = residentTimelineMeta(p, room);
   bar.style.background = meta.fg;
-  const nameText = esc(maskViewerName(p.name) || p.resStatus);
+  const displayName = maskViewerName(residentDisplayName(p)) || '이름 미입력';
+  const nameText = esc(displayName || p.resStatus);
   const memoText = p.memo ? ` <span class="tl-bar-memo">${esc(p.memo)}</span>` : '';
   bar.innerHTML = `<span class="tl-bar-name">${nameText}</span>${memoText}`;
-  bar.title = `${maskViewerName(p.name) || '이름 미입력'} · ${meta.key} · ${p.channel} · ${p.moveIn} ~ ${p.moveOut || '미정'}${p.memo ? ' · ' + p.memo : ''} (클릭 시 호실로 이동)`;
+  bar.title = `${displayName} · ${meta.key} · ${p.channel} · ${p.moveIn} ~ ${p.moveOut || '미정'}${p.memo ? ' · ' + p.memo : ''} (클릭 시 호실로 이동)`;
   bar.style.cursor = 'pointer';
   bar.onclick = ()=> scrollToRoomCard(room);
   return bar;
