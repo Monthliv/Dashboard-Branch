@@ -1918,7 +1918,7 @@ function renderRoomCard(room, sectionStatus){
   pencil.title = roomEditOn ? '수정 완료' : '방 정보 수정';
   pencil.onclick = ()=>{
     if(!roomEditOn){ UI.roomSnapshots[room.id] = Object.assign({}, room); }
-    else { delete UI.roomSnapshots[room.id]; }
+    else { delete UI.roomSnapshots[room.id]; scheduleSave(); }
     UI.roomEditMode[room.id] = !roomEditOn; render();
   };
   if(canEdit()) header.querySelector('.rc-header-top').appendChild(pencil);
@@ -2143,6 +2143,10 @@ function renderResidentView(p, room, isSecondary){
 }
 
 /* ---------------- room info: edit mode (방 정보만) ---------------- */
+// 이 편집 패널 안의 필드들은 더 이상 값이 바뀔 때마다 바로 저장하지 않는다. 방 카드 헤더의
+// 연필(✎) 아이콘을 눌러 들어왔다가 체크(✓) 아이콘을 눌러 나가는 시점에 한 번만 저장한다
+// (renderRoomCard의 pencil.onclick 참고). 여기서는 render()만 호출해 화면엔 바로 반영하고,
+// scheduleSave()는 호출하지 않는다.
 function renderRoomEditForm(room){
   const wrap = document.createElement('div');
 
@@ -2155,7 +2159,7 @@ function renderRoomEditForm(room){
     </div>
   `;
   const saleStatusSel = grid.querySelector('[data-f="saleStatus"]');
-  if(saleStatusSel) saleStatusSel.addEventListener('change', (e)=>{ logChange(`${room.number}호 판매상태 변경: ${room.saleStatus} → ${e.target.value}`); room.saleStatus = e.target.value; scheduleSave(); render(); });
+  if(saleStatusSel) saleStatusSel.addEventListener('change', (e)=>{ logChange(`${room.number}호 판매상태 변경: ${room.saleStatus} → ${e.target.value}`); room.saleStatus = e.target.value; render(); });
   wrap.appendChild(grid);
 
   const chipRow = document.createElement('div');
@@ -2178,7 +2182,7 @@ function renderRoomEditForm(room){
         room.maintenanceDate=''; room.maintenanceMemo='';
       }
       logChange(`${room.number}호 ${MAINT_KIND_META[kind].label} ${turningOn?'설정':'해제'}`);
-      scheduleSave(); render();
+      render();
     };
     chips.appendChild(chip);
   });
@@ -2195,7 +2199,7 @@ function renderRoomEditForm(room){
     dateInput.value = room.maintenanceDate || '';
     dateInput.addEventListener('change', ()=>{
       logChange(`${room.number}호 ${kindLabel} 예정일 변경: ${dateInput.value || '미정'}`);
-      room.maintenanceDate = dateInput.value; scheduleSave(); render();
+      room.maintenanceDate = dateInput.value; render();
     });
     dateWrap.appendChild(labeled(`${kindLabel} 예정일`, dateInput));
     wrap.appendChild(dateWrap);
@@ -2208,7 +2212,7 @@ function renderRoomEditForm(room){
     memoInput.placeholder = '예: 변기 물 안 내려감, 방충망 파손 등';
     memoInput.addEventListener('input', ()=>{
       logChange(`${room.number}호 ${kindLabel} 메모 수정`);
-      room.maintenanceMemo = memoInput.value; scheduleSave();
+      room.maintenanceMemo = memoInput.value;
     });
     memoWrap.appendChild(labeled(`${kindLabel} 메모`, memoInput));
     wrap.appendChild(memoWrap);
@@ -2229,7 +2233,7 @@ function renderRoomEditForm(room){
       room.reservationName=''; room.reservationPhone=''; room.reservationMoveIn=''; room.reservationMemo='';
     }
     logChange(`${room.number}호 예약 ${turningOn?'설정':'해제'}`);
-    scheduleSave(); render();
+    render();
   };
   reserveChips.appendChild(reserveChip);
   reserveChipRow.appendChild(reserveChips);
@@ -2240,14 +2244,14 @@ function renderRoomEditForm(room){
     nameInput.type = 'text';
     nameInput.value = room.reservationName || '';
     nameInput.placeholder = '예약자명';
-    nameInput.addEventListener('input', ()=>{ logChange(`${room.number}호 예약자명 수정`); room.reservationName = nameInput.value; scheduleSave(); });
+    nameInput.addEventListener('input', ()=>{ logChange(`${room.number}호 예약자명 수정`); room.reservationName = nameInput.value; });
     wrap.appendChild(labeled('예약자명', nameInput));
 
     const phoneInput = document.createElement('input');
     phoneInput.type = 'text';
     phoneInput.value = room.reservationPhone || '';
     phoneInput.placeholder = '연락처';
-    phoneInput.addEventListener('input', ()=>{ logChange(`${room.number}호 예약자 연락처 수정`); room.reservationPhone = phoneInput.value; scheduleSave(); });
+    phoneInput.addEventListener('input', ()=>{ logChange(`${room.number}호 예약자 연락처 수정`); room.reservationPhone = phoneInput.value; });
     wrap.appendChild(labeled('연락처', phoneInput));
 
     const moveInInput = document.createElement('input');
@@ -2255,7 +2259,7 @@ function renderRoomEditForm(room){
     moveInInput.value = room.reservationMoveIn || '';
     moveInInput.addEventListener('change', ()=>{
       logChange(`${room.number}호 예약 입실예정일 변경: ${moveInInput.value || '미정'}`);
-      room.reservationMoveIn = moveInInput.value; scheduleSave();
+      room.reservationMoveIn = moveInInput.value;
     });
     wrap.appendChild(labeled('입실예정일', moveInInput));
 
@@ -2263,7 +2267,7 @@ function renderRoomEditForm(room){
     reserveMemoInput.rows = 2;
     reserveMemoInput.value = room.reservationMemo || '';
     reserveMemoInput.placeholder = '예: 계약금 입금 예정, 문의 채널 등';
-    reserveMemoInput.addEventListener('input', ()=>{ logChange(`${room.number}호 예약 메모 수정`); room.reservationMemo = reserveMemoInput.value; scheduleSave(); });
+    reserveMemoInput.addEventListener('input', ()=>{ logChange(`${room.number}호 예약 메모 수정`); room.reservationMemo = reserveMemoInput.value; });
     wrap.appendChild(labeled('메모', reserveMemoInput));
   }
 
@@ -2273,9 +2277,9 @@ function renderRoomEditForm(room){
   const noteArea = document.createElement('textarea');
   noteArea.value = room.note;
   noteArea.placeholder = '예: 204호 정독립 이동 예정';
-  noteArea.addEventListener('input', ()=>{ logChange(`${room.number}호 특이사항 메모 수정`); room.note = noteArea.value; scheduleSave(); });
+  noteArea.addEventListener('input', ()=>{ logChange(`${room.number}호 특이사항 메모 수정`); room.note = noteArea.value; });
   noteWrap.appendChild(noteArea);
-  noteWrap.appendChild(renderMemoStyleControls(room, 'noteColor', 'noteBold'));
+  noteWrap.appendChild(renderMemoStyleControls(room, 'noteColor', 'noteBold', true));
   wrap.appendChild(noteWrap);
 
   return wrap;
@@ -2297,7 +2301,9 @@ function wouldExceedParking(p, candidateMoveIn, candidateMoveOut){
 function renderResidentEditCard(p, isSecondary, isDraft, room){
   const card = document.createElement('div');
   card.className = 'resident-edit-card';
-  const maybeSave = ()=>{ if(!isDraft) scheduleSave(); };
+  // 입실자 카드도 방 카드와 마찬가지로 필드가 바뀔 때마다 바로 저장하지 않고, 상단의 체크(✓)
+  // "수정 완료" 버튼(doneBtn)을 누르는 시점에 한 번만 저장한다. 여기서는 render()만 한다.
+  const maybeSave = ()=>{};
 
   if(UI.residentFieldEdit[p.id] === undefined) UI.residentFieldEdit[p.id] = !p.firstSaveDone;
   const identityOpen = UI.residentFieldEdit[p.id];
@@ -2576,7 +2582,7 @@ function renderResidentEditCard(p, isSecondary, isDraft, room){
   memo.style.marginTop = '4px';
   memo.addEventListener('input', ()=>{ p.memo = memo.value; maybeSave(); });
   card.appendChild(memo);
-  card.appendChild(renderMemoStyleControls(p, 'memoColor', 'memoBold'));
+  card.appendChild(renderMemoStyleControls(p, 'memoColor', 'memoBold', true));
 
   if(room && !isDraft && !UI.draftResident[room.id] && !roomHasUpcomingResident(room) && roomHasVacatingResident(room)){
     const addRow = document.createElement('div');
@@ -2594,7 +2600,10 @@ function renderResidentEditCard(p, isSecondary, isDraft, room){
 }
 
 const MEMO_COLORS = { black:'#1E2A32', red:'#C0473F', blue:'#2F6FED' };
-function renderMemoStyleControls(obj, colorField, boldField){
+// deferSave가 true면 저장을 미루고 render()만 한다 — 방/입실자 카드의 편집 패널처럼 체크(✓)
+// 아이콘을 누를 때 한 번에 저장하는 화면에서 쓴다. 지점 정보 메모처럼 필드별로 바로바로
+// 저장하는 화면에서는 기존대로 deferSave 없이 호출한다.
+function renderMemoStyleControls(obj, colorField, boldField, deferSave){
   const row = document.createElement('div');
   row.className = 'memo-style-row';
   Object.keys(MEMO_COLORS).forEach(key=>{
@@ -2603,7 +2612,7 @@ function renderMemoStyleControls(obj, colorField, boldField){
     sw.className = 'color-swatch' + ((obj[colorField]||'black')===key ? ' active' : '');
     sw.style.background = MEMO_COLORS[key];
     sw.title = key==='black' ? '검정' : (key==='red' ? '빨강' : '파랑');
-    sw.onclick = ()=>{ obj[colorField] = key; scheduleSave(); render(); };
+    sw.onclick = ()=>{ obj[colorField] = key; if(!deferSave) scheduleSave(); render(); };
     row.appendChild(sw);
   });
   const boldBtn = document.createElement('button');
@@ -2611,7 +2620,7 @@ function renderMemoStyleControls(obj, colorField, boldField){
   boldBtn.className = 'bold-toggle-btn' + (obj[boldField] ? ' active' : '');
   boldBtn.textContent = 'B';
   boldBtn.title = '굵게';
-  boldBtn.onclick = ()=>{ obj[boldField] = !obj[boldField]; scheduleSave(); render(); };
+  boldBtn.onclick = ()=>{ obj[boldField] = !obj[boldField]; if(!deferSave) scheduleSave(); render(); };
   row.appendChild(boldBtn);
   return row;
 }
