@@ -2056,12 +2056,10 @@ function renderRoomCard(room, sectionStatus){
         periodRow.textContent = `${h.moveIn || '-'}~${h.moveOut || '-'}`;
         entry.appendChild(periodRow);
         if(h.memo){
+          // 메모 원본의 색상/굵기 서식은 적용하지 않고, 다른 이력 항목들과 같은 일반 텍스트로 보여준다.
           const memo = document.createElement('div');
-          memo.className = 'resident-memo';
+          memo.className = 'history-sub';
           memo.textContent = h.memo;
-          memo.title = h.memo;
-          memo.style.color = MEMO_COLORS[h.memoColor] || MEMO_COLORS.black;
-          if(h.memoBold) memo.style.fontWeight = '700';
           entry.appendChild(memo);
         }
         histBox.appendChild(entry);
