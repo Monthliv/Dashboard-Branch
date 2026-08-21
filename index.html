@@ -1903,6 +1903,16 @@ function restoreFromHistory(h){
     RESIDENT_HISTORY_COL.doc(h.id).delete().catch(e=> console.error('퇴실 이력 삭제 실패:', e));
     refreshHistoryCache();
     UI.historyOpen[room.id] = false;
+    // "복원" 버튼은 이 방에 재실 입실자가 하나도 없을 때만 나타나므로, 지금 복원하는 것 자체가
+    // 그 공실 상태(=이 방의 현재 퇴실청소 플래그를 만든 바로 그 퇴실)를 되돌리는 것이다. 즉시
+    // 퇴실 처리는 예약 퇴실과 달리 cleaningFlagSourceId를 남기지 않으므로, 여기서는 무조건
+    // 지운다.
+    room.needsCleaning = false;
+    room.needsRetouch = false;
+    room.needsExtraCleaning = false;
+    room.maintenanceDate = '';
+    room.maintenanceMemo = '';
+    room.cleaningFlagSourceId = null;
     logChange(`"${h.name}" 님을 ${room.number}호 입실자로 복원`);
     scheduleSave(); render();
   });
