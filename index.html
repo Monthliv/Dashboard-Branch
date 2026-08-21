@@ -1777,7 +1777,13 @@ function moveResidentToHistory(p, moveOutOverride){
     id: uid('h'), roomId: p.roomId,
     name: p.name || '(이름 미입력)', phone: p.phone || '',
     moveIn: p.originalMoveIn || p.moveIn || '', moveOut: moveOutOverride || p.moveOut || todayISO(),
-    sourceContractId: p.sourceContractId || null
+    sourceContractId: p.sourceContractId || null,
+    // 퇴실 처리 시점까지 입실자 카드에서 수정된 내용을 그대로 이력에 남긴다 — memo/대리결제/
+    // 2인 거주 여부 등은 카드가 저장하고 있는 최신 값이 곧 여기서 남겨야 할 값이다.
+    channel: p.channel || '', carNumber: p.carNumber || '',
+    memo: p.memo || '', memoColor: p.memoColor || 'black', memoBold: !!p.memoBold,
+    paymentProxy: !!p.paymentProxy, actualResidentName: p.actualResidentName || '', actualResidentPhone: p.actualResidentPhone || '',
+    doubleOccupancy: !!p.doubleOccupancy
   };
   DB.residentHistory.push(historyEntry);
   RESIDENT_HISTORY_COL.doc(historyEntry.id).set(historyEntry).catch(e=> console.error('퇴실 이력 저장 실패:', e));
@@ -1815,9 +1821,12 @@ function restoreFromHistory(h){
     while(usedSlots.has(freeSlot)) freeSlot++;
     const p = {
       id: uid('p'), roomId: room.id, name: h.name, phone: h.phone,
-      channel: '독립생활', resStatus:'', contractType:'신규',
+      channel: h.channel || '독립생활', resStatus:'', contractType:'신규',
       moveIn: h.moveIn, moveOut: h.moveOut, originalMoveIn: h.moveIn, scheduledToLeave:false,
-      carNumber:'', memo:'', firstSaveDone:true, slotIndex: freeSlot
+      carNumber: h.carNumber || '', memo: h.memo || '', memoColor: h.memoColor || 'black', memoBold: !!h.memoBold,
+      paymentProxy: !!h.paymentProxy, actualResidentName: h.actualResidentName || '', actualResidentPhone: h.actualResidentPhone || '',
+      doubleOccupancy: !!h.doubleOccupancy,
+      firstSaveDone:true, slotIndex: freeSlot
     };
     p.resStatus = computeResStatus(p);
     DB.residents.push(p);
@@ -1998,7 +2007,7 @@ function renderRoomCard(room, sectionStatus){
         entry.className = 'history-entry';
         const topRow = document.createElement('div');
         topRow.className = 'history-top';
-        topRow.innerHTML = `<span class="nm">${esc(maskViewerName(h.name))}</span><span class="ph">${esc(h.phone||'-')}</span>`;
+        topRow.innerHTML = `<span class="nm">${esc(maskViewerName(residentDisplayName(h)))}</span><span class="ph">${esc(h.phone||'-')}</span>`;
         if(canEdit() && !roomOccupied){
           if(idx === 0){
             const restoreBtn = document.createElement('button');
@@ -2024,10 +2033,30 @@ function renderRoomCard(room, sectionStatus){
           topRow.appendChild(delHistBtn);
         }
         entry.appendChild(topRow);
+        if(h.doubleOccupancy || h.paymentProxy){
+          const doubleMeta = statusMeta('2인 거주');
+          const proxyMeta = statusMeta('대리결제');
+          const flagsLine = document.createElement('div');
+          flagsLine.className = 'resident-flags';
+          flagsLine.innerHTML = `
+            ${h.paymentProxy ? `<span class="badge" style="background:${proxyMeta.bg};color:${proxyMeta.fg}">대리결제</span>` : ''}
+            ${h.doubleOccupancy ? `<span class="badge" style="background:${doubleMeta.bg};color:${doubleMeta.fg}">2인 거주</span>` : ''}
+          `;
+          entry.appendChild(flagsLine);
+        }
         const periodRow = document.createElement('div');
         periodRow.className = 'history-period';
         periodRow.textContent = `${h.moveIn || '-'} ~ ${h.moveOut || '-'}`;
         entry.appendChild(periodRow);
+        if(h.memo){
+          const memo = document.createElement('div');
+          memo.className = 'resident-memo';
+          memo.textContent = h.memo;
+          memo.title = h.memo;
+          memo.style.color = MEMO_COLORS[h.memoColor] || MEMO_COLORS.black;
+          if(h.memoBold) memo.style.fontWeight = '700';
+          entry.appendChild(memo);
+        }
         histBox.appendChild(entry);
       });
     }
