@@ -1776,7 +1776,10 @@ function moveResidentToHistory(p, moveOutOverride){
   const historyEntry = {
     id: uid('h'), roomId: p.roomId,
     name: p.name || '(이름 미입력)', phone: p.phone || '',
-    moveIn: p.originalMoveIn || p.moveIn || '', moveOut: moveOutOverride || p.moveOut || todayISO(),
+    // 연장/직접 수정 등으로 입실일이 최초 등록 시점 이후 바뀌었을 수 있으므로, 항상 카드에
+    // 남아있는 "지금" 값(p.moveIn)을 남긴다 — 최초 등록 당시 값(originalMoveIn)을 쓰면 그
+    // 사이의 수정 내역이 무시되고 이전 기간으로 되돌아가 버린다.
+    moveIn: p.moveIn || '', moveOut: moveOutOverride || p.moveOut || todayISO(),
     sourceContractId: p.sourceContractId || null,
     // 퇴실 처리 시점까지 입실자 카드에서 수정된 내용을 그대로 이력에 남긴다 — memo/대리결제/
     // 2인 거주 여부 등은 카드가 저장하고 있는 최신 값이 곧 여기서 남겨야 할 값이다.
@@ -2007,7 +2010,10 @@ function renderRoomCard(room, sectionStatus){
         entry.className = 'history-entry';
         const topRow = document.createElement('div');
         topRow.className = 'history-top';
-        topRow.innerHTML = `<span class="nm">${esc(maskViewerName(residentDisplayName(h)))}</span><span class="ph">${esc(h.phone||'-')}</span>`;
+        // 대리결제였던 기록이면 이름뿐 아니라 연락처도 결제자(h.phone)가 아니라 실거주자
+        // 연락처(actualResidentPhone)를 보여줘야 이름-연락처가 같은 사람을 가리킨다.
+        const histPhone = (h.paymentProxy && h.actualResidentPhone) ? h.actualResidentPhone : h.phone;
+        topRow.innerHTML = `<span class="nm">${esc(maskViewerName(residentDisplayName(h)))}</span><span class="ph">${esc(histPhone||'-')}</span>`;
         if(canEdit() && !roomOccupied){
           if(idx === 0){
             const restoreBtn = document.createElement('button');
