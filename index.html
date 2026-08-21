@@ -270,6 +270,7 @@
   .history-top .nm{ font-weight:700; }
   .history-top .ph{ color:var(--ink-soft); }
   .history-top .btn{ margin-left:auto; }
+  .history-sub{ font-size:11.5px; color:var(--ink); margin-top:3px; }
   .history-period{ font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--ink-soft); margin-top:3px; }
   .history-empty{ font-size:12px; color:var(--ink-soft); }
   .rc-header-right{ display:flex; align-items:center; gap:6px; flex:none; }
@@ -2010,10 +2011,9 @@ function renderRoomCard(room, sectionStatus){
         entry.className = 'history-entry';
         const topRow = document.createElement('div');
         topRow.className = 'history-top';
-        // 대리결제였던 기록이면 이름뿐 아니라 연락처도 결제자(h.phone)가 아니라 실거주자
-        // 연락처(actualResidentPhone)를 보여줘야 이름-연락처가 같은 사람을 가리킨다.
-        const histPhone = (h.paymentProxy && h.actualResidentPhone) ? h.actualResidentPhone : h.phone;
-        topRow.innerHTML = `<span class="nm">${esc(maskViewerName(residentDisplayName(h)))}</span><span class="ph">${esc(histPhone||'-')}</span>`;
+        // 대리결제였던 기록은 이름 하나로 실거주자만 대신 보여주지 않고, 계약자(h.name/h.phone)와
+        // 실입실자를 각각 텍스트로 그대로 나열한다 — 색이 있는 플래그(배지)는 쓰지 않는다.
+        topRow.innerHTML = `<span class="nm">${esc(maskViewerName(h.name))}</span><span class="ph">${esc(h.phone||'-')}</span>`;
         if(canEdit() && !roomOccupied){
           if(idx === 0){
             const restoreBtn = document.createElement('button');
@@ -2039,20 +2039,21 @@ function renderRoomCard(room, sectionStatus){
           topRow.appendChild(delHistBtn);
         }
         entry.appendChild(topRow);
-        if(h.doubleOccupancy || h.paymentProxy){
-          const doubleMeta = statusMeta('2인 거주');
-          const proxyMeta = statusMeta('대리결제');
-          const flagsLine = document.createElement('div');
-          flagsLine.className = 'resident-flags';
-          flagsLine.innerHTML = `
-            ${h.paymentProxy ? `<span class="badge" style="background:${proxyMeta.bg};color:${proxyMeta.fg}">대리결제</span>` : ''}
-            ${h.doubleOccupancy ? `<span class="badge" style="background:${doubleMeta.bg};color:${doubleMeta.fg}">2인 거주</span>` : ''}
-          `;
-          entry.appendChild(flagsLine);
+        if(h.paymentProxy){
+          const actualLine = document.createElement('div');
+          actualLine.className = 'history-sub';
+          actualLine.textContent = `실입실자 ${maskViewerName(h.actualResidentName) || '-'} ${h.actualResidentPhone || '-'}`;
+          entry.appendChild(actualLine);
+        }
+        if(h.doubleOccupancy){
+          const doubleLine = document.createElement('div');
+          doubleLine.className = 'history-sub';
+          doubleLine.textContent = '2인 거주';
+          entry.appendChild(doubleLine);
         }
         const periodRow = document.createElement('div');
         periodRow.className = 'history-period';
-        periodRow.textContent = `${h.moveIn || '-'} ~ ${h.moveOut || '-'}`;
+        periodRow.textContent = `${h.moveIn || '-'}~${h.moveOut || '-'}`;
         entry.appendChild(periodRow);
         if(h.memo){
           const memo = document.createElement('div');
