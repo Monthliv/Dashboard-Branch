@@ -2825,14 +2825,21 @@ function renderTimelineSection(branch){
     row.appendChild(days);
     gridWrap.appendChild(row);
   }
-  function appendEmptyRoomRow(room){
+  // 타임라인 왼쪽 라벨(호실번호가 표시되는 영역)은 입실자/계약 상태가 아니라 방 자체의 상태
+  // (이용중/판매중/판매보류/공실)를 보여준다 — 개별 입실자·계약의 상태는 오른쪽 막대 쪽에서
+  // 확인한다.
+  function roomStatusRowMeta(room){
     const effStatus = effectiveRoomStatus(room);
     const roomOverdue = roomHasOverdueResident(room);
-    const rowStatusLabel = roomOverdue ? '연체중' : effStatus;
-    const rowMeta = roomOverdue ? { fg:'var(--st-hold)', bg:'var(--st-hold-bg)' } : statusMeta(effStatus);
-    appendRow(rowMeta,
+    const label = roomOverdue ? '연체중' : effStatus;
+    const meta = roomOverdue ? { fg:'var(--st-hold)', bg:'var(--st-hold-bg)' } : statusMeta(effStatus);
+    return { meta, label };
+  }
+  function appendEmptyRoomRow(room){
+    const { meta, label } = roomStatusRowMeta(room);
+    appendRow(meta,
       `<span class="rm">${esc(room.number)}</span>
-       <span class="nm" style="color:${rowMeta.fg};font-weight:700;"><span class="tl-status-dot" style="background:${rowMeta.fg}"></span>${esc(rowStatusLabel)}</span>`,
+       <span class="nm" style="color:${meta.fg};font-weight:700;"><span class="tl-status-dot" style="background:${meta.fg}"></span>${esc(label)}</span>`,
       [], null);
   }
   // 계약/입실자/과거 퇴실자 세 가지 출처를 전부 {range, meta, name, memo, room}로 통일해서 다루고,
@@ -2846,11 +2853,16 @@ function renderTimelineSection(branch){
     // 못 찾으면 계약 데이터의 입실자/계약자명만으로 표시한다.
     let matched = DB.residents.find(p=>p.sourceContractId===c.id) || null;
     if(!matched){
-      matched = DB.residents.find(p=>{
+      const candidates = DB.residents.filter(p=>{
         if(!group.roomIds.has(p.roomId) || !p.moveIn) return false;
         const pOut = p.moveOut || '9999-12-31';
         return p.moveIn <= range.end && pOut >= range.start;
-      }) || null;
+      });
+      // 2인실처럼 같은 기간에 겹치는 입실자가 둘 이상이면, 날짜만으로는 이 계약이 누구 것인지
+      // 알 수 없다 — 계약서에 적힌 이름과 일치하는 실입실자를 우선 찾아 정확히 짚어낸다.
+      const declaredName = String(c.resident || c.contractor || '').trim();
+      matched = (declaredName && candidates.find(p=> p.name===declaredName || p.actualResidentName===declaredName))
+        || candidates[0] || null;
     }
     const today = todayISO();
     let meta;
@@ -2982,17 +2994,12 @@ function renderTimelineSection(branch){
     if(entries.length===0){ appendEmptyRoomRow(primaryRoom); return; }
 
     // 같은 호실의 여러 항목(계약 갱신, 입실자 교체 등)은 한 행 안에 막대 여러 개로 이어 붙인다.
-    // 라벨의 상태 색은 "오늘"에 걸쳐 있는 항목을 우선 쓰고, 없으면 가장 가까운 미래 항목,
-    // 그것도 없으면(전부 과거) 가장 최근 항목을 쓴다.
-    const today = todayISO();
-    const labelEntry = entries.find(e=> e.range.start<=today && e.range.end>=today)
-      || entries.find(e=> e.range.start>today)
-      || entries[entries.length-1];
     const bars = entries.map(e=> buildTimelineBar(e));
+    const { meta, label } = roomStatusRowMeta(primaryRoom);
 
-    appendRow(labelEntry.meta,
+    appendRow(meta,
       `<span class="rm">${esc(group.number)}</span>
-       <span class="nm"><span class="tl-status-dot" style="background:${labelEntry.meta.fg}"></span>${esc(labelEntry.meta.key)}</span>`,
+       <span class="nm"><span class="tl-status-dot" style="background:${meta.fg}"></span>${esc(label)}</span>`,
       bars,
       ()=> scrollToRoomCard(primaryRoom)
     );
