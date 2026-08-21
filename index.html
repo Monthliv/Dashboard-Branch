@@ -2661,23 +2661,12 @@ function renderResidentEditCard(p, isSecondary, isDraft, room){
   if(p.firstSaveDone){
     const btnCol = document.createElement('div');
     btnCol.style.cssText = 'display:flex;gap:6px;align-items:flex-end;padding-bottom:1px;';
-    const scheduledBtn = document.createElement('button');
-    scheduledBtn.className = 'btn small' + (p.scheduledToLeave ? ' primary' : '');
-    scheduledBtn.textContent = '퇴실예정';
-    scheduledBtn.title = '체크해두면 퇴실예정일이 지났을 때 자동으로 퇴실 처리됩니다';
-    scheduledBtn.onclick = ()=>{ p.scheduledToLeave = !p.scheduledToLeave; maybeSave(); render(); };
     const leaveBtn = document.createElement('button');
     leaveBtn.className = 'btn small danger';
     leaveBtn.textContent = '퇴실';
-    leaveBtn.title = '지금(오늘 날짜)로 즉시 퇴실 처리 (정보는 히스토리로 이동하고 자리가 비워집니다)';
-    leaveBtn.onclick = ()=>{
-      const today = todayISO();
-      showConfirm(`${p.name || '이 입실자'}를 오늘(${today}) 날짜로 퇴실 처리할까요?\n정보는 히스토리로 이동되고, 이 자리에 새 입실자를 등록할 수 있게 됩니다.`, ()=>{
-        moveResidentToHistory(p, today);
-        scheduleSave(); render();
-      });
-    };
-    btnCol.appendChild(scheduledBtn); btnCol.appendChild(leaveBtn);
+    leaveBtn.title = '퇴실 유형을 선택해 처리합니다';
+    leaveBtn.onclick = ()=> showLeaveChoiceModal(p, room);
+    btnCol.appendChild(leaveBtn);
     outDateRow.appendChild(btnCol);
   }
   card.appendChild(outDateRow);
