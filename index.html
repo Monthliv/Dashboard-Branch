@@ -1811,6 +1811,22 @@ function occupiesRoom(p){
 function roomHasOverdueResident(room){
   return DB.residents.some(p => p.roomId===room.id && isOverdue(p));
 }
+// 만기/중도 퇴실 예약(아직 실제로 퇴실 처리되진 않은 미래 날짜)과 실제 퇴실 처리(당일퇴실,
+// 또는 예약일이 지나 처리되는 경우) 둘 다 이 방이 앞으로 비게 될 예정이면 퇴실청소 날짜를
+// 같은 방식으로 미리 표시해준다.
+function flagUpcomingCleaning(room, cleaningBaseDate){
+  room.needsCleaning = true;
+  room.needsRetouch = false;
+  room.needsExtraCleaning = false;
+  room.maintenanceDate = nextMonWedFri(cleaningBaseDate);
+  room.maintenanceMemo = '';
+}
+// 이 입실자(excludeId)가 빠지고 나서도 그 방에 남아있는 재실/입실예정 입실자가 있는지 확인한다.
+// roomHasActiveResident와 달리, 아직 DB.residents에서 빠지지 않은(=아직 퇴실 예약 상태인)
+// 입실자 본인은 셈에서 제외해야 "이 사람이 나가면 방이 비는지"를 정확히 판단할 수 있다.
+function roomWouldBeVacantExcept(room, excludeId){
+  return !DB.residents.some(x=> x.roomId===room.id && x.id!==excludeId && occupiesRoom(x));
+}
 function moveResidentToHistory(p, moveOutOverride){
   logChange(`${p.name || '입실자'} 퇴실 처리`);
   const historyEntry = {
@@ -1842,11 +1858,7 @@ function moveResidentToHistory(p, moveOutOverride){
     if(!STATUS_LIST_MANUAL.includes(room.saleStatus)){
       room.saleStatus = '공실';
     }
-    room.needsCleaning = true;
-    room.needsRetouch = false;
-    room.needsExtraCleaning = false;
-    room.maintenanceDate = nextMonWedFri(todayISO());
-    room.maintenanceMemo = '';
+    flagUpcomingCleaning(room, todayISO());
   }
 }
 function restoreFromHistory(h){
@@ -5757,6 +5769,7 @@ function showLeaveChoiceModal(p, room){
           moveResidentToHistory(p, p.moveOut);
         } else {
           p.scheduledToLeave = true;
+          if(room && roomWouldBeVacantExcept(room, p.id)) flagUpcomingCleaning(room, p.moveOut);
           logChange(`${room ? room.number + '호 ' : ''}"${p.name}" 만기퇴실 예약 (${p.moveOut})`);
         }
         scheduleSave();
@@ -5817,6 +5830,7 @@ function showLeaveChoiceModal(p, room){
       if(chosen > today){
         p.moveOut = chosen;
         p.scheduledToLeave = true;
+        if(room && roomWouldBeVacantExcept(room, p.id)) flagUpcomingCleaning(room, chosen);
         logChange(`${room ? room.number + '호 ' : ''}"${p.name}" 중도퇴실 예약 (${chosen})`);
         scheduleSave();
         close(); render();
