@@ -2038,7 +2038,7 @@ function renderRoomCard(room, sectionStatus){
     const parts = [];
     if(room.reservationName) parts.push(room.reservationName);
     if(room.reservationPhone) parts.push(room.reservationPhone);
-    if(room.reservationMoveIn) parts.push(`입실예정 ${room.reservationMoveIn}`);
+    if(room.reservationMoveIn) parts.push(`입실예정 ${room.reservationMoveIn}${room.reservationMoveOut ? '~'+room.reservationMoveOut : ''}`);
     if(room.reservationMemo) parts.push(room.reservationMemo);
     const chip = document.createElement('div');
     chip.className = 'rc-note-chip';
@@ -2292,7 +2292,7 @@ function renderRoomEditForm(room){
     const turningOn = !room.reserved;
     room.reserved = turningOn;
     if(!turningOn){
-      room.reservationName=''; room.reservationPhone=''; room.reservationMoveIn=''; room.reservationMemo='';
+      room.reservationName=''; room.reservationPhone=''; room.reservationMoveIn=''; room.reservationMoveOut=''; room.reservationMemo='';
     }
     logChange(`${room.number}호 예약 ${turningOn?'설정':'해제'}`);
     render();
@@ -2324,6 +2324,15 @@ function renderRoomEditForm(room){
       room.reservationMoveIn = moveInInput.value;
     });
     wrap.appendChild(labeled('입실예정일', moveInInput));
+
+    const moveOutInput = document.createElement('input');
+    moveOutInput.type = 'date';
+    moveOutInput.value = room.reservationMoveOut || '';
+    moveOutInput.addEventListener('change', ()=>{
+      logChange(`${room.number}호 예약 퇴실예정일 변경: ${moveOutInput.value || '미정'}`);
+      room.reservationMoveOut = moveOutInput.value;
+    });
+    wrap.appendChild(labeled('퇴실예정일', moveOutInput));
 
     const reserveMemoInput = document.createElement('textarea');
     reserveMemoInput.rows = 2;
