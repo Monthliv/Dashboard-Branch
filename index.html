@@ -1150,21 +1150,36 @@ function buildGlobalSearchIndex(){
     if(!room) return null;
     const branch = DB.branches.find(b=>b.id===room.branchId);
     if(!branch || !hasBranchAccess(branch.id)) return null;
-    return { p, room, branch, isHistory:false };
+    return { kind:'resident', p, room, branch, isHistory:false };
   }).filter(Boolean);
   const past = DB.residentHistory.map(h=>{
     const room = DB.rooms.find(r=>r.id===h.roomId);
     if(!room) return null;
     const branch = DB.branches.find(b=>b.id===room.branchId);
     if(!branch || !hasBranchAccess(branch.id)) return null;
-    return { p:h, room, branch, isHistory:true };
+    return { kind:'resident', p:h, room, branch, isHistory:true };
   }).filter(Boolean);
-  return [...current, ...past];
+  // 예약 중인 호실(방 카드의 "예약" 정보)도 검색 대상에 포함한다 — 입실자가 아니라 방 자체에
+  // 붙어있는 정보라 별도 종류(kind:'reservation')로 다룬다.
+  const reservations = DB.rooms.filter(r=>r.reserved).map(room=>{
+    const branch = DB.branches.find(b=>b.id===room.branchId);
+    if(!branch || !hasBranchAccess(branch.id)) return null;
+    return { kind:'reservation', room, branch };
+  }).filter(Boolean);
+  return [...current, ...past, ...reservations];
 }
 function globalSearchHaystack(item){
+  if(item.kind === 'reservation'){
+    const { room, branch } = item;
+    const phoneDigits = (room.reservationPhone||'').replace(/\D/g,'');
+    return [room.reservationName, room.reservationPhone, phoneDigits, room.number, branch.name, branch.shortName]
+      .filter(Boolean).join(' ').toLowerCase();
+  }
   const { p, room, branch } = item;
   const phoneDigits = (p.phone||'').replace(/\D/g,'');
-  return [p.name, p.phone, phoneDigits, p.carNumber, room.number, branch.name, branch.shortName]
+  // 대리결제인 경우 계약자 정보뿐 아니라 실입실자 이름/연락처로도 찾을 수 있어야 한다.
+  const actualPhoneDigits = (p.actualResidentPhone||'').replace(/\D/g,'');
+  return [p.name, p.phone, phoneDigits, p.actualResidentName, p.actualResidentPhone, actualPhoneDigits, p.carNumber, room.number, branch.name, branch.shortName]
     .filter(Boolean).join(' ').toLowerCase();
 }
 function runGlobalSearch(query){
@@ -1183,10 +1198,31 @@ function renderGlobalSearchResults(query){
   if(results.length===0){
     box.appendChild(el('div', 'header-search-empty', '검색 결과가 없습니다.'));
   } else {
-    results.forEach(({ p, room, branch, isHistory })=>{
+    results.forEach((item)=>{
+      const { room, branch } = item;
       const row = document.createElement('div');
       row.className = 'header-search-item';
 
+      if(item.kind === 'reservation'){
+        const top = document.createElement('div'); top.className = 'hs-top';
+        top.appendChild(el('span', null, maskViewerName(room.reservationName) || '예약자명 미입력'));
+        top.appendChild(el('span', 'badge muted', '예약'));
+        row.appendChild(top);
+        const periodText = room.reservationMoveIn ? ` (입실예정 ${room.reservationMoveIn}${room.reservationMoveOut ? '~'+room.reservationMoveOut : ''})` : '';
+        row.appendChild(el('div', 'hs-sub', `${room.reservationPhone || '연락처 미입력'} · ${branchLabel(branch)} ${room.number}호${periodText}`));
+        row.addEventListener('click', ()=>{
+          UI.view = 'branch';
+          UI.branchId = branch.id;
+          scrollToRoomCard(room);
+          const input = document.getElementById('globalSearchInput');
+          if(input) input.value = '';
+          box.style.display = 'none'; box.innerHTML = '';
+        });
+        box.appendChild(row);
+        return;
+      }
+
+      const { p, isHistory } = item;
       const top = document.createElement('div'); top.className = 'hs-top';
       top.appendChild(el('span', null, maskViewerName(p.name) || '이름 미입력'));
       const isUpcoming = !isHistory && computeResStatus(p) === '입실예정';
@@ -1196,6 +1232,9 @@ function renderGlobalSearchResults(query){
 
       const periodText = isHistory ? ` (${p.moveIn || '?'} ~ ${p.moveOut || '?'})` : '';
       row.appendChild(el('div', 'hs-sub', `${p.phone || '연락처 미입력'} · ${branchLabel(branch)} ${room.number}호${periodText}`));
+      if(p.paymentProxy && (p.actualResidentName || p.actualResidentPhone)){
+        row.appendChild(el('div', 'hs-sub', `실입실자 ${maskViewerName(p.actualResidentName) || '-'} ${p.actualResidentPhone || '-'}`));
+      }
 
       row.addEventListener('click', ()=>{
         UI.view = 'branch';
