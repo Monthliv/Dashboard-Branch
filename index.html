@@ -692,6 +692,7 @@ const MAINT_KIND_META = {
   extra:   { label:'추가청소', bg:'#E1F5E9', fg:'#1F7A45' },
 };
 const MAINT_KIND_FIELD = { moveout:'needsCleaning', retouch:'needsRetouch', extra:'needsExtraCleaning' };
+const MAINT_DONE_LABEL = { moveout:'청소완료', retouch:'리터치완료', extra:'추가청소완료' };
 function roomMaintKind(room){
   if(room.needsRetouch) return 'retouch';
   if(room.needsExtraCleaning) return 'extra';
@@ -2061,6 +2062,12 @@ function renderRoomCard(room, sectionStatus){
     : '계약 이력 보기';
   contractBtn.onclick = ()=> showContractHistoryModal(room);
   header.querySelector('.rc-header-badges').prepend(contractBtn);
+  const cleanHistBtn = document.createElement('button');
+  cleanHistBtn.className = 'history-btn';
+  cleanHistBtn.textContent = '청소이력';
+  cleanHistBtn.title = '청소/리터치 완료 이력 보기';
+  cleanHistBtn.onclick = ()=> showCleaningHistoryModal(room);
+  header.querySelector('.rc-header-badges').prepend(cleanHistBtn);
   const pencil = document.createElement('button');
   pencil.className = 'iconbtn' + (roomEditOn ? ' active' : '');
   pencil.innerHTML = roomEditOn ? '&#10003;' : '&#9998;';
@@ -4053,6 +4060,64 @@ function showContractHistoryModal(room){
   document.body.appendChild(overlay);
 }
 
+function showCleaningHistoryModal(room){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  const box = document.createElement('div');
+  box.className = 'modal-box';
+  const close = ()=> overlay.remove();
+
+  function renderBody(){
+    box.innerHTML = '';
+    const hist = (room.cleaningHistory || []).slice().sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+    const title = el('div', 'modal-msg', `${room.number}호 청소 이력 (${hist.length}건)`, 'margin-bottom:10px;font-weight:700;');
+    box.appendChild(title);
+
+    if(hist.length===0){
+      box.appendChild(el('div', null, '등록된 청소 이력이 없습니다.', 'font-size:12.5px;color:var(--ink-soft);padding:12px 0;'));
+    } else {
+      const list = document.createElement('div');
+      hist.forEach(h=>{
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 4px;border-bottom:1px solid var(--line);font-size:12.5px;';
+        const left = document.createElement('span');
+        left.textContent = `${h.date || '-'}  ${h.label || '-'}`;
+        row.appendChild(left);
+        if(canEdit()){
+          const delBtn = document.createElement('button');
+          delBtn.type = 'button';
+          delBtn.className = 'iconbtn del';
+          delBtn.innerHTML = '&times;';
+          delBtn.title = '이 청소 이력 삭제';
+          delBtn.onclick = ()=>{
+            showConfirm(`"${h.date || '-'} ${h.label || ''}" 이력을 삭제할까요?`, ()=>{
+              room.cleaningHistory = (room.cleaningHistory || []).filter(x=>x.id!==h.id);
+              logChange(`${room.number}호 청소 이력(${h.date || '-'} ${h.label || ''}) 삭제`);
+              scheduleSave();
+              renderBody();
+            });
+          };
+          row.appendChild(delBtn);
+        }
+        list.appendChild(row);
+      });
+      box.appendChild(list);
+    }
+
+    const btnRow = document.createElement('div');
+    btnRow.className = 'modal-btn-row';
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'btn'; closeBtn.textContent = '닫기'; closeBtn.onclick = close;
+    btnRow.appendChild(closeBtn);
+    box.appendChild(btnRow);
+  }
+  renderBody();
+
+  overlay.addEventListener('click', (e)=>{ if(e.target===overlay) close(); });
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+}
+
 function toISODateStr(v){
   if(v == null || v==='') return '';
   if(v instanceof Date){
@@ -5345,9 +5410,14 @@ function completeCleaningEntry(room, type){
   const field = MAINT_KIND_FIELD[type];
   if(!field || !room[field]) return;
   const label = MAINT_KIND_META[type].label;
+  const doneLabel = MAINT_DONE_LABEL[type] || `${label}완료`;
+  const scheduledDate = room.maintenanceDate || '';
+  const memo = room.maintenanceMemo || '';
   room[field] = false;
   room.maintenanceDate = '';
   room.maintenanceMemo = '';
+  if(!Array.isArray(room.cleaningHistory)) room.cleaningHistory = [];
+  room.cleaningHistory.unshift({ id: uid('cl'), type, label: doneLabel, date: todayISO(), scheduledDate, memo });
   logChange(`${room.number}호 ${label} 완료 처리`);
   scheduleSave(); render();
 }
