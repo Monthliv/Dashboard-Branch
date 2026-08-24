@@ -410,6 +410,7 @@
   .cal-chip.moveout{ background:#FBEFD8; color:#8A5F14; }
   .cal-chip.retouch{ background:#E3E8FD; color:#2E3F9E; }
   .cal-chip.extra{ background:#E1F5E9; color:#1F7A45; }
+  .cal-chip.done{ opacity:0.55; }
 
   .table-scroll{ overflow-x:auto; }
   table.week-matrix{ table-layout:fixed; min-width:720px; }
@@ -5406,6 +5407,16 @@ function collectCleaningEntries(){
   return entries;
 }
 
+/* 청소 관리 주간표에 "완료" 플래그로 표시할, 이미 처리된 청소 이력(room.cleaningHistory) 목록. */
+function collectCleaningDoneEntries(){
+  const entries = [];
+  DB.rooms.filter(r=> hasBranchAccess(r.branchId) && Array.isArray(r.cleaningHistory) && r.cleaningHistory.length).forEach(r=>{
+    const branch = DB.branches.find(b=>b.id===r.branchId);
+    r.cleaningHistory.forEach(h=> entries.push({ type:h.type, branch, room:r, date:h.date, label:h.label }));
+  });
+  return entries;
+}
+
 function completeCleaningEntry(room, type){
   const field = MAINT_KIND_FIELD[type];
   if(!field || !room[field]) return;
@@ -5466,7 +5477,7 @@ function renderCleaningWeekMatrix(){
 
   const legend = document.createElement('div');
   legend.className = 'cal-legend';
-  legend.innerHTML = `<span class="cal-legend-item">클릭 시 계약/입실관리의 해당 지점으로 이동 · 해당 없는 항목은 표시하지 않음</span>`;
+  legend.innerHTML = `<span class="cal-legend-item">클릭 시 계약/입실관리의 해당 지점으로 이동 · 해당 없는 항목은 표시하지 않음 · 흐리게 표시된 항목은 완료 처리됨</span>`;
   box.appendChild(legend);
 
   const branches = allowedBranches();
@@ -5476,22 +5487,38 @@ function renderCleaningWeekMatrix(){
   }
 
   const entries = collectCleaningEntries().filter(e=> e.date && weekDates.includes(e.date));
-  const grid = new Map(); // branchId -> date -> {moveout:[room번호...], retouch:[...], extra:[...]}
+  const doneEntries = collectCleaningDoneEntries().filter(e=> e.date && weekDates.includes(e.date));
+  const grid = new Map(); // branchId -> date -> {moveout:[room번호...], retouch:[...], extra:[...], moveoutDone:[...], retouchDone:[...], extraDone:[...]}
+  function dayEntrySlot(dmap, date){
+    if(!dmap.has(date)) dmap.set(date, { moveout:[], retouch:[], extra:[], moveoutDone:[], retouchDone:[], extraDone:[] });
+    return dmap.get(date);
+  }
   entries.forEach(e=>{
     const bkey = e.branch ? e.branch.id : '__none__';
     if(!grid.has(bkey)) grid.set(bkey, new Map());
-    const dmap = grid.get(bkey);
-    if(!dmap.has(e.date)) dmap.set(e.date, { moveout:[], retouch:[], extra:[] });
-    dmap.get(e.date)[e.type].push(e.room.number);
+    dayEntrySlot(grid.get(bkey), e.date)[e.type].push(e.room.number);
+  });
+  doneEntries.forEach(e=>{
+    const bkey = e.branch ? e.branch.id : '__none__';
+    if(!grid.has(bkey)) grid.set(bkey, new Map());
+    dayEntrySlot(grid.get(bkey), e.date)[e.type+'Done'].push(e.room.number);
   });
 
   function chipsHtml(dayEntry, branchName, dateLabel){
-    return Object.keys(MAINT_KIND_META).filter(k=> dayEntry[k] && dayEntry[k].length).map(k=>{
+    const pending = Object.keys(MAINT_KIND_META).filter(k=> dayEntry[k] && dayEntry[k].length).map(k=>{
       const rooms = dayEntry[k];
       const roomsText = rooms.map(n=> n+'호').join(', ');
       const tip = `${branchName} · ${roomsText} · ${MAINT_KIND_META[k].label} · 청소예정일 ${dateLabel}`;
       return `<span class="cal-chip ${k}" title="${esc(tip)}">${MAINT_KIND_META[k].label}(${rooms.length})</span>`;
-    }).join('');
+    });
+    const done = Object.keys(MAINT_KIND_META).filter(k=> dayEntry[k+'Done'] && dayEntry[k+'Done'].length).map(k=>{
+      const rooms = dayEntry[k+'Done'];
+      const roomsText = rooms.map(n=> n+'호').join(', ');
+      const doneLabel = MAINT_DONE_LABEL[k] || `${MAINT_KIND_META[k].label}완료`;
+      const tip = `${branchName} · ${roomsText} · ${doneLabel} · ${dateLabel}`;
+      return `<span class="cal-chip ${k} done" title="${esc(tip)}">${doneLabel}(${rooms.length})</span>`;
+    });
+    return pending.concat(done).join('');
   }
 
   const DOW = ['월','화','수','목','금','토','일'];
