@@ -620,6 +620,11 @@ function nextMonWedFri(fromDateStr){
   while(![1,3,5].includes(d.getDay())) d.setDate(d.getDate()+1);
   return d.toISOString().slice(0,10);
 }
+function prevMonWedFri(fromDateStr){
+  const d = fromDateStr ? new Date(fromDateStr) : new Date();
+  while(![1,3,5].includes(d.getDay())) d.setDate(d.getDate()-1);
+  return d.toISOString().slice(0,10);
+}
 function formatWon(n){ n = Number(n)||0; return n.toLocaleString('ko-KR') + '원'; }
 function branchLabel(branch){ return (branch && branch.shortName && branch.shortName.trim()) ? branch.shortName : (branch ? branch.name : ''); }
 function syncBranchSelectOption(branch){
@@ -694,6 +699,7 @@ const MAINT_KIND_META = {
 };
 const MAINT_KIND_FIELD = { moveout:'needsCleaning', retouch:'needsRetouch', extra:'needsExtraCleaning' };
 const MAINT_DONE_LABEL = { moveout:'청소완료', retouch:'리터치완료', extra:'추가청소완료' };
+const CLEANING_HISTORY_MAX = 5;
 function roomMaintKind(room){
   if(room.needsRetouch) return 'retouch';
   if(room.needsExtraCleaning) return 'extra';
@@ -5388,8 +5394,10 @@ function renderCleaningView(){
 /* 청소 관리 대시보드(상단 카드·주간표)가 공유하는 단일 데이터 소스.
    퇴실청소: 계약만기일 등으로 퇴실이 확정된(scheduledToLeave) 입실자는, 청소 인력이
    나오는 월/수/금 중 퇴실일 이후 가장 빠른 날짜를 청소일로 잡는다(예: 8/9(일) 만기 →
-   8/10(월)). 이미 퇴실청소가 필요로 표시된 호실은 그 날짜를 그대로 쓴다. 리터치/추가청소는
-   수동 관리이며 예정일을 입력하지 않았으면 date를 null로 둔다(카드 목록엔 "오늘"로
+   8/10(월)). 이미 퇴실청소가 필요로 표시된 호실은 그 날짜를 그대로 쓴다. 리터치는
+   autoFlagDueRetouch()가 조건에 맞으면 자동으로 needsRetouch/maintenanceDate를 걸어주므로
+   여기서는 그렇게 이미 걸린 값을 그대로 읽기만 한다(필요하면 수동으로도 계속 켤 수 있다).
+   추가청소는 수동 관리이며 예정일을 입력하지 않았으면 date를 null로 둔다(카드 목록엔 "오늘"로
    표시되지만, 날짜가 없어 주간표에는 올릴 수 없음 — 소비하는 쪽에서 구분해서 처리한다). */
 function collectCleaningEntries(){
   const entries = [];
@@ -5405,6 +5413,35 @@ function collectCleaningEntries(){
     entries.push({ type:'moveout', branch, room, date: nextMonWedFri(p.moveOut) });
   });
   return entries;
+}
+
+// 리터치 자동 예약 기준일(입실예정일 기준 며칠 이내에 청소 이력이 없으면 리터치가 필요한지).
+const RETOUCH_RECENT_CLEAN_DAYS = 10;
+function roomCleanedWithin(room, beforeDateStr, windowDays){
+  const from = addDaysISO(beforeDateStr, -windowDays);
+  return (room.cleaningHistory || []).some(h=> h.date && h.date >= from && h.date < beforeDateStr);
+}
+/* 리터치 자동 예약: 지금 아무도 살고 있지 않고(이용중인 입실자 없음), 입실예정자가 있는 방인데
+   그 입실예정일 기준 RETOUCH_RECENT_CLEAN_DAYS일 이내에 청소(퇴실청소/리터치/추가청소 무엇이든)
+   이력이 없으면, 입실예정일 전 가장 가까운 월/수/금으로 리터치를 자동으로 건다. 예: 입실예정일이
+   10/11이고 직전 퇴실청소가 9/30(11일 전이라 기준일 밖)이면 10/9(가장 가까운 금)에 리터치.
+   이미 청소/리터치/추가청소가 걸려 있는 방, 공실 방은 건드리지 않는다(수동 관리 유지). */
+function autoFlagDueRetouch(){
+  let changed = false;
+  DB.rooms.forEach(room=>{
+    if(roomMaintKind(room)) return;
+    if(effectiveRoomStatus(room) === '공실') return;
+    if(DB.residents.some(p=> p.roomId===room.id && isCurrentlyResiding(p))) return;
+    const upcoming = DB.residents.filter(p=> p.roomId===room.id && isUpcoming(p))
+      .sort((a,b)=> a.moveIn.localeCompare(b.moveIn))[0];
+    if(!upcoming) return;
+    if(roomCleanedWithin(room, upcoming.moveIn, RETOUCH_RECENT_CLEAN_DAYS)) return;
+    room.needsRetouch = true;
+    room.maintenanceDate = prevMonWedFri(addDaysISO(upcoming.moveIn, -1));
+    room.maintenanceMemo = '';
+    changed = true;
+  });
+  if(changed) scheduleSave();
 }
 
 /* 청소 관리 주간표에 "완료" 플래그로 표시할, 이미 처리된 청소 이력(room.cleaningHistory) 목록. */
@@ -5429,6 +5466,7 @@ function completeCleaningEntry(room, type){
   room.maintenanceMemo = '';
   if(!Array.isArray(room.cleaningHistory)) room.cleaningHistory = [];
   room.cleaningHistory.unshift({ id: uid('cl'), type, label: doneLabel, date: todayISO(), scheduledDate, memo });
+  room.cleaningHistory = room.cleaningHistory.slice(0, CLEANING_HISTORY_MAX);
   logChange(`${room.number}호 ${label} 완료 처리`);
   scheduleSave(); render();
 }
@@ -6145,6 +6183,7 @@ async function initApp(user){
   applyLoadedCore(DB);
   if(canEdit()) processScheduledLeaves();
   if(canEdit()) processPendingRoomMoves();
+  if(canEdit()) autoFlagDueRetouch();
   let statusFixed = false;
   DB.rooms.forEach(room=>{
     if(!roomHasActiveResident(room) && !STATUS_LIST_MANUAL.includes(room.saleStatus)){
@@ -6439,9 +6478,9 @@ firebase.auth().onAuthStateChanged(user=>{
   }
 });
 // PC를 계속 켜둔 채 로그인 화면을 새로고침 없이 며칠씩 열어두면 initApp()이 다시 실행되지
-// 않아 날짜가 바뀌어도 자동 백업이 안 생긴다. 그래서 별도로 주기적으로(1시간마다) 오늘
-// 백업이 있는지 확인해서, 탭을 계속 켜둔 세션에서도 날짜가 바뀌면 자동으로 새 백업을 만든다.
-setInterval(()=>{ if(canEdit()) maybeCreateDailyBackup(); }, 60*60*1000);
+// 않아 날짜가 바뀌어도 자동 백업/리터치 자동 예약이 안 갱신된다. 그래서 별도로 주기적으로
+// (1시간마다) 오늘 백업이 있는지, 새로 리터치 예약 대상이 된 방이 있는지 확인한다.
+setInterval(()=>{ if(canEdit()){ maybeCreateDailyBackup(); autoFlagDueRetouch(); } }, 60*60*1000);
 
 // 관제센터 특성상 PC를 끄지 않고 탭을 며칠씩 열어두는 경우가 많다. 예전에는 그렇게 오래 열린
 // 세션이 로그인 시점의(=시간이 지날수록 오래된) 데이터를 계속 들고 있다가 저장 시 다른 곳의
