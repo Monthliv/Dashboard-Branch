@@ -4566,10 +4566,7 @@ function renderStatsView(){
 
   const branchSection = document.createElement('div');
   branchSection.className = 'stat-section';
-  branchSection.innerHTML = `<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px;">
-    <h3 style="margin:0;font-size:16px;">지점별 현황</h3>
-    <span style="font-size:13px;color:var(--ink-soft);font-weight:600;">${localDateKey()}</span>
-  </div>`;
+  branchSection.innerHTML = `<h3 style="margin:0 0 12px;font-size:19px;">지점별 현황 (${localDateKey().replace(/-/g,'/')})</h3>`;
   const table = document.createElement('table');
   table.className = 'branch-table';
   table.innerHTML = `<thead><tr><th>지점</th><th>호실수</th><th>이용중</th><th>판매중</th><th>입실율</th><th>예약</th><th>판매보류</th></tr></thead>`;
