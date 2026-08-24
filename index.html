@@ -717,9 +717,24 @@ function roomCardMaintKind(room){
   // 청소/리터치 예정일이 지나면 방 카드(입실자 카드)에서는 배지를 더 이상 노출하지 않는다.
   // 단, 원본 데이터(needsCleaning 등)는 그대로 두어 청소 관리 화면에는 계속 기록이 남는다.
   const kind = roomMaintKind(room);
-  if(!kind) return null;
-  if(room.maintenanceDate && room.maintenanceDate < todayISO()) return null;
-  return kind;
+  if(kind){
+    if(room.maintenanceDate && room.maintenanceDate < todayISO()) return null;
+    return kind;
+  }
+  // needsCleaning 플래그가 아직 안 걸려 있어도(예: 새 계약자를 미리 등록하며 기존 입실자만
+  // 퇴실확정으로 표시해 둔 경우처럼 flagUpcomingCleaning이 호출되지 않는 경로), 청소관리
+  // 화면(collectCleaningEntries)과 같은 기준으로 방 카드에도 청소예정일 배지를 미리 보여준다.
+  if(roomUpcomingLeaveDate(room)) return 'moveout';
+  return null;
+}
+function roomUpcomingLeaveDate(room){
+  // 청소관리 화면(collectCleaningEntries)의 예비 판정과 동일한 기준: room.needsCleaning이
+  // 아직 안 걸려 있어도, 퇴실확정(scheduledToLeave)된 입실자가 있으면 그 퇴실일 기준으로
+  // 청소예정일을 미리 계산해 보여준다(방이 곧 완전히 빌지 여부와 무관하게 동일하게 취급).
+  const leavers = DB.residents.filter(p=> p.roomId===room.id && p.scheduledToLeave && p.moveOut);
+  if(leavers.length===0) return null;
+  const earliest = leavers.reduce((a,b)=> a.moveOut < b.moveOut ? a : b);
+  return nextMonWedFri(earliest.moveOut);
 }
 
 function seedState(){
@@ -2124,7 +2139,8 @@ function renderRoomCard(room, sectionStatus){
   const atCapacity = (residents.length + (draft?1:0)) >= cap;
   const roomEditOn = !!UI.roomEditMode[room.id];
 
-  const maintDateSuffix = room.maintenanceDate ? ` · ${room.maintenanceDate.slice(5)}` : '';
+  const maintDateForBadge = room.maintenanceDate || roomUpcomingLeaveDate(room);
+  const maintDateSuffix = maintDateForBadge ? ` · ${maintDateForBadge.slice(5)}` : '';
   const reserveMeta = statusMeta('예약');
   const isDouble = roomHasDoubleOccupancy(room);
   const priceBranch = DB.branches.find(b=>b.id===room.branchId);
