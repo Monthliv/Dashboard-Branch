@@ -1892,7 +1892,9 @@ function roomHasVacatingResident(room){
   return DB.residents.some(p=>p.roomId===room.id && (p.scheduledToLeave || p.pendingRoomMove));
 }
 function roomHasUpcomingResident(room){
-  return DB.residents.some(p=>p.roomId===room.id && computeResStatus(p)==='입실예정');
+  // 이미 등록된 입실예정자가 있어도, 그 사람이 단기 이용 후 퇴실확정된 상태라면 "다음 예약자"를
+  // 미리 등록할 수 있어야 하므로, 퇴실확정된 입실예정자는 여기서 제외한다.
+  return DB.residents.some(p=>p.roomId===room.id && computeResStatus(p)==='입실예정' && !p.scheduledToLeave);
 }
 function addUpcomingResidentToRoom(room){
   if(UI.draftResident[room.id]){
