@@ -637,11 +637,6 @@ function syncBranchSelectOption(branch){
 const STATUS_LIST = ['이용중','이용중판매','단기판매','판매중','퇴실확정','공실','판매보류'];
 const STATUS_LIST_MANUAL = STATUS_LIST.filter(s => !['이용중','이용중판매','단기판매','퇴실확정'].includes(s));
 const STATUS_LIST_STATS = STATUS_LIST.filter(s => !['이용중판매','단기판매'].includes(s));
-const SHORT_SALE_SOON_DAYS = 9;
-function shortSaleMoveInSoon(room){
-  return DB.residents.some(p=> p.roomId===room.id && isUpcoming(p)
-    && Math.round((new Date(p.moveIn) - new Date(todayISO())) / 86400000) <= SHORT_SALE_SOON_DAYS);
-}
 /* 탭 노출 규칙: 이용중=입실자가 있으면 무조건, 판매중=판매중 상태면 무조건이라 이용중판매/단기판매는
    두 탭 모두에 걸친다. 호실 카드 배지에는 이용중판매/단기판매를 그대로 보여주고(플래그는 유지),
    탭 목록에는 별도 탭을 만들지 않는다. */
@@ -2120,8 +2115,8 @@ function effectiveRoomStatus(room){
   // 실제로 거주 중인 입실자가 있으면 기본은 "이용중"입니다. 다만 그 입실자가 퇴실 예정(scheduledToLeave)
   // 상태이고 판매 상태가 "판매중"이면 다음 입실자를 미리 구하는 중이라는 뜻이므로 "이용중판매"로
   // 표시합니다(이용중/판매중 탭 모두에 노출, roomTabs 참고). 미래 입실예정자만 있는 상태에서
-  // 판매중으로 지정해두면 "단기판매"로 표시되며, 입실예정일이 SHORT_SALE_SOON_DAYS일 이내로
-  // 다가오면 실제로 "이용중"으로 전환됩니다.
+  // 판매중으로 지정해두면 입실예정일이 임박했더라도(단기판매) 계속 "판매중" 집계(이용중/판매중
+  // 탭 모두에 노출)에 포함됩니다 — 아직 실제로 입실 전이라 판매중 상태를 그대로 반영합니다.
   if(roomHasActiveResident(room)){
     const hasCurrent = DB.residents.some(p => p.roomId===room.id && isCurrentlyResiding(p));
     if(hasCurrent){
@@ -2129,7 +2124,7 @@ function effectiveRoomStatus(room){
       return '이용중';
     }
     if(room.saleStatus !== '판매중') return '이용중';
-    return shortSaleMoveInSoon(room) ? '이용중' : '단기판매';
+    return '단기판매';
   }
   return room.saleStatus;
 }
