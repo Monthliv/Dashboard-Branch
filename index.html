@@ -727,14 +727,21 @@ function roomCardMaintKind(room){
   if(roomUpcomingLeaveDate(room)) return 'moveout';
   return null;
 }
+function roomEarliestLeaverMoveOut(room){
+  const leavers = DB.residents.filter(p=> p.roomId===room.id && p.scheduledToLeave && p.moveOut);
+  if(leavers.length===0) return null;
+  return leavers.reduce((a,b)=> a.moveOut < b.moveOut ? a : b).moveOut;
+}
 function roomUpcomingLeaveDate(room){
   // 청소관리 화면(collectCleaningEntries)의 예비 판정과 동일한 기준: room.needsCleaning이
   // 아직 안 걸려 있어도, 퇴실확정(scheduledToLeave)된 입실자가 있으면 그 퇴실일 기준으로
   // 청소예정일을 미리 계산해 보여준다(방이 곧 완전히 빌지 여부와 무관하게 동일하게 취급).
-  const leavers = DB.residents.filter(p=> p.roomId===room.id && p.scheduledToLeave && p.moveOut);
-  if(leavers.length===0) return null;
-  const earliest = leavers.reduce((a,b)=> a.moveOut < b.moveOut ? a : b);
-  return nextMonWedFri(earliest.moveOut);
+  const raw = roomEarliestLeaverMoveOut(room);
+  if(!raw) return null;
+  // 방 카드에서 "퇴실청소" 칩을 눌러 이 제안을 취소한 적이 있다면, 같은 퇴실일 기준으로는
+  // 다시 자동으로 켜지 않는다(퇴실일이 바뀌면 새 정보이므로 다시 제안한다).
+  if(room.cleaningDismissedMoveOut && room.cleaningDismissedMoveOut === raw) return null;
+  return nextMonWedFri(raw);
 }
 
 function seedState(){
@@ -2485,17 +2492,27 @@ function renderRoomEditForm(room){
   chips.className = 'maint-chips';
   Object.keys(MAINT_KIND_META).forEach(kind=>{
     const field = MAINT_KIND_FIELD[kind];
+    // needsCleaning 등 원본 필드뿐 아니라, 퇴실확정 입실자로 인해 배지가 자동 표시된 상태(fallback)도
+    // "켜짐"으로 보여줘야 클릭했을 때 의도대로 꺼짐(취소) 처리가 된다.
+    const isOn = roomCardMaintKind(room) === kind;
     const chip = document.createElement('span');
-    chip.className = 'flagchip ' + kind + (room[field] ? ' on' : '');
+    chip.className = 'flagchip ' + kind + (isOn ? ' on' : '');
     chip.textContent = MAINT_KIND_META[kind].label;
     chip.onclick = ()=>{
-      const turningOn = !room[field];
+      const turningOn = !isOn;
       Object.values(MAINT_KIND_FIELD).forEach(f=> room[f]=false);
       room[field] = turningOn;
       if(turningOn){
         if(!room.maintenanceDate) room.maintenanceDate = nextMonWedFri(todayISO());
+        room.cleaningDismissedMoveOut = '';
       } else {
         room.maintenanceDate=''; room.maintenanceMemo='';
+        // moveout을 껐는데도 아직 퇴실확정된 입실자가 남아있으면, 다음 렌더에서 fallback이
+        // 같은 배지를 곧바로 다시 켜버린다. 그 입실자의 퇴실일을 "취소함"으로 기억해서,
+        // 그 퇴실일이 바뀌기 전까지는 배지가 다시 뜨지 않게 한다.
+        if(kind==='moveout'){
+          room.cleaningDismissedMoveOut = roomEarliestLeaverMoveOut(room) || '';
+        }
       }
       logChange(`${room.number}호 ${MAINT_KIND_META[kind].label} ${turningOn?'설정':'해제'}`);
       render();
