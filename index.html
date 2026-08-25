@@ -637,12 +637,21 @@ function syncBranchSelectOption(branch){
 const STATUS_LIST = ['이용중','이용중판매','단기판매','판매중','퇴실확정','공실','판매보류'];
 const STATUS_LIST_MANUAL = STATUS_LIST.filter(s => !['이용중','이용중판매','단기판매','퇴실확정'].includes(s));
 const STATUS_LIST_STATS = STATUS_LIST.filter(s => !['이용중판매','단기판매'].includes(s));
+function roomBranch(room){ return DB.branches.find(b=>b.id===room.branchId); }
+// 제주점만 "이용중" 집계 기준이 다르다: 당일 기준 실제 재실 입실자가 있는 방만 이용중으로 센다.
+// 다른 지점은 입실예정자만 있어도(아직 입실 전) 이용중으로 잡는 기존 기준을 그대로 쓴다.
+function isJejuBranch(branch){ return !!branch && cleanKeyLoose(branch.name).includes('제주'); }
 /* 탭 노출 규칙: 이용중=입실자가 있으면 무조건, 판매중=판매중 상태면 무조건이라 이용중판매/단기판매는
    두 탭 모두에 걸친다. 호실 카드 배지에는 이용중판매/단기판매를 그대로 보여주고(플래그는 유지),
    탭 목록에는 별도 탭을 만들지 않는다. */
 function roomTabs(room){
   const s = effectiveRoomStatus(room);
-  if(s === '이용중판매' || s === '단기판매') return ['이용중','판매중'];
+  if(s === '이용중판매') return ['이용중','판매중'];
+  if(s === '단기판매'){
+    // 단기판매는 아직 실제 재실자가 없는(입실예정자만 있는) 상태라, 제주점은 이용중에 넣지 않는다.
+    if(isJejuBranch(roomBranch(room))) return ['판매중'];
+    return ['이용중','판매중'];
+  }
   return [s];
 }
 const RESIDENT_STATUS_LIST = ['입실중','입실예정','퇴실확정'];
@@ -2117,13 +2126,15 @@ function effectiveRoomStatus(room){
   // 표시합니다(이용중/판매중 탭 모두에 노출, roomTabs 참고). 미래 입실예정자만 있는 상태에서
   // 판매중으로 지정해두면 입실예정일이 임박했더라도(단기판매) 계속 "판매중" 집계(이용중/판매중
   // 탭 모두에 노출)에 포함됩니다 — 아직 실제로 입실 전이라 판매중 상태를 그대로 반영합니다.
+  // 단, 제주점은 예외입니다: 당일 기준 실제 재실 입실자가 없으면(입실예정자만 있어도) "이용중"으로
+  // 자동 전환하지 않고 지정해둔 판매 상태를 그대로 보여줍니다.
   if(roomHasActiveResident(room)){
     const hasCurrent = DB.residents.some(p => p.roomId===room.id && isCurrentlyResiding(p));
     if(hasCurrent){
       if(room.saleStatus === '판매중' && roomHasScheduledLeaveResident(room)) return '이용중판매';
       return '이용중';
     }
-    if(room.saleStatus !== '판매중') return '이용중';
+    if(room.saleStatus !== '판매중') return isJejuBranch(roomBranch(room)) ? room.saleStatus : '이용중';
     return '단기판매';
   }
   return room.saleStatus;
