@@ -5576,11 +5576,13 @@ function collectCleaningEntries(){
     const kind = roomMaintKind(r);
     entries.push({ type:kind, branch, room:r, date: r.maintenanceDate || (kind==='moveout' ? todayISO() : null) });
   });
-  DB.residents.filter(p=> p.scheduledToLeave && p.moveOut).forEach(p=>{
-    const room = DB.rooms.find(r=>r.id===p.roomId);
-    if(!room || roomMaintKind(room) || !hasBranchAccess(room.branchId)) return;
-    const branch = DB.branches.find(b=>b.id===room.branchId);
-    entries.push({ type:'moveout', branch, room, date: nextMonWedFri(p.moveOut) });
+  // roomUpcomingLeaveDate는 방 카드 배지와 동일한 기준(퇴실확정된 입실자 유무 + 방 카드에서
+  // "퇴실청소" 칩으로 취소한 적이 있는지)을 쓰므로, 방 카드에서 취소하면 여기서도 함께 사라진다.
+  DB.rooms.filter(r=> !roomMaintKind(r) && hasBranchAccess(r.branchId)).forEach(r=>{
+    const date = roomUpcomingLeaveDate(r);
+    if(!date) return;
+    const branch = DB.branches.find(b=>b.id===r.branchId);
+    entries.push({ type:'moveout', branch, room:r, date });
   });
   return entries;
 }
