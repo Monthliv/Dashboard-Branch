@@ -576,7 +576,10 @@
       <h1 id="homeLink" class="home-link" title="전체 통계로 이동">
         <span class="home-icon" aria-hidden="true">&#8962;</span>먼슬리브 계약/입실 관리
       </h1>
-      <div class="sub" id="savedNote">불러오는 중…</div>
+      <div style="display:flex; align-items:baseline; gap:8px;">
+        <div class="sub" id="savedNote">불러오는 중…</div>
+        <button class="btn small" id="forceSaveBtn" style="display:none;" title="자동저장을 기다리지 않고 지금 바로 저장합니다">지금 저장</button>
+      </div>
     </div>
     <div class="nav-row">
       <div class="branch-picker">
@@ -1153,6 +1156,18 @@ function renderTopNav(){
   adminBtn.style.display = isSuperAdmin() ? '' : 'none';
   adminBtn.className = 'btn small' + (UI.view==='admin' ? ' primary' : '');
   adminBtn.onclick = ()=>{ UI.view = 'admin'; render(); };
+
+  const forceSaveBtn = document.getElementById('forceSaveBtn');
+  forceSaveBtn.style.display = canEdit() ? '' : 'none';
+  forceSaveBtn.onclick = ()=>{
+    if(saveInFlight) return;
+    // 디바운스 대기 중(250ms)이던 자동저장이 있었다면 취소하고, 지금 즉시 저장한다 —
+    // 수정 직후 몇 초 안에 새로고침하면 그 사이 저장이 아직 안 끝나 예전 데이터로
+    // 되돌아가 보이는 문제를, 명시적으로 지금 저장을 끝내고 넘어갈 수 있게 해준다.
+    clearTimeout(saveTimer); saveTimer = null;
+    forceSaveBtn.disabled = true;
+    saveState().finally(()=>{ forceSaveBtn.disabled = false; });
+  };
 }
 
 function currentBranch(){
