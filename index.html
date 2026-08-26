@@ -6312,11 +6312,15 @@ const DOORLOCK_STATUS_COLORS = {
 };
 // 지점 구분: 소속명(affiliation)에 "먼슬리브"가 들어있으면 먼슬리브 직영 지점, 그렇지 않고
 // 다른 회사 브랜드로 표기돼 있으면(예: 달해스테이·더쉼·블루스테이 등) 입점고시원으로 분류한다.
-// 한 지점으로 합쳐진 여러 기기의 소속명이 서로 다를 일은 없으므로 대표로 첫 값만 확인한다.
-const DOORLOCK_CATEGORY_ORDER = ['입점고시원', '먼슬리브'];
+// 먼슬리브 직영 중에서도 기기명에 "호텔스테이"가 들어있으면(예: "먼슬리브 청량리 호텔스테이_...")
+// 별도로 호텔스테이로 더 세분화한다 — 소속명은 지점마다 "호텔 스테이"/"호스텔" 등으로 표기가
+// 갈려 신뢰할 수 없어서, 기기명 원문 쪽을 기준으로 판단한다.
+const DOORLOCK_CATEGORY_ORDER = ['입점고시원', '먼슬리브', '호텔스테이'];
 function doorlockCategoryForGroup(group){
   const rec = group.records.find(r=> r.affiliation);
-  return (rec && rec.affiliation.includes('먼슬리브')) ? '먼슬리브' : '입점고시원';
+  if(!rec || !rec.affiliation.includes('먼슬리브')) return '입점고시원';
+  const isHotelStay = group.records.some(r=> (r.deviceName||'').includes('호텔스테이'));
+  return isHotelStay ? '호텔스테이' : '먼슬리브';
 }
 function renderDoorlockDisconnectedSection(records, prevRecords, dateForTitle, editable){
   const box = document.createElement('div');
