@@ -6093,13 +6093,14 @@ function doorlockBranchLabel(branchGroup){
 function doorlockRoomLabel(r){
   if(r.roomNumber) return r.roomNumber;
   const raw = r.spaceName || r.deviceName || '(이름 없음)';
-  // 방 번호가 없는 공용공간 등은 공간명을 그대로 보여주는데, 원본 공간명에 지점명이 하이픈으로
-  // 덧붙어 있는 경우(예: "로비 공용출입문 - 성수")가 있어 중복되는 지점명과 하이픈을 지운다.
+  // 방 번호가 없는 공용공간 등은 공간명을 그대로 보여주는데, 원본 공간명에 지점명이 하이픈이나
+  // 밑줄로 덧붙어 있는 경우(예: "로비 공용출입문 - 성수", "로비____성수")가 있어 중복되는
+  // 지점명과 구분자(하이픈/밑줄)를 지운다.
   let cleaned = raw;
   [r.branchGroup, doorlockBranchLabel(r.branchGroup)].forEach(name=>{
     if(name) cleaned = cleaned.split(name).join('');
   });
-  cleaned = cleaned.replace(/-/g, ' ').replace(/\s{2,}/g, ' ').trim();
+  cleaned = cleaned.replace(/[-_]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
   return cleaned || raw;
 }
 function renderDoorlockDisconnectedSection(records){
