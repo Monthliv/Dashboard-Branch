@@ -986,7 +986,8 @@ async function saveState(){
   try{
     const core = { branches: DB.branches, rooms: DB.rooms, residents: DB.residents, channelList: DB.channelList, shortcuts: DB.shortcuts,
       doorlocks: DB.doorlocks, doorlockPrevSnapshot: DB.doorlockPrevSnapshot, doorlockImportDate: DB.doorlockImportDate,
-      doorlockBranchNameOverrides: DB.doorlockBranchNameOverrides, doorlockActionTags: DB.doorlockActionTags };
+      doorlockBranchNameOverrides: DB.doorlockBranchNameOverrides, doorlockActionTags: DB.doorlockActionTags,
+      doorlockBranchNotes: DB.doorlockBranchNotes };
     const nowIso = new Date().toISOString();
     // 이 상태 문서는 통째로 덮어써서 저장하는 구조라, 이 탭이 불러온 뒤로 다른 곳에서 이미 저장이
     // 일어났는데도 그냥 저장하면 이 탭이 들고 있는(=오래된) 데이터로 그 변경사항을 통째로 지워버리게
@@ -1050,6 +1051,7 @@ function applyLoadedCore(parsed){
   DB.doorlockImportDate = parsed.doorlockImportDate || '';
   DB.doorlockBranchNameOverrides = parsed.doorlockBranchNameOverrides || {};
   DB.doorlockActionTags = parsed.doorlockActionTags || {};
+  DB.doorlockBranchNotes = parsed.doorlockBranchNotes || {};
   DB.residents.forEach(p => {
     if(p.originalMoveIn == null) p.originalMoveIn = p.moveIn || '';
     if(p.scheduledToLeave == null) p.scheduledToLeave = false;
@@ -4837,6 +4839,7 @@ function downloadFullBackup(){
     channelList: DB.channelList, shortcuts: DB.shortcuts,
     doorlocks: DB.doorlocks, doorlockPrevSnapshot: DB.doorlockPrevSnapshot, doorlockImportDate: DB.doorlockImportDate,
     doorlockBranchNameOverrides: DB.doorlockBranchNameOverrides, doorlockActionTags: DB.doorlockActionTags,
+    doorlockBranchNotes: DB.doorlockBranchNotes,
     backedUpAt: new Date().toISOString()
   };
   const blob = new Blob([JSON.stringify(backup)], { type:'application/json' });
@@ -4877,7 +4880,8 @@ async function restoreLatestBackup(){
       try{
         const newCore = { branches: DB.branches, rooms: DB.rooms, residents: DB.residents, channelList: DB.channelList, shortcuts: DB.shortcuts,
           doorlocks: DB.doorlocks, doorlockPrevSnapshot: DB.doorlockPrevSnapshot, doorlockImportDate: DB.doorlockImportDate,
-          doorlockBranchNameOverrides: DB.doorlockBranchNameOverrides, doorlockActionTags: DB.doorlockActionTags };
+          doorlockBranchNameOverrides: DB.doorlockBranchNameOverrides, doorlockActionTags: DB.doorlockActionTags,
+          doorlockBranchNotes: DB.doorlockBranchNotes };
         await FIRESTORE_DOC.set({ json: JSON.stringify(newCore), updatedAt: new Date().toISOString() });
         logChange(`"${latest.id}" 백업으로 복원`);
         render();
@@ -6294,7 +6298,7 @@ function renderDoorlockDisconnectedSection(records){
 
   const table = document.createElement('table');
   table.className = 'doorlock-table';
-  table.innerHTML = `<thead><tr><th>지점</th><th>미연결 방</th></tr></thead>`;
+  table.innerHTML = `<thead><tr><th>지점</th><th>미연결 방</th><th>특이사항</th></tr></thead>`;
   const tbody = document.createElement('tbody');
   Object.keys(displayGroups).sort((a,b)=> a.localeCompare(b,'ko')).forEach(label=>{
     const group = displayGroups[label];
@@ -6370,7 +6374,48 @@ function renderDoorlockDisconnectedSection(records){
         roomTd.appendChild(chip);
       });
     }
-    tr.appendChild(branchTd); tr.appendChild(roomTd);
+    const noteTd = document.createElement('td');
+    const note = group.keys.map(k=> DB.doorlockBranchNotes && DB.doorlockBranchNotes[k]).find(Boolean) || '';
+    if(canEdit()){
+      const noteSpan = document.createElement('span');
+      noteSpan.textContent = note || '메모 추가';
+      noteSpan.style.cssText = 'cursor:pointer;' + (note ? '' : 'color:var(--ink-soft);font-style:italic;');
+      noteSpan.title = '클릭하여 특이사항 수정';
+      noteSpan.onclick = ()=>{
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = note;
+        input.placeholder = '특이사항 입력';
+        input.style.cssText = 'width:180px;';
+        const commit = ()=>{
+          const val = input.value.trim();
+          if(!DB.doorlockBranchNotes) DB.doorlockBranchNotes = {};
+          // 합쳐진 행일 수 있으므로, 이 행을 구성하는 모든 branchGroup 키에 같은 메모를
+          // 적용해야 다음 렌더에서도 일관되게 보인다.
+          let changed = false;
+          group.keys.forEach(key=>{
+            const before = DB.doorlockBranchNotes[key];
+            if(val) DB.doorlockBranchNotes[key] = val;
+            else delete DB.doorlockBranchNotes[key];
+            if(before !== DB.doorlockBranchNotes[key]) changed = true;
+          });
+          if(changed){
+            logChange(`도어락 "${label}" 특이사항 수정`);
+            scheduleSave();
+          }
+          render();
+        };
+        input.addEventListener('keydown', (e)=>{ if(e.key==='Enter') input.blur(); });
+        input.addEventListener('blur', commit);
+        noteTd.innerHTML = '';
+        noteTd.appendChild(input);
+        input.focus(); input.select();
+      };
+      noteTd.appendChild(noteSpan);
+    } else {
+      noteTd.textContent = note || '-';
+    }
+    tr.appendChild(branchTd); tr.appendChild(roomTd); tr.appendChild(noteTd);
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
@@ -6455,12 +6500,13 @@ function renderDoorlockView(){
       resetBtn.className = 'btn danger';
       resetBtn.textContent = '데이터 초기화';
       resetBtn.onclick = ()=>{
-        showConfirm('도어락 데이터를 모두 초기화할까요?\n지금까지 붙여넣은 데이터, 이전 비교 기록, 지점명 수정 내역, 처리 방법 태그가 모두 삭제됩니다.', ()=>{
+        showConfirm('도어락 데이터를 모두 초기화할까요?\n지금까지 붙여넣은 데이터, 이전 비교 기록, 지점명 수정 내역, 처리 방법 태그, 특이사항 메모가 모두 삭제됩니다.', ()=>{
           DB.doorlocks = [];
           DB.doorlockPrevSnapshot = null;
           DB.doorlockImportDate = '';
           DB.doorlockBranchNameOverrides = {};
           DB.doorlockActionTags = {};
+          DB.doorlockBranchNotes = {};
           logChange('도어락 데이터 초기화');
           scheduleSave(); render();
         });
