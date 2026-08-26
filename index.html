@@ -5991,7 +5991,34 @@ function renderCleaningCard(title, list, showDate){
 function applyDoorlockBuildingSplit(branchGroup, deviceName){
   if(!branchGroup.replace(/\s+/g,'').includes('신대방삼거리')) return branchGroup;
   const m = deviceName.match(/([A-Za-z0-9]{1,3})동/);
-  return m ? `${branchGroup} ${m[1].toUpperCase()}동` : branchGroup;
+  if(!m) return branchGroup;
+  const marker = m[1].toUpperCase() + '동';
+  // branchGroup을 뽑아낸 조각에 이미 건물 표기가 붙어있으면(예: "신대방삼거리역A동") 중복으로
+  // 또 붙이지 않는다.
+  if(branchGroup.toUpperCase().includes(marker)) return branchGroup;
+  return `${branchGroup} ${marker}`;
+}
+// 여러 지점에 공통으로 붙어 지점 구분에 의미가 없는 명칭들. 길이가 긴 것부터 지워야
+// "호텔스테이"처럼 짧은 단어("스테이")를 포함하는 합성어도 통째로 지워진다.
+const DOORLOCK_GENERIC_WORDS = ['먼슬리브','레지던스','원룸텔','호텔스테이','스테이'].sort((a,b)=> b.length-a.length);
+function doorlockStripGenericWords(s){
+  let cleaned = s;
+  DOORLOCK_GENERIC_WORDS.forEach(w=>{ cleaned = cleaned.split(w).join(''); });
+  return cleaned.trim();
+}
+// 기기명을 밑줄(_)로 나눠 앞부분을 지점명, 뒷부분을 방 이름으로 쓴다. "먼슬리브"처럼 여러
+// 지점에 공통으로 붙는 명칭은 지점명 후보에서 제외하고, 그 다음으로 뜻이 남는 조각을 지점명
+// 으로 쓴다. 마지막 조각은 (지점명이 아니므로) 그대로 방 이름으로 쓴다.
+function doorlockSplitDeviceName(deviceName){
+  const raw = String(deviceName||'').split('_').map(s=>s.trim()).filter(Boolean);
+  if(raw.length === 0) return { branch: deviceName || '기타', room: deviceName || '' };
+  const meaningfulIdx = raw.map(s=> doorlockStripGenericWords(s) ? true : false)
+    .reduce((acc, ok, idx)=> { if(ok) acc.push(idx); return acc; }, []);
+  if(meaningfulIdx.length === 0) return { branch: deviceName, room: raw[raw.length-1] };
+  const branchIdx = meaningfulIdx[0];
+  const branch = doorlockStripGenericWords(raw[branchIdx]) || raw[branchIdx];
+  const room = raw.length > branchIdx + 1 ? raw[raw.length-1] : branch;
+  return { branch, room };
 }
 function parseDoorlockPaste(text){
   const tokens = String(text||'').split(/[\t\n]/).map(t=> t.trim()).filter(t=> t!=='');
@@ -6018,35 +6045,15 @@ function parseDoorlockPaste(text){
     }
     let owner = '';
     if(j < tokens.length && !SERIAL_RE.test(tokens[j])){ owner = tokens[j]; j++; }
-    // 호실번호는 공간명이 아니라 기기명("먼슬리브_성수_208호")에서 숫자+"호"만 뽑는다.
-    const roomMatch = deviceName.match(/(\d+)\s*호/);
+    // 기기명을 밑줄 기준으로 앞(지점명)/뒤(방 이름)로 나눈다. 방 이름에 숫자+"호"가 있으면
+    // 배지에는 숫자만 보여준다(roomNumber).
+    const parts = doorlockSplitDeviceName(deviceName);
+    const branchGroup = applyDoorlockBuildingSplit(parts.branch, deviceName);
+    const roomMatch = parts.room.match(/(\d+)\s*호/);
     const roomNumber = roomMatch ? roomMatch[1] : '';
-    records.push({ id: serial, deviceName, serial, affiliation, spaceName, ssid, battery, lastConnected, connected, owner, roomNumber });
+    records.push({ id: serial, deviceName, serial, affiliation, spaceName, ssid, battery, lastConnected, connected, owner, branchGroup, roomText: parts.room, roomNumber });
     i = j;
   }
-  // 지점 그룹핑은 소속명이 아니라 기기명 기준(소속명은 신대방삼거리역 A/B동처럼 서로 다른
-  // 건물인데도 같은 값인 경우가 있어 그룹핑 기준으로는 덜 안정적). "지점_호실번호"든
-  // "지점_공용공간_도어락"이든 기기명 뒷부분의 형식을 특정 구분자 개수로 가정하지 않고,
-  // 같은 소속명을 쓰는 기기들의 기기명 "공통 접두어"를 실제로 찾아서 그걸 지점 그룹 키로
-  // 쓴다 — 방 번호든 공용공간 이름이든 실제로 겹치는 부분만 안전하게 떼어낼 수 있다.
-  const byAffiliation = {};
-  records.forEach(r=> { (byAffiliation[r.affiliation] = byAffiliation[r.affiliation] || []).push(r); });
-  Object.values(byAffiliation).forEach(group=>{
-    let prefix = group[0].deviceName;
-    if(group.length > 1){
-      prefix = group.map(r=>r.deviceName).reduce((a,b)=>{
-        let k = 0;
-        while(k < a.length && k < b.length && a[k]===b[k]) k++;
-        return a.slice(0, k);
-      });
-      // 단어 중간이 아니라 구분자(밑줄/공백) 경계에서 끊기도록 뒤쪽을 다듬는다.
-      const m = prefix.match(/^(.*[_\s])[^_\s]*$/);
-      if(m) prefix = m[1];
-      prefix = prefix.replace(/[_\s]+$/, '');
-      if(prefix.length < 2) prefix = group[0].deviceName; // 공통점이 거의 없으면 원본 유지
-    }
-    group.forEach(r=>{ r.branchGroup = applyDoorlockBuildingSplit(prefix, r.deviceName); });
-  });
   return records;
 }
 function importDoorlockRecords(records, onImported){
@@ -6105,36 +6112,18 @@ function showDoorlockPasteModal(){
   document.body.appendChild(overlay);
   setTimeout(()=> textarea.focus(), 0);
 }
-// 지점 그룹핑(branchGroup)은 기기명 기준이라 소속명과 다르게 생겼을 수 있어, 사람이 보는
-// 지점명은 그 그룹 소속명(affiliation)을 기준으로 따로 만든다: 벤더 접미사(" - 고수플러스")와
-// 모든 지점에 공통으로 붙는 "먼슬리브" 접두어, "레지던스 원룸텔" 문구를 지워 간결하게 보여준다.
-function doorlockBranchLabel(branchGroup, affiliation){
-  // 자동 정리 결과가 마음에 안 들면 지점별 미연결 방 표에서 지점명을 직접 클릭해 수정할 수 있고,
-  // 그 수정값이 여기 있으면 자동 정리보다 우선한다.
+// branchGroup(기기명 밑줄 앞부분, 중복 명칭 제외 처리까지 끝난 값)이 곧 지점명이다.
+// 자동 정리 결과가 마음에 안 들면 지점별 미연결 방 표에서 지점명을 직접 클릭해 수정할 수
+// 있고, 그 수정값이 있으면 항상 우선한다.
+function doorlockBranchLabel(branchGroup){
   if(DB.doorlockBranchNameOverrides && DB.doorlockBranchNameOverrides[branchGroup]) return DB.doorlockBranchNameOverrides[branchGroup];
-  const source = (affiliation!=null && affiliation!=='') ? affiliation : branchGroup;
-  let cleaned = String(source||'').split(' - ')[0] || source || '';
-  cleaned = cleaned.replace(/^먼슬리브\s*/, '');
-  cleaned = cleaned.split('레지던스 원룸텔').join('');
-  cleaned = cleaned.replace(/\s{2,}/g, ' ').trim();
-  cleaned = cleaned || branchGroup || '기타';
-  // applyDoorlockBuildingSplit이 branchGroup 끝에 붙여둔 "A동"/"B동" 같은 건물 구분은 소속명에는
-  // 없을 수 있어(신대방삼거리역처럼 A/B동 소속명이 같은 경우), branchGroup에 남아있으면
-  // 라벨에도 그대로 붙여 A동/B동이 같은 이름으로 뭉개지지 않게 한다.
-  const buildingMatch = String(branchGroup||'').match(/\s([A-Za-z0-9]{1,3}동)$/);
-  if(buildingMatch && !cleaned.includes(buildingMatch[1])) cleaned = `${cleaned} ${buildingMatch[1]}`;
-  return cleaned;
+  return branchGroup || '기타';
 }
-// 호실번호가 있으면 숫자만, 없으면(방이 아닌 공용공간 등) 기기명에서 지점 그룹 접두어를 뗀
-// 나머지를 방 이름으로 쓴다. 공간명은 표기가 들쭉날쭉해(예: 지점명이 중복 포함) 쓰지 않는다.
+// 호실번호가 있으면 숫자만, 없으면(방이 아닌 공용공간 등) 기기명 밑줄 뒷부분(roomText)을
+// 그대로 방 이름으로 쓴다.
 function doorlockRoomLabel(r){
   if(r.roomNumber) return r.roomNumber;
-  const deviceName = r.deviceName || '';
-  const prefix = r.branchGroup || '';
-  let rest = deviceName;
-  if(prefix && deviceName.startsWith(prefix)) rest = deviceName.slice(prefix.length);
-  rest = rest.replace(/^[_\s]+/, '').replace(/[_\s]+$/, '');
-  return rest || deviceName || '(이름 없음)';
+  return r.roomText || r.deviceName || '(이름 없음)';
 }
 function renderDoorlockDisconnectedSection(records){
   const box = document.createElement('div');
@@ -6146,13 +6135,13 @@ function renderDoorlockDisconnectedSection(records){
     const key = r.branchGroup || '기타';
     (rawGroups[key] = rawGroups[key] || []).push(r);
   });
-  // 2차: 화면에 보여줄 지점명(소속명 기준 라벨)이 같으면 한 행으로 합친다 — 기기명 패턴이
-  // 같은 지점 안에서도 완전히 통일돼있지 않으면 같은 지점이 서로 다른 branchGroup으로
-  // 쪼개질 수 있는데, 지점명이 같다면 화면에는 하나로 보여줘야 한다.
+  // 2차: 화면에 보여줄 지점명이 같으면 한 행으로 합친다 — 기기명 패턴이 같은 지점 안에서도
+  // 완전히 통일돼있지 않으면 같은 지점이 서로 다른 branchGroup으로 쪼개질 수 있는데, 지점명이
+  // 같다면 화면에는 하나로 보여줘야 한다.
   const displayGroups = {};
   Object.keys(rawGroups).forEach(key=>{
     const groupRecords = rawGroups[key];
-    const label = doorlockBranchLabel(key, groupRecords[0].affiliation);
+    const label = doorlockBranchLabel(key);
     if(!displayGroups[label]) displayGroups[label] = { keys: [], records: [] };
     displayGroups[label].keys.push(key);
     displayGroups[label].records.push(...groupRecords);
@@ -6239,7 +6228,7 @@ function renderDoorlockDisconnectedSection(records){
 function renderDoorlockNewIssuesSection(prevRecords, currRecords){
   const prevBySerial = new Map((prevRecords||[]).map(r=>[r.serial, r]));
   const added = currRecords.filter(r=> !prevBySerial.has(r.serial) && !r.connected)
-    .sort((a,b)=> doorlockBranchLabel(a.branchGroup, a.affiliation).localeCompare(doorlockBranchLabel(b.branchGroup, b.affiliation),'ko'));
+    .sort((a,b)=> doorlockBranchLabel(a.branchGroup).localeCompare(doorlockBranchLabel(b.branchGroup),'ko'));
   const box = document.createElement('div');
   box.className = 'stat-section cleaning-card';
   box.innerHTML = `<h3 style="margin:0;">신규 추가된 미연결 방 <span class="cnt-badge">${added.length}</span></h3>`;
@@ -6253,7 +6242,7 @@ function renderDoorlockNewIssuesSection(prevRecords, currRecords){
   const tbody = document.createElement('tbody');
   added.forEach(r=>{
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td style="white-space:nowrap;">${esc(doorlockBranchLabel(r.branchGroup, r.affiliation))}</td><td>${esc(doorlockRoomLabel(r))}</td><td>${esc(r.battery||'-')}</td><td>${esc(r.lastConnected||'-')}</td>`;
+    tr.innerHTML = `<td style="white-space:nowrap;">${esc(doorlockBranchLabel(r.branchGroup))}</td><td>${esc(doorlockRoomLabel(r))}</td><td>${esc(r.battery||'-')}</td><td>${esc(r.lastConnected||'-')}</td>`;
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
