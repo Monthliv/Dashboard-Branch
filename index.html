@@ -812,8 +812,13 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const firestoreDB = firebase.firestore();
 const FIRESTORE_DOC = firestoreDB.collection('monthliv').doc('state');
-// 도어락 현황을 로그인 없이 공유할 수 있도록, 도어락 관련 필드만 별도 문서로 미러링한다.
-// (전체 상태 문서는 입주자 개인정보 등을 포함하고 있어 그대로 공개할 수 없다.)
+// 도어락 데이터(특히 최근 5일 히스토리)는 지점별 기기 수가 많아지면 용량이 꽤 커서, 지점/호실/
+// 입실자와 같은 문서에 넣으면 Firestore 문서 용량 제한(1MB)에 걸려 저장 자체가 조용히 실패할 수
+// 있다(계약/퇴실 이력을 별도 컬렉션으로 뺀 것과 같은 이유). 그래서 도어락 데이터는 별도 문서에
+// 독립적으로 저장한다.
+const DOORLOCK_DOC = firestoreDB.collection('monthliv').doc('doorlock');
+// 도어락 현황을 로그인 없이 공유할 수 있도록, 도어락 관련 필드만 별도 문서로 한 번 더 미러링한다.
+// (DOORLOCK_DOC도 인증 없이는 못 읽으므로, 공개 링크 전용으로 읽기 권한을 열어둔 문서가 따로 필요하다.)
 const DOORLOCK_PUBLIC_DOC = firestoreDB.collection('monthliv').doc('doorlockPublic');
 const USERS_COL = firestoreDB.collection('users');
 const CHANGELOG_COL = firestoreDB.collection('changeLog');
@@ -988,10 +993,7 @@ async function saveState(){
   if(note) note.textContent = '저장 중…';
   saveInFlight = true;
   try{
-    const core = { branches: DB.branches, rooms: DB.rooms, residents: DB.residents, channelList: DB.channelList, shortcuts: DB.shortcuts,
-      doorlocks: DB.doorlocks, doorlockPrevSnapshot: DB.doorlockPrevSnapshot, doorlockImportDate: DB.doorlockImportDate,
-      doorlockBranchNameOverrides: DB.doorlockBranchNameOverrides, doorlockActionTags: DB.doorlockActionTags,
-      doorlockBranchNotes: DB.doorlockBranchNotes, doorlockHistory: DB.doorlockHistory };
+    const core = { branches: DB.branches, rooms: DB.rooms, residents: DB.residents, channelList: DB.channelList, shortcuts: DB.shortcuts };
     const nowIso = new Date().toISOString();
     // 이 상태 문서는 통째로 덮어써서 저장하는 구조라, 이 탭이 불러온 뒤로 다른 곳에서 이미 저장이
     // 일어났는데도 그냥 저장하면 이 탭이 들고 있는(=오래된) 데이터로 그 변경사항을 통째로 지워버리게
@@ -1050,6 +1052,18 @@ function applyLoadedCore(parsed){
   DB.residents = parsed.residents;
   DB.channelList = (parsed.channelList && parsed.channelList.length) ? parsed.channelList : [...DEFAULT_CHANNEL_LIST];
   DB.shortcuts = parsed.shortcuts || [];
+  DB.residents.forEach(p => {
+    if(p.originalMoveIn == null) p.originalMoveIn = p.moveIn || '';
+    if(p.scheduledToLeave == null) p.scheduledToLeave = false;
+    p.resStatus = computeResStatus(p);
+  });
+}
+// 도어락 데이터는 DOORLOCK_DOC(별도 문서)에서 따로 불러와 적용한다 — applyLoadedCore와 분리해둔
+// 이유는, 지점/호실/입실자 실시간 동기화(onSnapshot on FIRESTORE_DOC)가 갱신될 때마다
+// applyLoadedCore가 다시 호출되는데, 그 스냅샷 JSON에는 더 이상 도어락 필드가 들어있지 않으므로
+// 여기서 함께 처리하면 다른 사람이 방/입실자만 수정해도 화면의 도어락 데이터가 매번 빈 값으로
+// 지워져버린다.
+function applyDoorlockCore(parsed){
   DB.doorlocks = parsed.doorlocks || [];
   DB.doorlockPrevSnapshot = parsed.doorlockPrevSnapshot || null;
   DB.doorlockImportDate = parsed.doorlockImportDate || '';
@@ -1065,11 +1079,6 @@ function applyLoadedCore(parsed){
     }
     DB.doorlockHistory.push({ date: DB.doorlockImportDate, records: DB.doorlocks });
   }
-  DB.residents.forEach(p => {
-    if(p.originalMoveIn == null) p.originalMoveIn = p.moveIn || '';
-    if(p.scheduledToLeave == null) p.scheduledToLeave = false;
-    p.resStatus = computeResStatus(p);
-  });
 }
 // 실시간 동기화로 받은 데이터가 있어도, 지금 화면 어딘가에서 아직 저장 안 된 입력(방/입실자
 // 수정 패널, 신규 입실자 작성 중, 관리자 화면의 지점/호실 추가·관리 폼 등)이 진행 중이면 바로
@@ -4891,10 +4900,7 @@ async function restoreLatestBackup(){
       if(Array.isArray(core.channelList)) DB.channelList = core.channelList;
       if(Array.isArray(core.shortcuts)) DB.shortcuts = core.shortcuts;
       try{
-        const newCore = { branches: DB.branches, rooms: DB.rooms, residents: DB.residents, channelList: DB.channelList, shortcuts: DB.shortcuts,
-          doorlocks: DB.doorlocks, doorlockPrevSnapshot: DB.doorlockPrevSnapshot, doorlockImportDate: DB.doorlockImportDate,
-          doorlockBranchNameOverrides: DB.doorlockBranchNameOverrides, doorlockActionTags: DB.doorlockActionTags,
-          doorlockBranchNotes: DB.doorlockBranchNotes, doorlockHistory: DB.doorlockHistory };
+        const newCore = { branches: DB.branches, rooms: DB.rooms, residents: DB.residents, channelList: DB.channelList, shortcuts: DB.shortcuts };
         await FIRESTORE_DOC.set({ json: JSON.stringify(newCore), updatedAt: new Date().toISOString() });
         logChange(`"${latest.id}" 백업으로 복원`);
         render();
@@ -6121,13 +6127,34 @@ function importDoorlockRecords(records, onImported){
     if(DB.doorlockHistory.length > 5) DB.doorlockHistory.shift();
   }
   logChange(`도어락 데이터 붙여넣기: ${records.length}건 갱신`);
-  scheduleSave();
+  saveDoorlockState();
   syncDoorlockPublicMirror();
   render();
   if(onImported) onImported();
 }
+// 도어락 데이터의 실제 저장소(DOORLOCK_DOC)에 지금 DB에 있는 도어락 관련 필드를 통째로 쓴다.
+// FIRESTORE_DOC(지점/호실/입실자)와 분리된 별도 문서라 트랜잭션 충돌 검사는 두지 않았다 — 도어락
+// 데이터는 보통 한 번에 한 사람이 붙여넣고, 마지막에 쓴 내용이 이기는 정도로 충분하다. 실패하면
+// (예: 문서 용량 제한 재발) 조용히 넘어가지 않고 사용자에게 바로 알린다 — 예전에 이 저장이 조용히
+// 실패해서 "붙여넣고 저장했는데 다시 접속하면 초기화되어 있다"는 문제가 있었다.
+function saveDoorlockState(){
+  DOORLOCK_DOC.set({
+    doorlocks: DB.doorlocks || [],
+    doorlockPrevSnapshot: DB.doorlockPrevSnapshot || null,
+    doorlockImportDate: DB.doorlockImportDate || '',
+    doorlockHistory: DB.doorlockHistory || [],
+    doorlockBranchNameOverrides: DB.doorlockBranchNameOverrides || {},
+    doorlockActionTags: DB.doorlockActionTags || {},
+    doorlockBranchNotes: DB.doorlockBranchNotes || {},
+    updatedAt: new Date().toISOString()
+  }).catch(e=>{
+    console.error('도어락 데이터 저장 실패:', e);
+    showAlert(`도어락 데이터 저장에 실패했습니다. 방금 하신 변경사항이 저장되지 않았을 수 있습니다.\n\n오류 내용: ${(e && e.message) || e}`);
+  });
+}
 // 로그인 없이 볼 수 있는 공유 링크(?public=doorlock)용으로, 도어락 관련 필드만 별도 문서에
-// 복사해둔다. 입주자 개인정보가 담긴 나머지 상태(branches/rooms/residents)는 포함하지 않는다.
+// 한 번 더 복사해둔다(DOORLOCK_DOC은 인증 없이는 못 읽으므로). 입주자 개인정보가 담긴 나머지
+// 상태(branches/rooms/residents)는 포함하지 않는다.
 function syncDoorlockPublicMirror(){
   DOORLOCK_PUBLIC_DOC.set({
     doorlocks: DB.doorlocks || [],
@@ -6225,7 +6252,7 @@ function showDoorlockActionModal(serial, label){
       if(!DB.doorlockActionTags) DB.doorlockActionTags = {};
       DB.doorlockActionTags[serial] = { tag, label };
       logChange(`도어락 "${label}" 처리 방법 설정: ${tag}`);
-      scheduleSave(); syncDoorlockPublicMirror(); close(); render();
+      saveDoorlockState(); syncDoorlockPublicMirror(); close(); render();
     };
     btnCol.appendChild(btn);
   });
@@ -6236,7 +6263,7 @@ function showDoorlockActionModal(serial, label){
     clearBtn.onclick = ()=>{
       delete DB.doorlockActionTags[serial];
       logChange(`도어락 "${label}" 처리 방법 해제`);
-      scheduleSave(); syncDoorlockPublicMirror(); close(); render();
+      saveDoorlockState(); syncDoorlockPublicMirror(); close(); render();
     };
     btnCol.appendChild(clearBtn);
   }
@@ -6400,7 +6427,7 @@ function renderDoorlockDisconnectedSection(records, prevRecords, dateForTitle, e
           });
           if(changed){
             logChange(`도어락 지점명 수정: "${label}" → "${val || label}"`);
-            scheduleSave();
+            saveDoorlockState();
             syncDoorlockPublicMirror();
           }
           render();
@@ -6467,7 +6494,7 @@ function renderDoorlockDisconnectedSection(records, prevRecords, dateForTitle, e
           });
           if(changed){
             logChange(`도어락 "${label}" 특이사항 수정`);
-            scheduleSave();
+            saveDoorlockState();
             syncDoorlockPublicMirror();
           }
           render();
@@ -6616,7 +6643,7 @@ function renderDoorlockView(){
           DB.doorlockHistory = [];
           UI.doorlockHistoryOffset = 0;
           logChange('도어락 데이터 초기화');
-          scheduleSave(); syncDoorlockPublicMirror(); render();
+          saveDoorlockState(); syncDoorlockPublicMirror(); render();
         });
       };
       btnRow.appendChild(resetBtn);
@@ -7109,6 +7136,15 @@ async function initApp(user){
   DB.residents = DB.residents.filter(p => p.firstSaveDone !== false);
   if(canEdit() && DB.residents.length !== beforeCount) scheduleSave();
   applyLoadedCore(DB);
+  // 도어락 데이터는 별도 문서(DOORLOCK_DOC)에서 불러온다 — 이 부분만 실패해도 이미 불러온
+  // 지점/호실/입실자 같은 핵심 데이터는 그대로 유지되도록 별도 try/catch로 분리한다.
+  try{
+    const doorlockSnap = await DOORLOCK_DOC.get();
+    applyDoorlockCore(doorlockSnap.exists ? doorlockSnap.data() : {});
+  }catch(e){
+    console.error('도어락 데이터 불러오기 실패:', e);
+    applyDoorlockCore({});
+  }
   if(canEdit()) processScheduledLeaves();
   if(canEdit()) processPendingRoomMoves();
   if(canEdit()) autoFlagDueRetouch();
