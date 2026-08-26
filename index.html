@@ -6310,6 +6310,14 @@ const DOORLOCK_STATUS_COLORS = {
   existing: { bg:'var(--st-leaving-bg)', fg:'var(--st-leaving)' },
   new: { bg:'var(--st-hold-bg)', fg:'var(--st-hold)' }
 };
+// 지점 구분: 소속명(affiliation)에 "먼슬리브"가 들어있으면 먼슬리브 직영 지점, 그렇지 않고
+// 다른 회사 브랜드로 표기돼 있으면(예: 달해스테이·더쉼·블루스테이 등) 입점고시원으로 분류한다.
+// 한 지점으로 합쳐진 여러 기기의 소속명이 서로 다를 일은 없으므로 대표로 첫 값만 확인한다.
+const DOORLOCK_CATEGORY_ORDER = ['입점고시원', '먼슬리브'];
+function doorlockCategoryForGroup(group){
+  const rec = group.records.find(r=> r.affiliation);
+  return (rec && rec.affiliation.includes('먼슬리브')) ? '먼슬리브' : '입점고시원';
+}
 function renderDoorlockDisconnectedSection(records, prevRecords, dateForTitle, editable){
   const box = document.createElement('div');
   box.className = 'stat-section';
@@ -6349,8 +6357,7 @@ function renderDoorlockDisconnectedSection(records, prevRecords, dateForTitle, e
   table.className = 'doorlock-table';
   table.innerHTML = `<thead><tr><th>지점</th><th>미연결 방</th><th>특이사항</th></tr></thead>`;
   const tbody = document.createElement('tbody');
-  Object.keys(displayGroups).sort((a,b)=> a.localeCompare(b,'ko')).forEach(label=>{
-    const group = displayGroups[label];
+  function buildBranchRow(label, group){
     // 도어락 기기가 같은 방에 여러 대(재스캔 등)라 라벨이 같은 값으로 겹칠 수 있어 라벨
     // 기준으로 중복 제거한다.
     const byRoomLabel = new Map();
@@ -6467,7 +6474,28 @@ function renderDoorlockDisconnectedSection(records, prevRecords, dateForTitle, e
       noteTd.textContent = note || '-';
     }
     tr.appendChild(branchTd); tr.appendChild(roomTd); tr.appendChild(noteTd);
-    tbody.appendChild(tr);
+    return tr;
+  }
+  // 지점 구분(입점고시원/먼슬리브)별로 묶어서, 구분 헤더 행 → 그 구분에 속한 지점들(가나다순)
+  // 순서로 렌더링한다. 상단에 입점고시원, 그 아래 먼슬리브 순서로 고정 노출한다.
+  const labelsByCategory = {};
+  Object.keys(displayGroups).forEach(label=>{
+    const cat = doorlockCategoryForGroup(displayGroups[label]);
+    (labelsByCategory[cat] = labelsByCategory[cat] || []).push(label);
+  });
+  DOORLOCK_CATEGORY_ORDER.forEach(cat=>{
+    const labels = labelsByCategory[cat];
+    if(!labels || labels.length===0) return;
+    const headerTr = document.createElement('tr');
+    const headerTd = document.createElement('td');
+    headerTd.colSpan = 3;
+    headerTd.textContent = cat;
+    headerTd.style.cssText = 'font-weight:800; color:var(--accent-ink); background:var(--accent-soft); padding:8px 12px;';
+    headerTr.appendChild(headerTd);
+    tbody.appendChild(headerTr);
+    labels.sort((a,b)=> a.localeCompare(b,'ko')).forEach(label=>{
+      tbody.appendChild(buildBranchRow(label, displayGroups[label]));
+    });
   });
   table.appendChild(tbody);
   box.appendChild(table);
