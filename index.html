@@ -6117,14 +6117,35 @@ function renderDoorlockDisconnectedSection(records){
   table.innerHTML = `<thead><tr><th>지점</th><th>미연결 방</th></tr></thead>`;
   const tbody = document.createElement('tbody');
   Object.keys(groups).sort((a,b)=> doorlockBranchLabel(a).localeCompare(doorlockBranchLabel(b),'ko')).forEach(branchName=>{
+    // 도어락 기기가 같은 방에 여러 대(재스캔 등)라 라벨이 같은 값으로 겹칠 수 있어 라벨 기준으로 중복 제거한다.
+    const seenLabels = new Set();
     const disconnected = groups[branchName]
       .filter(r=> !r.connected)
+      .filter(r=>{
+        const label = doorlockRoomLabel(r);
+        if(seenLabels.has(label)) return false;
+        seenLabels.add(label);
+        return true;
+      })
       .sort((a,b)=> doorlockRoomLabel(a).localeCompare(doorlockRoomLabel(b), 'ko', {numeric:true}));
     const tr = document.createElement('tr');
-    const cellHtml = disconnected.length
-      ? disconnected.map(r=> esc(doorlockRoomLabel(r))).join(', ')
-      : '<span style="color:var(--ink-soft);">전체 연결됨</span>';
-    tr.innerHTML = `<td style="font-weight:700;white-space:nowrap;">${esc(doorlockBranchLabel(branchName))}</td><td>${cellHtml}</td>`;
+    const branchTd = document.createElement('td');
+    branchTd.style.cssText = 'font-weight:700;white-space:nowrap;';
+    branchTd.textContent = doorlockBranchLabel(branchName);
+    const roomTd = document.createElement('td');
+    if(disconnected.length===0){
+      roomTd.innerHTML = '<span style="color:var(--ink-soft);">전체 연결됨</span>';
+    } else {
+      roomTd.style.cssText = 'display:flex; flex-wrap:wrap; gap:6px;';
+      disconnected.forEach(r=>{
+        const chip = document.createElement('span');
+        chip.className = 'badge';
+        chip.style.cssText = 'background:var(--st-hold-bg); color:var(--st-hold);';
+        chip.textContent = doorlockRoomLabel(r);
+        roomTd.appendChild(chip);
+      });
+    }
+    tr.appendChild(branchTd); tr.appendChild(roomTd);
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
