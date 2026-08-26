@@ -298,6 +298,7 @@
   .badge.res-status.moving{ background:var(--st-presell-bg); color:var(--st-presell); }
   .badge.res-status.upcoming{ background:var(--st-forsale-bg); color:var(--st-forsale); }
   .resident-period{ font-family:'JetBrains Mono',monospace; font-size:11.5px; color:var(--ink-soft); margin-top:4px; }
+  .resident-phone{ font-size:11.5px; color:var(--ink-soft); margin-top:2px; font-family:'JetBrains Mono',monospace; }
   .resident-car{ font-size:11.5px; color:var(--ink-soft); margin-top:4px; font-family:'JetBrains Mono',monospace; }
   .resident-memo{
     margin-top:5px; font-size:11.5px; color:var(--ink); background:#F4F1E9; border-radius:6px;
@@ -847,6 +848,10 @@ function isSuperAdmin(){ return USER_ROLE === 'superadmin'; }
    우선 표시한다. 입실자 카드(renderResidentView)와 타임라인이 이 기준을 공유한다. */
 function residentDisplayName(p){
   return (p.paymentProxy && p.actualResidentName) ? p.actualResidentName : p.name;
+}
+/* 연락처도 이름과 같은 기준: 대리결제면 계약자 연락처(phone) 대신 실입실자 연락처를 보여준다. */
+function residentDisplayPhone(p){
+  return (p.paymentProxy && p.actualResidentPhone) ? p.actualResidentPhone : p.phone;
 }
 /* 보기 권한(viewer) 계정에는 입실자 이름 앞 두 글자만 보여주고 나머지는 마스킹한다. */
 function maskViewerName(name){
@@ -2461,6 +2466,14 @@ function renderResidentView(p, room, isSecondary){
   }
   nameLine.appendChild(nameWrap); nameLine.appendChild(acts);
   block.appendChild(nameLine);
+
+  const displayPhone = residentDisplayPhone(p);
+  if(displayPhone && displayPhone.trim()){
+    const phoneLine = document.createElement('div');
+    phoneLine.className = 'resident-phone';
+    phoneLine.textContent = displayPhone;
+    block.appendChild(phoneLine);
+  }
 
   if(!isSecondary){
     const period = document.createElement('div');
