@@ -6441,16 +6441,16 @@ function renderDoorlockDisconnectedSection(records, prevRecords, dateForTitle, e
     if(canEdit() && editable){
       const noteSpan = document.createElement('span');
       noteSpan.textContent = note || '메모 추가';
-      noteSpan.style.cssText = 'cursor:pointer;' + (note ? '' : 'color:var(--ink-soft);font-style:italic;');
+      noteSpan.style.cssText = 'cursor:pointer; white-space:pre-line;' + (note ? '' : 'color:var(--ink-soft);font-style:italic;');
       noteSpan.title = '클릭하여 특이사항 수정';
       noteSpan.onclick = ()=>{
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.value = note;
-        input.placeholder = '특이사항 입력';
-        input.style.cssText = 'width:180px;';
+        const textarea = document.createElement('textarea');
+        textarea.value = note;
+        textarea.placeholder = '특이사항 입력';
+        textarea.rows = 2;
+        textarea.style.cssText = 'width:200px; resize:vertical;';
         const commit = ()=>{
-          const val = input.value.trim();
+          const val = textarea.value.trim();
           if(!DB.doorlockBranchNotes) DB.doorlockBranchNotes = {};
           // 합쳐진 행일 수 있으므로, 이 행을 구성하는 모든 branchGroup 키에 같은 메모를
           // 적용해야 다음 렌더에서도 일관되게 보인다.
@@ -6468,14 +6468,15 @@ function renderDoorlockDisconnectedSection(records, prevRecords, dateForTitle, e
           }
           render();
         };
-        input.addEventListener('keydown', (e)=>{ if(e.key==='Enter') input.blur(); });
-        input.addEventListener('blur', commit);
+        // 줄바꿈이 가능한 메모라 Enter는 그대로 줄바꿈으로 두고, blur(다른 곳 클릭)로만 저장한다.
+        textarea.addEventListener('blur', commit);
         noteTd.innerHTML = '';
-        noteTd.appendChild(input);
-        input.focus(); input.select();
+        noteTd.appendChild(textarea);
+        textarea.focus(); textarea.select();
       };
       noteTd.appendChild(noteSpan);
     } else {
+      noteTd.style.whiteSpace = 'pre-line';
       noteTd.textContent = note || '-';
     }
     tr.appendChild(branchTd); tr.appendChild(roomTd); tr.appendChild(noteTd);
