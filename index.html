@@ -6127,7 +6127,7 @@ function importDoorlockRecords(records, onImported){
   if(onImported) onImported();
 }
 // 로그인 없이 볼 수 있는 공유 링크(?public=doorlock)용으로, 도어락 관련 필드만 별도 문서에
-// 복사해둔다. 처리 방법 태그(아톡/청소방/현장출동)는 내부 운영 정보라 공유 대상에서 제외한다.
+// 복사해둔다. 입주자 개인정보가 담긴 나머지 상태(branches/rooms/residents)는 포함하지 않는다.
 function syncDoorlockPublicMirror(){
   DOORLOCK_PUBLIC_DOC.set({
     doorlocks: DB.doorlocks || [],
@@ -6136,6 +6136,7 @@ function syncDoorlockPublicMirror(){
     doorlockHistory: DB.doorlockHistory || [],
     doorlockBranchNameOverrides: DB.doorlockBranchNameOverrides || {},
     doorlockBranchNotes: DB.doorlockBranchNotes || {},
+    doorlockActionTags: DB.doorlockActionTags || {},
     updatedAt: new Date().toISOString()
   }).catch(e=> console.error('공유용 도어락 데이터 동기화 실패:', e));
 }
@@ -6224,7 +6225,7 @@ function showDoorlockActionModal(serial, label){
       if(!DB.doorlockActionTags) DB.doorlockActionTags = {};
       DB.doorlockActionTags[serial] = { tag, label };
       logChange(`도어락 "${label}" 처리 방법 설정: ${tag}`);
-      scheduleSave(); close(); render();
+      scheduleSave(); syncDoorlockPublicMirror(); close(); render();
     };
     btnCol.appendChild(btn);
   });
@@ -6235,7 +6236,7 @@ function showDoorlockActionModal(serial, label){
     clearBtn.onclick = ()=>{
       delete DB.doorlockActionTags[serial];
       logChange(`도어락 "${label}" 처리 방법 해제`);
-      scheduleSave(); close(); render();
+      scheduleSave(); syncDoorlockPublicMirror(); close(); render();
     };
     btnCol.appendChild(clearBtn);
   }
@@ -7380,6 +7381,7 @@ async function initPublicDoorlockView(){
       DB.doorlockHistory = d.doorlockHistory || [];
       DB.doorlockBranchNameOverrides = d.doorlockBranchNameOverrides || {};
       DB.doorlockBranchNotes = d.doorlockBranchNotes || {};
+      DB.doorlockActionTags = d.doorlockActionTags || {};
     }
   }catch(e){
     console.error('공유용 도어락 데이터 조회 실패:', e);
