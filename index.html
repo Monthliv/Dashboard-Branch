@@ -6006,18 +6006,20 @@ function doorlockStripGenericWords(s){
   DOORLOCK_GENERIC_WORDS.forEach(w=>{ cleaned = cleaned.split(w).join(''); });
   return cleaned.trim();
 }
-// 기기명을 밑줄(_)로 나눠 앞부분을 지점명, 뒷부분을 방 이름으로 쓴다. "먼슬리브"처럼 여러
-// 지점에 공통으로 붙는 명칭은 지점명 후보에서 제외하고, 그 다음으로 뜻이 남는 조각을 지점명
-// 으로 쓴다. 마지막 조각은 (지점명이 아니므로) 그대로 방 이름으로 쓴다.
+// 기기명의 "가장 마지막" 밑줄(_)을 기준으로 앞부분을 지점명, 뒷부분을 방 이름으로 나눈다.
+// 지점명 쪽은 띄어쓰기(및 안쪽에 남아있는 밑줄)를 무시하고 붙여서 정리한 뒤 "먼슬리브"처럼
+// 여러 지점에 공통으로 붙는 명칭을 지운다 — 표기가 살짝 달라도(공백 유무 등) 안전하게 지워진다.
 function doorlockSplitDeviceName(deviceName){
-  const raw = String(deviceName||'').split('_').map(s=>s.trim()).filter(Boolean);
-  if(raw.length === 0) return { branch: deviceName || '기타', room: deviceName || '' };
-  const meaningfulIdx = raw.map(s=> doorlockStripGenericWords(s) ? true : false)
-    .reduce((acc, ok, idx)=> { if(ok) acc.push(idx); return acc; }, []);
-  if(meaningfulIdx.length === 0) return { branch: deviceName, room: raw[raw.length-1] };
-  const branchIdx = meaningfulIdx[0];
-  const branch = doorlockStripGenericWords(raw[branchIdx]) || raw[branchIdx];
-  const room = raw.length > branchIdx + 1 ? raw[raw.length-1] : branch;
+  const name = String(deviceName||'').trim();
+  const idx = name.lastIndexOf('_');
+  if(idx === -1){
+    const compact = doorlockStripGenericWords(name.replace(/\s+/g,''));
+    return { branch: compact || name, room: name };
+  }
+  const branchRaw = name.slice(0, idx);
+  const room = name.slice(idx + 1).trim();
+  const branchCompact = branchRaw.replace(/[\s_]+/g, '');
+  const branch = doorlockStripGenericWords(branchCompact) || branchCompact || branchRaw;
   return { branch, room };
 }
 function parseDoorlockPaste(text){
