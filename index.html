@@ -5981,6 +5981,14 @@ function renderCleaningCard(title, list, showDate){
    원본 표의 "마지막 연결" 칸이 날짜와 연결상태(연결/미연결) 두 줄로 이루어져 있어 탭/줄바꿈
    위치가 불규칙할 수 있으므로, 칸 위치가 아니라 일련번호(hex)·날짜·연결상태 같은 값 자체의
    패턴을 기준(anchor)으로 각 행을 인식한다. */
+// 신대방삼거리역은 소속명만으로는 A동/B동이 구분되지 않지만 실제로는 서로 다른 건물이라,
+// 공간명·기기명에 남아있는 "A동"/"B동" 표기를 찾아 지점 그룹명에 붙여 구분한다
+// (branchParkingCombineGroup과 같은 이유로 이 지점만 예외 처리 — 다른 지점은 해당 없음).
+function applyDoorlockBuildingSplit(branchGroup, spaceName, deviceName){
+  if(!branchGroup.replace(/\s+/g,'').includes('신대방삼거리')) return branchGroup;
+  const m = `${spaceName} ${deviceName}`.match(/([A-Za-z0-9]{1,3})동/);
+  return m ? `${branchGroup} ${m[1].toUpperCase()}동` : branchGroup;
+}
 function parseDoorlockPaste(text){
   const tokens = String(text||'').split(/[\t\n]/).map(t=> t.trim()).filter(t=> t!=='');
   const SERIAL_RE = /^[0-9A-Fa-f]{10,20}$/;
@@ -6008,7 +6016,8 @@ function parseDoorlockPaste(text){
     if(j < tokens.length && !SERIAL_RE.test(tokens[j])){ owner = tokens[j]; j++; }
     // 소속명은 "먼슬리브 성수 - 고수플러스"처럼 도어락 업체(벤더) 이름이 붙어있어, " - " 앞부분만
     // 지점 그룹명으로 쓴다. 공간명("208호(블레스룸)____성수")에서는 앞의 숫자+"호"만 호실번호로 뽑는다.
-    const branchGroup = (affiliation.split(' - ')[0] || affiliation).trim() || '기타';
+    let branchGroup = (affiliation.split(' - ')[0] || affiliation).trim() || '기타';
+    branchGroup = applyDoorlockBuildingSplit(branchGroup, spaceName, deviceName);
     const roomMatch = spaceName.match(/(\d+)\s*호/);
     const roomNumber = roomMatch ? roomMatch[1] : '';
     records.push({ id: serial, deviceName, serial, affiliation, spaceName, ssid, battery, lastConnected, connected, owner, branchGroup, roomNumber });
@@ -6075,11 +6084,23 @@ function showDoorlockPasteModal(){
 // "먼슬리브"는 모든 지점 소속명에 공통으로 붙는 접두어라 구분에 의미가 없어, 지점명을 표시할
 // 때는 제외하고 간결하게 보여준다.
 function doorlockBranchLabel(branchGroup){
-  return String(branchGroup||'').replace(/^먼슬리브\s*/, '').trim() || branchGroup || '기타';
+  let cleaned = String(branchGroup||'').replace(/^먼슬리브\s*/, '');
+  cleaned = cleaned.split('레지던스 원룸텔').join('');
+  cleaned = cleaned.replace(/\s{2,}/g, ' ').trim();
+  return cleaned || branchGroup || '기타';
 }
 // 공간명에서 뽑아낸 호실번호가 있으면 숫자만, 없으면(방이 아닌 공용공간 등) 공간명 자체를 보여준다.
 function doorlockRoomLabel(r){
-  return r.roomNumber || r.spaceName || r.deviceName || '(이름 없음)';
+  if(r.roomNumber) return r.roomNumber;
+  const raw = r.spaceName || r.deviceName || '(이름 없음)';
+  // 방 번호가 없는 공용공간 등은 공간명을 그대로 보여주는데, 원본 공간명에 지점명이 하이픈으로
+  // 덧붙어 있는 경우(예: "로비 공용출입문 - 성수")가 있어 중복되는 지점명과 하이픈을 지운다.
+  let cleaned = raw;
+  [r.branchGroup, doorlockBranchLabel(r.branchGroup)].forEach(name=>{
+    if(name) cleaned = cleaned.split(name).join('');
+  });
+  cleaned = cleaned.replace(/-/g, ' ').replace(/\s{2,}/g, ' ').trim();
+  return cleaned || raw;
 }
 function renderDoorlockDisconnectedSection(records){
   const box = document.createElement('div');
