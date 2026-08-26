@@ -6018,17 +6018,35 @@ function parseDoorlockPaste(text){
     }
     let owner = '';
     if(j < tokens.length && !SERIAL_RE.test(tokens[j])){ owner = tokens[j]; j++; }
-    // 지점 그룹핑은 소속명이 아니라 기기명 기준: "먼슬리브_성수_208호"처럼 끝에 붙는 호실번호만
-    // 떼어내면 같은 지점의 기기끼리 같은 접두어로 묶인다(소속명은 신대방삼거리역 A/B동처럼
-    // 서로 다른 건물인데도 같은 값인 경우가 있어 그룹핑 기준으로는 덜 안정적).
     // 공간명("208호(블레스룸)____성수")에서는 앞의 숫자+"호"만 호실번호로 뽑는다.
-    let branchGroup = deviceName.replace(/[_\s]*\d+\s*호\s*$/, '').trim() || deviceName || '기타';
-    branchGroup = applyDoorlockBuildingSplit(branchGroup, spaceName, deviceName);
     const roomMatch = spaceName.match(/(\d+)\s*호/);
     const roomNumber = roomMatch ? roomMatch[1] : '';
-    records.push({ id: serial, deviceName, serial, affiliation, spaceName, ssid, battery, lastConnected, connected, owner, branchGroup, roomNumber });
+    records.push({ id: serial, deviceName, serial, affiliation, spaceName, ssid, battery, lastConnected, connected, owner, roomNumber });
     i = j;
   }
+  // 지점 그룹핑은 소속명이 아니라 기기명 기준(소속명은 신대방삼거리역 A/B동처럼 서로 다른
+  // 건물인데도 같은 값인 경우가 있어 그룹핑 기준으로는 덜 안정적). "지점_호실번호"든
+  // "지점_공용공간_도어락"이든 기기명 뒷부분의 형식을 특정 구분자 개수로 가정하지 않고,
+  // 같은 소속명을 쓰는 기기들의 기기명 "공통 접두어"를 실제로 찾아서 그걸 지점 그룹 키로
+  // 쓴다 — 방 번호든 공용공간 이름이든 실제로 겹치는 부분만 안전하게 떼어낼 수 있다.
+  const byAffiliation = {};
+  records.forEach(r=> { (byAffiliation[r.affiliation] = byAffiliation[r.affiliation] || []).push(r); });
+  Object.values(byAffiliation).forEach(group=>{
+    let prefix = group[0].deviceName;
+    if(group.length > 1){
+      prefix = group.map(r=>r.deviceName).reduce((a,b)=>{
+        let k = 0;
+        while(k < a.length && k < b.length && a[k]===b[k]) k++;
+        return a.slice(0, k);
+      });
+      // 단어 중간이 아니라 구분자(밑줄/공백) 경계에서 끊기도록 뒤쪽을 다듬는다.
+      const m = prefix.match(/^(.*[_\s])[^_\s]*$/);
+      if(m) prefix = m[1];
+      prefix = prefix.replace(/[_\s]+$/, '');
+      if(prefix.length < 2) prefix = group[0].deviceName; // 공통점이 거의 없으면 원본 유지
+    }
+    group.forEach(r=>{ r.branchGroup = applyDoorlockBuildingSplit(prefix, r.spaceName, r.deviceName); });
+  });
   return records;
 }
 function importDoorlockRecords(records, onImported){
@@ -6116,15 +6134,13 @@ function doorlockLooseMatchRegex(str){
 function doorlockRoomLabel(r){
   if(r.roomNumber) return r.roomNumber;
   const raw = r.spaceName || r.deviceName || '(이름 없음)';
-  // 방 번호가 없는 공용공간 등은 공간명을 그대로 보여주는데, 지점명과 겹치는 단어가 공간명에
-  // 표기만 살짝 다르게(예: "마곡발산" 지점의 공간명에 "마곡 발산", "고려대 안암" 지점의
-  // 공간명에 "고대안암") 들어있는 경우가 있다. 지점명을 통째로 비교하지 않고 단어 단위로
-  // 쪼개서, 공백 유무 차이는 무시하고 겹치는 단어를 지운다.
-  // branchGroup은 기기명 기준이라 "먼슬리브_마곡발산_로비"처럼 방 번호가 없는 기기는 공간
-  // 이름 자체(로비 등)까지 그대로 남아있을 수 있어, 단어 후보는 소속명 기준 라벨(branchLabel)
-  // 에서만 뽑는다 — branchGroup을 섞으면 진짜 지점명이 아닌 부분까지 지워버릴 수 있다.
-  const branchLabel = doorlockBranchLabel(r.branchGroup, r.affiliation);
-  const words = branchLabel.split(/\s+/).filter(w=> w && w.length >= 2);
+  // 방 번호가 없는 공용공간 등은 공간명을 그대로 보여주는데, 기기명(branchGroup, 위치 정보를
+  // 뗀 나머지)과 겹치는 단어가 공간명에 표기만 살짝 다르게(예: "먼슬리브_마곡발산"과 공간명의
+  // "마곡 발산") 들어있는 경우가 있다. 기기명을 통째로 비교하지 않고 단어 단위로 쪼개서,
+  // 공백 유무 차이는 무시하고 겹치는 단어를 지운다. A동/B동처럼 건물 구분 표시는 방 자체의
+  // 정보일 수 있어 제외한다.
+  const words = String(r.branchGroup||'').split(/[_\s]+/)
+    .filter(w=> w && w.length >= 2 && !/^[A-Za-z0-9]{1,3}동$/.test(w));
   let cleaned = raw;
   words.forEach(word=>{
     const re = doorlockLooseMatchRegex(word);
