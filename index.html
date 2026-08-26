@@ -985,7 +985,8 @@ async function saveState(){
   saveInFlight = true;
   try{
     const core = { branches: DB.branches, rooms: DB.rooms, residents: DB.residents, channelList: DB.channelList, shortcuts: DB.shortcuts,
-      doorlocks: DB.doorlocks, doorlockPrevSnapshot: DB.doorlockPrevSnapshot, doorlockImportDate: DB.doorlockImportDate };
+      doorlocks: DB.doorlocks, doorlockPrevSnapshot: DB.doorlockPrevSnapshot, doorlockImportDate: DB.doorlockImportDate,
+      doorlockBranchNameOverrides: DB.doorlockBranchNameOverrides };
     const nowIso = new Date().toISOString();
     // 이 상태 문서는 통째로 덮어써서 저장하는 구조라, 이 탭이 불러온 뒤로 다른 곳에서 이미 저장이
     // 일어났는데도 그냥 저장하면 이 탭이 들고 있는(=오래된) 데이터로 그 변경사항을 통째로 지워버리게
@@ -1047,6 +1048,7 @@ function applyLoadedCore(parsed){
   DB.doorlocks = parsed.doorlocks || [];
   DB.doorlockPrevSnapshot = parsed.doorlockPrevSnapshot || null;
   DB.doorlockImportDate = parsed.doorlockImportDate || '';
+  DB.doorlockBranchNameOverrides = parsed.doorlockBranchNameOverrides || {};
   DB.residents.forEach(p => {
     if(p.originalMoveIn == null) p.originalMoveIn = p.moveIn || '';
     if(p.scheduledToLeave == null) p.scheduledToLeave = false;
@@ -4833,6 +4835,7 @@ function downloadFullBackup(){
     contracts: DB.contracts, residentHistory: DB.residentHistory,
     channelList: DB.channelList, shortcuts: DB.shortcuts,
     doorlocks: DB.doorlocks, doorlockPrevSnapshot: DB.doorlockPrevSnapshot, doorlockImportDate: DB.doorlockImportDate,
+    doorlockBranchNameOverrides: DB.doorlockBranchNameOverrides,
     backedUpAt: new Date().toISOString()
   };
   const blob = new Blob([JSON.stringify(backup)], { type:'application/json' });
@@ -4872,7 +4875,8 @@ async function restoreLatestBackup(){
       if(Array.isArray(core.shortcuts)) DB.shortcuts = core.shortcuts;
       try{
         const newCore = { branches: DB.branches, rooms: DB.rooms, residents: DB.residents, channelList: DB.channelList, shortcuts: DB.shortcuts,
-          doorlocks: DB.doorlocks, doorlockPrevSnapshot: DB.doorlockPrevSnapshot, doorlockImportDate: DB.doorlockImportDate };
+          doorlocks: DB.doorlocks, doorlockPrevSnapshot: DB.doorlockPrevSnapshot, doorlockImportDate: DB.doorlockImportDate,
+          doorlockBranchNameOverrides: DB.doorlockBranchNameOverrides };
         await FIRESTORE_DOC.set({ json: JSON.stringify(newCore), updatedAt: new Date().toISOString() });
         logChange(`"${latest.id}" 백업으로 복원`);
         render();
@@ -6084,6 +6088,9 @@ function showDoorlockPasteModal(){
 // "먼슬리브"는 모든 지점 소속명에 공통으로 붙는 접두어라 구분에 의미가 없어, 지점명을 표시할
 // 때는 제외하고 간결하게 보여준다.
 function doorlockBranchLabel(branchGroup){
+  // 자동 정리 결과가 마음에 안 들면 지점별 미연결 방 표에서 지점명을 직접 클릭해 수정할 수 있고,
+  // 그 수정값이 여기 있으면 자동 정리(먼슬리브 접두어 제거 등)보다 우선한다.
+  if(DB.doorlockBranchNameOverrides && DB.doorlockBranchNameOverrides[branchGroup]) return DB.doorlockBranchNameOverrides[branchGroup];
   let cleaned = String(branchGroup||'').replace(/^먼슬리브\s*/, '');
   cleaned = cleaned.split('레지던스 원룸텔').join('');
   cleaned = cleaned.replace(/\s{2,}/g, ' ').trim();
@@ -6131,7 +6138,39 @@ function renderDoorlockDisconnectedSection(records){
     const tr = document.createElement('tr');
     const branchTd = document.createElement('td');
     branchTd.style.cssText = 'font-weight:700;white-space:nowrap;';
-    branchTd.textContent = doorlockBranchLabel(branchName);
+    if(canEdit()){
+      const nameSpan = document.createElement('span');
+      nameSpan.textContent = doorlockBranchLabel(branchName);
+      nameSpan.style.cursor = 'pointer';
+      nameSpan.title = '클릭하여 지점명 수정';
+      nameSpan.onclick = ()=>{
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = doorlockBranchLabel(branchName);
+        input.style.cssText = 'width:130px;font-weight:700;';
+        const commit = ()=>{
+          const oldLabel = doorlockBranchLabel(branchName);
+          const val = input.value.trim();
+          if(!DB.doorlockBranchNameOverrides) DB.doorlockBranchNameOverrides = {};
+          if(val && val !== branchName) DB.doorlockBranchNameOverrides[branchName] = val;
+          else delete DB.doorlockBranchNameOverrides[branchName];
+          const newLabel = doorlockBranchLabel(branchName);
+          if(newLabel !== oldLabel){
+            logChange(`도어락 지점명 수정: "${oldLabel}" → "${newLabel}"`);
+            scheduleSave();
+          }
+          render();
+        };
+        input.addEventListener('keydown', (e)=>{ if(e.key==='Enter') input.blur(); });
+        input.addEventListener('blur', commit);
+        branchTd.innerHTML = '';
+        branchTd.appendChild(input);
+        input.focus(); input.select();
+      };
+      branchTd.appendChild(nameSpan);
+    } else {
+      branchTd.textContent = doorlockBranchLabel(branchName);
+    }
     const roomTd = document.createElement('td');
     if(disconnected.length===0){
       roomTd.innerHTML = '<span style="color:var(--ink-soft);">전체 연결됨</span>';
@@ -6195,6 +6234,22 @@ function renderDoorlockView(){
     pasteBtn.textContent = '도어락 데이터 붙여넣기';
     pasteBtn.onclick = showDoorlockPasteModal;
     btnRow.appendChild(pasteBtn);
+    if((DB.doorlocks||[]).length > 0){
+      const resetBtn = document.createElement('button');
+      resetBtn.className = 'btn danger';
+      resetBtn.textContent = '데이터 초기화';
+      resetBtn.onclick = ()=>{
+        showConfirm('도어락 데이터를 모두 초기화할까요?\n지금까지 붙여넣은 데이터, 이전 비교 기록, 지점명 수정 내역이 모두 삭제됩니다.', ()=>{
+          DB.doorlocks = [];
+          DB.doorlockPrevSnapshot = null;
+          DB.doorlockImportDate = '';
+          DB.doorlockBranchNameOverrides = {};
+          logChange('도어락 데이터 초기화');
+          scheduleSave(); render();
+        });
+      };
+      btnRow.appendChild(resetBtn);
+    }
     headerBox.appendChild(btnRow);
   }
   wrap.appendChild(headerBox);
