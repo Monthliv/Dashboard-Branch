@@ -6107,16 +6107,28 @@ function doorlockBranchLabel(branchGroup, affiliation){
   if(buildingMatch && !cleaned.includes(buildingMatch[1])) cleaned = `${cleaned} ${buildingMatch[1]}`;
   return cleaned;
 }
+// 문자 사이에 공백이 끼어도 매치되는 정규식을 만든다. "마곡발산"으로 "마곡 발산"도 잡아내기 위함.
+function doorlockLooseMatchRegex(str){
+  const escaped = String(str||'').split('').map(ch=> ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s*');
+  return escaped ? new RegExp(escaped, 'g') : null;
+}
 // 공간명에서 뽑아낸 호실번호가 있으면 숫자만, 없으면(방이 아닌 공용공간 등) 공간명 자체를 보여준다.
 function doorlockRoomLabel(r){
   if(r.roomNumber) return r.roomNumber;
   const raw = r.spaceName || r.deviceName || '(이름 없음)';
-  // 방 번호가 없는 공용공간 등은 공간명을 그대로 보여주는데, 원본 공간명에 지점명이 하이픈이나
-  // 밑줄로 덧붙어 있는 경우(예: "로비 공용출입문 - 성수", "로비____성수")가 있어 중복되는
-  // 지점명과 구분자(하이픈/밑줄)를 지운다.
+  // 방 번호가 없는 공용공간 등은 공간명을 그대로 보여주는데, 지점명과 겹치는 단어가 공간명에
+  // 표기만 살짝 다르게(예: "마곡발산" 지점의 공간명에 "마곡 발산", "고려대 안암" 지점의
+  // 공간명에 "고대안암") 들어있는 경우가 있다. 지점명을 통째로 비교하지 않고 단어 단위로
+  // 쪼개서, 공백 유무 차이는 무시하고 겹치는 단어를 지운다.
+  // branchGroup은 기기명 기준이라 "먼슬리브_마곡발산_로비"처럼 방 번호가 없는 기기는 공간
+  // 이름 자체(로비 등)까지 그대로 남아있을 수 있어, 단어 후보는 소속명 기준 라벨(branchLabel)
+  // 에서만 뽑는다 — branchGroup을 섞으면 진짜 지점명이 아닌 부분까지 지워버릴 수 있다.
+  const branchLabel = doorlockBranchLabel(r.branchGroup, r.affiliation);
+  const words = branchLabel.split(/\s+/).filter(w=> w && w.length >= 2);
   let cleaned = raw;
-  [r.branchGroup, doorlockBranchLabel(r.branchGroup, r.affiliation)].forEach(name=>{
-    if(name) cleaned = cleaned.split(name).join('');
+  words.forEach(word=>{
+    const re = doorlockLooseMatchRegex(word);
+    if(re) cleaned = cleaned.replace(re, '');
   });
   cleaned = cleaned.replace(/[-_]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
   return cleaned || raw;
