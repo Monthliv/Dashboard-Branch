@@ -986,7 +986,7 @@ async function saveState(){
   try{
     const core = { branches: DB.branches, rooms: DB.rooms, residents: DB.residents, channelList: DB.channelList, shortcuts: DB.shortcuts,
       doorlocks: DB.doorlocks, doorlockPrevSnapshot: DB.doorlockPrevSnapshot, doorlockImportDate: DB.doorlockImportDate,
-      doorlockBranchNameOverrides: DB.doorlockBranchNameOverrides };
+      doorlockBranchNameOverrides: DB.doorlockBranchNameOverrides, doorlockActionTags: DB.doorlockActionTags };
     const nowIso = new Date().toISOString();
     // 이 상태 문서는 통째로 덮어써서 저장하는 구조라, 이 탭이 불러온 뒤로 다른 곳에서 이미 저장이
     // 일어났는데도 그냥 저장하면 이 탭이 들고 있는(=오래된) 데이터로 그 변경사항을 통째로 지워버리게
@@ -1049,6 +1049,7 @@ function applyLoadedCore(parsed){
   DB.doorlockPrevSnapshot = parsed.doorlockPrevSnapshot || null;
   DB.doorlockImportDate = parsed.doorlockImportDate || '';
   DB.doorlockBranchNameOverrides = parsed.doorlockBranchNameOverrides || {};
+  DB.doorlockActionTags = parsed.doorlockActionTags || {};
   DB.residents.forEach(p => {
     if(p.originalMoveIn == null) p.originalMoveIn = p.moveIn || '';
     if(p.scheduledToLeave == null) p.scheduledToLeave = false;
@@ -4835,7 +4836,7 @@ function downloadFullBackup(){
     contracts: DB.contracts, residentHistory: DB.residentHistory,
     channelList: DB.channelList, shortcuts: DB.shortcuts,
     doorlocks: DB.doorlocks, doorlockPrevSnapshot: DB.doorlockPrevSnapshot, doorlockImportDate: DB.doorlockImportDate,
-    doorlockBranchNameOverrides: DB.doorlockBranchNameOverrides,
+    doorlockBranchNameOverrides: DB.doorlockBranchNameOverrides, doorlockActionTags: DB.doorlockActionTags,
     backedUpAt: new Date().toISOString()
   };
   const blob = new Blob([JSON.stringify(backup)], { type:'application/json' });
@@ -4876,7 +4877,7 @@ async function restoreLatestBackup(){
       try{
         const newCore = { branches: DB.branches, rooms: DB.rooms, residents: DB.residents, channelList: DB.channelList, shortcuts: DB.shortcuts,
           doorlocks: DB.doorlocks, doorlockPrevSnapshot: DB.doorlockPrevSnapshot, doorlockImportDate: DB.doorlockImportDate,
-          doorlockBranchNameOverrides: DB.doorlockBranchNameOverrides };
+          doorlockBranchNameOverrides: DB.doorlockBranchNameOverrides, doorlockActionTags: DB.doorlockActionTags };
         await FIRESTORE_DOC.set({ json: JSON.stringify(newCore), updatedAt: new Date().toISOString() });
         logChange(`"${latest.id}" 백업으로 복원`);
         render();
@@ -6003,7 +6004,12 @@ function applyDoorlockBuildingSplit(branchGroup, deviceName){
 const DOORLOCK_GENERIC_WORDS = ['먼슬리브','레지던스','원룸텔','호텔스테이','스테이'].sort((a,b)=> b.length-a.length);
 function doorlockStripGenericWords(s){
   let cleaned = s;
-  DOORLOCK_GENERIC_WORDS.forEach(w=>{ cleaned = cleaned.split(w).join(''); });
+  DOORLOCK_GENERIC_WORDS.forEach(w=>{
+    // 바로 뒤에 숫자가 오면(예: "스테이79") 일반 명칭이 아니라 그 지점 고유의 이름 일부일
+    // 수 있어 지우지 않는다.
+    const re = new RegExp(w + '(?!\\d)', 'g');
+    cleaned = cleaned.replace(re, '');
+  });
   return cleaned.trim();
 }
 // 기기명의 "가장 마지막" 밑줄(_)을 기준으로 앞부분을 지점명, 뒷부분을 방 이름으로 나눈다.
@@ -6069,6 +6075,17 @@ function importDoorlockRecords(records, onImported){
   if(prevRecords.length > 0){
     DB.doorlockPrevSnapshot = { date: DB.doorlockImportDate || '이전', records: prevRecords };
   }
+  // 미연결 -> 연결로 정상화된 기기는 더 이상 조치가 필요 없으므로 처리 방법(아톡/청소방/
+  // 현장출동) 태그를 자동으로 지운다.
+  if(DB.doorlockActionTags){
+    const newBySerial = new Map(records.map(r=>[r.serial, r]));
+    prevRecords.forEach(prevRec=>{
+      if(prevRec.connected === false){
+        const curr = newBySerial.get(prevRec.serial);
+        if(curr && curr.connected === true) delete DB.doorlockActionTags[prevRec.serial];
+      }
+    });
+  }
   DB.doorlocks = records;
   DB.doorlockImportDate = localDateKey();
   logChange(`도어락 데이터 붙여넣기: ${records.length}건 갱신`);
@@ -6127,11 +6144,124 @@ function doorlockRoomLabel(r){
   if(r.roomNumber) return r.roomNumber;
   return r.roomText || r.deviceName || '(이름 없음)';
 }
+const DOORLOCK_ACTION_TAGS = ['아톡', '청소방', '현장출동'];
+// 미연결 방을 클릭해 처리 방법(아톡/청소방/현장출동)을 지정한다. serial로 저장해두면
+// 다음 붙여넣기에도 같은 기기를 계속 추적할 수 있고, 연결이 정상화되면 자동으로 해제된다
+// (importDoorlockRecords 참고).
+function showDoorlockActionModal(serial, label){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  const box = document.createElement('div');
+  box.className = 'modal-box';
+  const close = ()=> overlay.remove();
+  box.appendChild(el('div', 'modal-msg', `"${label}" 처리 방법 선택`, 'margin-bottom:12px;font-weight:700;'));
+
+  const currentTag = DB.doorlockActionTags && DB.doorlockActionTags[serial] && DB.doorlockActionTags[serial].tag;
+  const btnCol = document.createElement('div');
+  btnCol.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
+  DOORLOCK_ACTION_TAGS.forEach(tag=>{
+    const btn = document.createElement('button');
+    btn.className = 'btn' + (tag===currentTag ? ' primary' : '');
+    btn.textContent = tag;
+    btn.onclick = ()=>{
+      if(!DB.doorlockActionTags) DB.doorlockActionTags = {};
+      DB.doorlockActionTags[serial] = { tag, label };
+      logChange(`도어락 "${label}" 처리 방법 설정: ${tag}`);
+      scheduleSave(); close(); render();
+    };
+    btnCol.appendChild(btn);
+  });
+  if(currentTag){
+    const clearBtn = document.createElement('button');
+    clearBtn.className = 'btn danger';
+    clearBtn.textContent = '처리 방법 해제';
+    clearBtn.onclick = ()=>{
+      delete DB.doorlockActionTags[serial];
+      logChange(`도어락 "${label}" 처리 방법 해제`);
+      scheduleSave(); close(); render();
+    };
+    btnCol.appendChild(clearBtn);
+  }
+  box.appendChild(btnCol);
+
+  const btnRow = document.createElement('div');
+  btnRow.className = 'modal-btn-row';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'btn'; cancelBtn.textContent = '닫기'; cancelBtn.onclick = close;
+  btnRow.appendChild(cancelBtn);
+  box.appendChild(btnRow);
+
+  overlay.addEventListener('click', (e)=>{ if(e.target===overlay) close(); });
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+}
+// 처리 방법(아톡/청소방/현장출동)이 지정된 방을 지점과 함께 상단에 모아 보여준다.
+function renderDoorlockActionSummary(){
+  const tags = DB.doorlockActionTags || {};
+  const entries = Object.keys(tags).map(serial=> ({ serial, ...tags[serial] }));
+  if(entries.length === 0) return null;
+  const box = document.createElement('div');
+  box.className = 'stat-section';
+  box.innerHTML = `<h3 style="margin:0 0 12px;">처리 방법별 방 목록</h3>`;
+  const grid = document.createElement('div');
+  grid.style.cssText = 'display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:14px;';
+  DOORLOCK_ACTION_TAGS.forEach(tagName=>{
+    const list = entries.filter(e=> e.tag===tagName);
+    const col = document.createElement('div');
+    col.innerHTML = `<div style="font-weight:700;margin-bottom:6px;">${esc(tagName)} <span class="cnt-badge">${list.length}</span></div>`;
+    if(list.length===0){
+      col.appendChild(el('div','cleaning-empty','없음'));
+    } else {
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;';
+      list.forEach(e=>{
+        const chip = document.createElement('span');
+        chip.className = 'badge';
+        chip.style.cssText = 'background:var(--accent-soft); color:var(--accent-ink);';
+        chip.textContent = e.label;
+        if(canEdit()){
+          chip.style.cursor = 'pointer';
+          chip.title = '클릭하여 처리 방법 변경/해제';
+          chip.onclick = ()=> showDoorlockActionModal(e.serial, e.label);
+        }
+        wrap.appendChild(chip);
+      });
+      col.appendChild(wrap);
+    }
+    grid.appendChild(col);
+  });
+  box.appendChild(grid);
+  return box;
+}
+// 직전 붙여넣기(doorlockPrevSnapshot) 대비 현재 미연결 기기의 상태를 분류한다.
+// existing: 그때도 미연결·지금도 미연결 / new: 그때는 괜찮았는데 지금 미연결(또는 신규 기기).
+// "정상 연결됨"(그때 미연결이었는데 지금은 연결됨)은 이 목록에 섞지 않고 상단의 별도
+// 카드(renderDoorlockResolvedSection)에서 하루만 보여준 뒤 자연히 빠진다.
+function computeDoorlockChipList(records){
+  const prevBySerial = new Map((DB.doorlockPrevSnapshot && DB.doorlockPrevSnapshot.records || []).map(r=>[r.serial, r]));
+  const chips = [];
+  records.forEach(r=>{
+    if(!r.connected){
+      const prev = prevBySerial.get(r.serial);
+      chips.push({ record: r, status: (prev && prev.connected===false) ? 'existing' : 'new' });
+    }
+  });
+  return chips;
+}
+const DOORLOCK_STATUS_COLORS = {
+  existing: { bg:'var(--st-hold-bg)', fg:'var(--st-hold)' },
+  new: { bg:'var(--st-leaving-bg)', fg:'var(--st-leaving)' }
+};
 function renderDoorlockDisconnectedSection(records){
   const box = document.createElement('div');
   box.className = 'stat-section';
-  box.innerHTML = `<h3 style="margin:0 0 12px;">지점별 미연결 방</h3>`;
-  // 1차: 기기명 기준 그룹핑 키(branchGroup)별로 묶는다.
+  const todaySlash = localDateKey().replace(/-/g,'/');
+  box.innerHTML = `<h3 style="margin:0 0 12px;font-size:16px;">지점별 도어락 미연결 정보 (${esc(todaySlash)})</h3>`;
+
+  const chipBySerial = new Map(computeDoorlockChipList(records).map(c=> [c.record.serial, c]));
+
+  // 1차: 기기명 기준 그룹핑 키(branchGroup)별로 묶는다(연결에 문제 없는 지점도 "전체
+  // 연결됨"으로 보여주기 위해 전체 레코드를 기준으로 묶는다).
   const rawGroups = {};
   records.forEach(r=>{
     const key = r.branchGroup || '기타';
@@ -6155,17 +6285,17 @@ function renderDoorlockDisconnectedSection(records){
   const tbody = document.createElement('tbody');
   Object.keys(displayGroups).sort((a,b)=> a.localeCompare(b,'ko')).forEach(label=>{
     const group = displayGroups[label];
-    // 도어락 기기가 같은 방에 여러 대(재스캔 등)라 라벨이 같은 값으로 겹칠 수 있어 라벨 기준으로 중복 제거한다.
-    const seenLabels = new Set();
-    const disconnected = group.records
-      .filter(r=> !r.connected)
-      .filter(r=>{
-        const roomLabel = doorlockRoomLabel(r);
-        if(seenLabels.has(roomLabel)) return false;
-        seenLabels.add(roomLabel);
-        return true;
-      })
-      .sort((a,b)=> doorlockRoomLabel(a).localeCompare(doorlockRoomLabel(b), 'ko', {numeric:true}));
+    // 도어락 기기가 같은 방에 여러 대(재스캔 등)라 라벨이 같은 값으로 겹칠 수 있어 라벨
+    // 기준으로 중복 제거한다.
+    const byRoomLabel = new Map();
+    group.records.forEach(r=>{
+      const chip = chipBySerial.get(r.serial);
+      if(!chip) return; // 연결됨(문제 없음)이면 표시하지 않는다
+      const rl = doorlockRoomLabel(r);
+      if(!byRoomLabel.has(rl)) byRoomLabel.set(rl, chip);
+    });
+    const chipsSorted = Array.from(byRoomLabel.values())
+      .sort((a,b)=> doorlockRoomLabel(a.record).localeCompare(doorlockRoomLabel(b.record), 'ko', {numeric:true}));
     const tr = document.createElement('tr');
     const branchTd = document.createElement('td');
     branchTd.style.cssText = 'font-weight:700;white-space:nowrap;';
@@ -6208,15 +6338,23 @@ function renderDoorlockDisconnectedSection(records){
       branchTd.textContent = label;
     }
     const roomTd = document.createElement('td');
-    if(disconnected.length===0){
+    if(chipsSorted.length===0){
       roomTd.innerHTML = '<span style="color:var(--ink-soft);">전체 연결됨</span>';
     } else {
       roomTd.style.cssText = 'display:flex; flex-wrap:wrap; gap:6px;';
-      disconnected.forEach(r=>{
+      chipsSorted.forEach(c=>{
+        const r = c.record;
+        const colors = DOORLOCK_STATUS_COLORS[c.status];
         const chip = document.createElement('span');
         chip.className = 'badge';
-        chip.style.cssText = 'background:var(--st-hold-bg); color:var(--st-hold);';
-        chip.textContent = doorlockRoomLabel(r);
+        chip.style.cssText = `background:${colors.bg}; color:${colors.fg};`;
+        const tagInfo = DB.doorlockActionTags && DB.doorlockActionTags[r.serial];
+        chip.textContent = doorlockRoomLabel(r) + (tagInfo ? ` · ${tagInfo.tag}` : '');
+        chip.title = r.lastConnected ? `마지막 연결: ${r.lastConnected}` : '연결 기록 없음';
+        if(canEdit()){
+          chip.style.cursor = 'pointer';
+          chip.onclick = ()=> showDoorlockActionModal(r.serial, `${label} ${doorlockRoomLabel(r)}`);
+        }
         roomTd.appendChild(chip);
       });
     }
@@ -6225,6 +6363,16 @@ function renderDoorlockDisconnectedSection(records){
   });
   table.appendChild(tbody);
   box.appendChild(table);
+
+  const legend = document.createElement('div');
+  legend.style.cssText = 'display:flex; gap:14px; flex-wrap:wrap; margin-top:10px; font-size:11.5px; color:var(--ink-soft);';
+  const legendDot = (color)=> `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${color};margin-right:4px;"></span>`;
+  legend.innerHTML = `
+    <span>${legendDot('var(--st-hold)')}기존 미연결</span>
+    <span>${legendDot('var(--st-leaving)')}신규 미연결</span>
+  `;
+  box.appendChild(legend);
+
   return box;
 }
 function renderDoorlockNewIssuesSection(prevRecords, currRecords){
@@ -6245,6 +6393,35 @@ function renderDoorlockNewIssuesSection(prevRecords, currRecords){
   added.forEach(r=>{
     const tr = document.createElement('tr');
     tr.innerHTML = `<td style="white-space:nowrap;">${esc(doorlockBranchLabel(r.branchGroup))}</td><td>${esc(doorlockRoomLabel(r))}</td><td>${esc(r.battery||'-')}</td><td>${esc(r.lastConnected||'-')}</td>`;
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  box.appendChild(table);
+  return box;
+}
+// 전날(직전 붙여넣기)에는 미연결이었는데 오늘은 연결된 방을 상단에 별도로 모아 보여준다.
+// 하루만 보여주고 자연히 빠진다 — doorlockPrevSnapshot이 매번 한 칸씩 앞으로 이동하므로,
+// 다음 붙여넣기 때는 "그 전날"이 이미 연결 상태였던 것으로 비교되어 더 이상 여기 나오지 않는다.
+function renderDoorlockResolvedSection(prevRecords, currRecords){
+  const prevBySerial = new Map((prevRecords||[]).map(r=>[r.serial, r]));
+  const resolved = currRecords.filter(r=>{
+    const prev = prevBySerial.get(r.serial);
+    return prev && prev.connected===false && r.connected===true;
+  }).sort((a,b)=> doorlockBranchLabel(a.branchGroup).localeCompare(doorlockBranchLabel(b.branchGroup),'ko'));
+  const box = document.createElement('div');
+  box.className = 'stat-section cleaning-card';
+  box.innerHTML = `<h3 style="margin:0;">정상 연결됨 <span class="cnt-badge">${resolved.length}</span></h3>`;
+  if(resolved.length===0){
+    box.appendChild(el('div','cleaning-empty','해당 항목이 없습니다.'));
+    return box;
+  }
+  const table = document.createElement('table');
+  table.className = 'doorlock-table';
+  table.innerHTML = `<thead><tr><th>지점</th><th>방</th></tr></thead>`;
+  const tbody = document.createElement('tbody');
+  resolved.forEach(r=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td style="white-space:nowrap;">${esc(doorlockBranchLabel(r.branchGroup))}</td><td>${esc(doorlockRoomLabel(r))}</td>`;
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
@@ -6275,11 +6452,12 @@ function renderDoorlockView(){
       resetBtn.className = 'btn danger';
       resetBtn.textContent = '데이터 초기화';
       resetBtn.onclick = ()=>{
-        showConfirm('도어락 데이터를 모두 초기화할까요?\n지금까지 붙여넣은 데이터, 이전 비교 기록, 지점명 수정 내역이 모두 삭제됩니다.', ()=>{
+        showConfirm('도어락 데이터를 모두 초기화할까요?\n지금까지 붙여넣은 데이터, 이전 비교 기록, 지점명 수정 내역, 처리 방법 태그가 모두 삭제됩니다.', ()=>{
           DB.doorlocks = [];
           DB.doorlockPrevSnapshot = null;
           DB.doorlockImportDate = '';
           DB.doorlockBranchNameOverrides = {};
+          DB.doorlockActionTags = {};
           logChange('도어락 데이터 초기화');
           scheduleSave(); render();
         });
@@ -6296,8 +6474,15 @@ function renderDoorlockView(){
     return wrap;
   }
 
+  const actionSummary = renderDoorlockActionSummary();
+  if(actionSummary) wrap.appendChild(actionSummary);
+
   if(DB.doorlockPrevSnapshot && DB.doorlockPrevSnapshot.records && DB.doorlockPrevSnapshot.records.length){
-    wrap.appendChild(renderDoorlockNewIssuesSection(DB.doorlockPrevSnapshot.records, records));
+    const diffGrid = document.createElement('div');
+    diffGrid.className = 'cleaning-cards-grid';
+    diffGrid.appendChild(renderDoorlockNewIssuesSection(DB.doorlockPrevSnapshot.records, records));
+    diffGrid.appendChild(renderDoorlockResolvedSection(DB.doorlockPrevSnapshot.records, records));
+    wrap.appendChild(diffGrid);
   }
   wrap.appendChild(renderDoorlockDisconnectedSection(records));
 
