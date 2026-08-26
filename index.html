@@ -6125,25 +6125,38 @@ function renderDoorlockDisconnectedSection(records){
   const box = document.createElement('div');
   box.className = 'stat-section';
   box.innerHTML = `<h3 style="margin:0 0 12px;">지점별 미연결 방</h3>`;
-  const groups = {};
+  // 1차: 기기명 기준 그룹핑 키(branchGroup)별로 묶는다.
+  const rawGroups = {};
   records.forEach(r=>{
     const key = r.branchGroup || '기타';
-    (groups[key] = groups[key] || []).push(r);
+    (rawGroups[key] = rawGroups[key] || []).push(r);
   });
+  // 2차: 화면에 보여줄 지점명(소속명 기준 라벨)이 같으면 한 행으로 합친다 — 기기명 패턴이
+  // 같은 지점 안에서도 완전히 통일돼있지 않으면 같은 지점이 서로 다른 branchGroup으로
+  // 쪼개질 수 있는데, 지점명이 같다면 화면에는 하나로 보여줘야 한다.
+  const displayGroups = {};
+  Object.keys(rawGroups).forEach(key=>{
+    const groupRecords = rawGroups[key];
+    const label = doorlockBranchLabel(key, groupRecords[0].affiliation);
+    if(!displayGroups[label]) displayGroups[label] = { keys: [], records: [] };
+    displayGroups[label].keys.push(key);
+    displayGroups[label].records.push(...groupRecords);
+  });
+
   const table = document.createElement('table');
   table.className = 'doorlock-table';
   table.innerHTML = `<thead><tr><th>지점</th><th>미연결 방</th></tr></thead>`;
   const tbody = document.createElement('tbody');
-  Object.keys(groups).sort((a,b)=> doorlockBranchLabel(a, groups[a][0].affiliation).localeCompare(doorlockBranchLabel(b, groups[b][0].affiliation),'ko')).forEach(branchName=>{
-    const affiliation = groups[branchName][0].affiliation;
+  Object.keys(displayGroups).sort((a,b)=> a.localeCompare(b,'ko')).forEach(label=>{
+    const group = displayGroups[label];
     // 도어락 기기가 같은 방에 여러 대(재스캔 등)라 라벨이 같은 값으로 겹칠 수 있어 라벨 기준으로 중복 제거한다.
     const seenLabels = new Set();
-    const disconnected = groups[branchName]
+    const disconnected = group.records
       .filter(r=> !r.connected)
       .filter(r=>{
-        const label = doorlockRoomLabel(r);
-        if(seenLabels.has(label)) return false;
-        seenLabels.add(label);
+        const roomLabel = doorlockRoomLabel(r);
+        if(seenLabels.has(roomLabel)) return false;
+        seenLabels.add(roomLabel);
         return true;
       })
       .sort((a,b)=> doorlockRoomLabel(a).localeCompare(doorlockRoomLabel(b), 'ko', {numeric:true}));
@@ -6152,23 +6165,28 @@ function renderDoorlockDisconnectedSection(records){
     branchTd.style.cssText = 'font-weight:700;white-space:nowrap;';
     if(canEdit()){
       const nameSpan = document.createElement('span');
-      nameSpan.textContent = doorlockBranchLabel(branchName, affiliation);
+      nameSpan.textContent = label;
       nameSpan.style.cursor = 'pointer';
       nameSpan.title = '클릭하여 지점명 수정';
       nameSpan.onclick = ()=>{
         const input = document.createElement('input');
         input.type = 'text';
-        input.value = doorlockBranchLabel(branchName, affiliation);
+        input.value = label;
         input.style.cssText = 'width:130px;font-weight:700;';
         const commit = ()=>{
-          const oldLabel = doorlockBranchLabel(branchName, affiliation);
           const val = input.value.trim();
           if(!DB.doorlockBranchNameOverrides) DB.doorlockBranchNameOverrides = {};
-          if(val && val !== branchName) DB.doorlockBranchNameOverrides[branchName] = val;
-          else delete DB.doorlockBranchNameOverrides[branchName];
-          const newLabel = doorlockBranchLabel(branchName, affiliation);
-          if(newLabel !== oldLabel){
-            logChange(`도어락 지점명 수정: "${oldLabel}" → "${newLabel}"`);
+          // 합쳐진 행일 수 있으므로, 이 행을 구성하는 모든 branchGroup 키에 같은 수정값을
+          // 적용해야 다음 렌더에서도 계속 하나로 합쳐진 채 유지된다.
+          let changed = false;
+          group.keys.forEach(key=>{
+            const before = DB.doorlockBranchNameOverrides[key];
+            if(val) DB.doorlockBranchNameOverrides[key] = val;
+            else delete DB.doorlockBranchNameOverrides[key];
+            if(before !== DB.doorlockBranchNameOverrides[key]) changed = true;
+          });
+          if(changed){
+            logChange(`도어락 지점명 수정: "${label}" → "${val || label}"`);
             scheduleSave();
           }
           render();
@@ -6181,7 +6199,7 @@ function renderDoorlockDisconnectedSection(records){
       };
       branchTd.appendChild(nameSpan);
     } else {
-      branchTd.textContent = doorlockBranchLabel(branchName, affiliation);
+      branchTd.textContent = label;
     }
     const roomTd = document.createElement('td');
     if(disconnected.length===0){
