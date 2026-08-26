@@ -812,6 +812,9 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const firestoreDB = firebase.firestore();
 const FIRESTORE_DOC = firestoreDB.collection('monthliv').doc('state');
+// 도어락 현황을 로그인 없이 공유할 수 있도록, 도어락 관련 필드만 별도 문서로 미러링한다.
+// (전체 상태 문서는 입주자 개인정보 등을 포함하고 있어 그대로 공개할 수 없다.)
+const DOORLOCK_PUBLIC_DOC = firestoreDB.collection('monthliv').doc('doorlockPublic');
 const USERS_COL = firestoreDB.collection('users');
 const CHANGELOG_COL = firestoreDB.collection('changeLog');
 const EMAIL_INDEX_COL = firestoreDB.collection('emailIndex');
@@ -845,6 +848,7 @@ function indexEmail(email){
 
 let CURRENT_USER = null;   // { uid, email }
 let USER_ROLE = null;      // 'pending' | 'viewer' | 'editor' | 'superadmin'
+let DOORLOCK_PUBLIC_VIEW = false; // true only on the login-free ?public=doorlock share page
 let USER_BRANCH_SCOPE = 'all'; // 'all' | 'selected' — superadmin is always effectively 'all'
 let USER_BRANCH_IDS = null;    // array of branch ids, only meaningful when scope === 'selected'
 function canEdit(){ return USER_ROLE === 'editor' || USER_ROLE === 'superadmin'; }
@@ -6118,8 +6122,22 @@ function importDoorlockRecords(records, onImported){
   }
   logChange(`도어락 데이터 붙여넣기: ${records.length}건 갱신`);
   scheduleSave();
+  syncDoorlockPublicMirror();
   render();
   if(onImported) onImported();
+}
+// 로그인 없이 볼 수 있는 공유 링크(?public=doorlock)용으로, 도어락 관련 필드만 별도 문서에
+// 복사해둔다. 처리 방법 태그(아톡/청소방/현장출동)는 내부 운영 정보라 공유 대상에서 제외한다.
+function syncDoorlockPublicMirror(){
+  DOORLOCK_PUBLIC_DOC.set({
+    doorlocks: DB.doorlocks || [],
+    doorlockPrevSnapshot: DB.doorlockPrevSnapshot || null,
+    doorlockImportDate: DB.doorlockImportDate || '',
+    doorlockHistory: DB.doorlockHistory || [],
+    doorlockBranchNameOverrides: DB.doorlockBranchNameOverrides || {},
+    doorlockBranchNotes: DB.doorlockBranchNotes || {},
+    updatedAt: new Date().toISOString()
+  }).catch(e=> console.error('공유용 도어락 데이터 동기화 실패:', e));
 }
 // 히스토리에서 offsetFromLatest(0=최신)만큼 과거로 이동한 스냅샷과, 그 비교 기준(하루 전)이 될
 // 스냅샷을 함께 반환한다. 히스토리가 비어 있으면 null.
@@ -6371,6 +6389,7 @@ function renderDoorlockDisconnectedSection(records, prevRecords, dateForTitle, e
           if(changed){
             logChange(`도어락 지점명 수정: "${label}" → "${val || label}"`);
             scheduleSave();
+            syncDoorlockPublicMirror();
           }
           render();
         };
@@ -6432,6 +6451,7 @@ function renderDoorlockDisconnectedSection(records, prevRecords, dateForTitle, e
           if(changed){
             logChange(`도어락 "${label}" 특이사항 수정`);
             scheduleSave();
+            syncDoorlockPublicMirror();
           }
           render();
         };
@@ -6506,17 +6526,34 @@ function renderDoorlockResolvedSection(prevRecords, currRecords){
   box.appendChild(table);
   return box;
 }
+// 도어락 화면(과거 날짜 이동 등)만 다시 그린다. 로그인 없는 공유 화면(?public=doorlock)에는
+// 지점 목록·상단 메뉴 등 나머지 앱 상태가 없으므로, 전체 render()를 부르면 그 상태를 읽으려다
+// 오류가 난다 — 공유 화면일 때는 도어락 섹션만 직접 다시 그린다.
+function refreshDoorlockDisplay(){
+  if(DOORLOCK_PUBLIC_VIEW){
+    const main = document.getElementById('main');
+    main.innerHTML = '';
+    main.appendChild(renderDoorlockView());
+  } else {
+    render();
+  }
+}
 function renderDoorlockView(){
   const wrap = document.createElement('div');
   wrap.style.paddingTop = '18px';
 
   const headerBox = document.createElement('div');
   headerBox.className = 'stat-section';
-  headerBox.innerHTML = `<h3>도어락 연결 관리</h3>
-    <div style="font-size:12px;color:var(--ink-soft);margin-bottom:12px;">
-      도어락 관리 업체 표(기기명·일련번호·소속명·공간명·SSID·배터리·마지막 연결·소유자, 헤더 포함)를 통째로 붙여넣으면 지점별 미연결 방 현황으로 정리됩니다.
-      ${DB.doorlockImportDate ? `마지막으로 붙여넣은 날짜: ${esc(DB.doorlockImportDate)}` : '아직 붙여넣은 데이터가 없습니다.'}
-    </div>`;
+  headerBox.innerHTML = DOORLOCK_PUBLIC_VIEW
+    ? `<h3>도어락 연결 현황 (공유 링크)</h3>
+       <div style="font-size:12px;color:var(--ink-soft);margin-bottom:12px;">
+         조회 전용 공유 화면입니다. ${DB.doorlockImportDate ? `마지막으로 갱신된 날짜: ${esc(DB.doorlockImportDate)}` : '아직 데이터가 없습니다.'}
+       </div>`
+    : `<h3>도어락 연결 관리</h3>
+       <div style="font-size:12px;color:var(--ink-soft);margin-bottom:12px;">
+         도어락 관리 업체 표(기기명·일련번호·소속명·공간명·SSID·배터리·마지막 연결·소유자, 헤더 포함)를 통째로 붙여넣으면 지점별 미연결 방 현황으로 정리됩니다.
+         ${DB.doorlockImportDate ? `마지막으로 붙여넣은 날짜: ${esc(DB.doorlockImportDate)}` : '아직 붙여넣은 데이터가 없습니다.'}
+       </div>`;
   if(canEdit()){
     const btnRow = document.createElement('div');
     btnRow.style.cssText = 'display:flex; gap:8px; flex-wrap:wrap;';
@@ -6540,7 +6577,7 @@ function renderDoorlockView(){
           DB.doorlockHistory = [];
           UI.doorlockHistoryOffset = 0;
           logChange('도어락 데이터 초기화');
-          scheduleSave(); render();
+          scheduleSave(); syncDoorlockPublicMirror(); render();
         });
       };
       btnRow.appendChild(resetBtn);
@@ -6566,25 +6603,46 @@ function renderDoorlockView(){
   const viewPrevRecords = snap.prevRecords;
   const isLatest = offset === 0;
 
-  if(maxOffset > 0){
+  {
     const navBar = document.createElement('div');
     navBar.style.cssText = 'display:flex; align-items:center; justify-content:center; gap:12px; margin-bottom:14px;';
-    const prevBtn = document.createElement('button');
-    prevBtn.className = 'btn small';
-    prevBtn.textContent = '◀ 이전';
-    prevBtn.disabled = offset >= maxOffset;
-    prevBtn.onclick = ()=>{ UI.doorlockHistoryOffset = Math.min(maxOffset, offset+1); render(); };
+    if(maxOffset > 0){
+      const prevBtn = document.createElement('button');
+      prevBtn.className = 'btn small';
+      prevBtn.textContent = '◀ 이전';
+      prevBtn.disabled = offset >= maxOffset;
+      prevBtn.onclick = ()=>{ UI.doorlockHistoryOffset = Math.min(maxOffset, offset+1); refreshDoorlockDisplay(); };
+      navBar.appendChild(prevBtn);
+    }
     const dateLabel = document.createElement('span');
     dateLabel.style.cssText = 'font-weight:700; font-size:13px; min-width:120px; text-align:center;';
     dateLabel.textContent = `${(snap.date||'').replace(/-/g,'/')}${isLatest ? ' (최신)' : ''}`;
-    const nextBtn = document.createElement('button');
-    nextBtn.className = 'btn small';
-    nextBtn.textContent = '다음 ▶';
-    nextBtn.disabled = isLatest;
-    nextBtn.onclick = ()=>{ UI.doorlockHistoryOffset = Math.max(0, offset-1); render(); };
-    navBar.appendChild(prevBtn); navBar.appendChild(dateLabel); navBar.appendChild(nextBtn);
+    navBar.appendChild(dateLabel);
+    if(maxOffset > 0){
+      const nextBtn = document.createElement('button');
+      nextBtn.className = 'btn small';
+      nextBtn.textContent = '다음 ▶';
+      nextBtn.disabled = isLatest;
+      nextBtn.onclick = ()=>{ UI.doorlockHistoryOffset = Math.max(0, offset-1); refreshDoorlockDisplay(); };
+      navBar.appendChild(nextBtn);
+    }
+    if(!DOORLOCK_PUBLIC_VIEW){
+      const shareBtn = document.createElement('button');
+      shareBtn.className = 'btn small';
+      shareBtn.textContent = '공유하기';
+      shareBtn.title = '로그인 없이 이 날짜의 도어락 현황을 볼 수 있는 링크를 복사합니다';
+      shareBtn.onclick = ()=>{
+        const url = `${location.origin}${location.pathname}?public=doorlock&date=${encodeURIComponent(snap.date || '')}`;
+        navigator.clipboard.writeText(url).then(()=>{
+          const orig = shareBtn.textContent;
+          shareBtn.textContent = '복사됨';
+          setTimeout(()=>{ shareBtn.textContent = orig; }, 1500);
+        }).catch(()=> showAlert(`링크 복사에 실패했습니다. 직접 복사해주세요:\n${url}`));
+      };
+      navBar.appendChild(shareBtn);
+    }
     wrap.appendChild(navBar);
-    if(!isLatest){
+    if(maxOffset > 0 && !isLatest){
       wrap.appendChild(el('div', null, '지난 기록을 보고 있습니다(수정 불가) · "다음 ▶"을 눌러 최신으로 돌아갈 수 있습니다.', 'font-size:11.5px;color:var(--ink-soft);text-align:center;margin-bottom:14px;'));
     }
   }
@@ -7298,16 +7356,59 @@ function showChangePasswordModal(){
   document.body.appendChild(overlay);
 }
 
-let suppressAuthHandling = false;
-firebase.auth().onAuthStateChanged(user=>{
-  if(suppressAuthHandling) return;
-  if(user){ initApp(user); }
-  else {
-    CURRENT_USER = null; USER_ROLE = null;
-    if(firestoreUnsubscribe){ firestoreUnsubscribe(); firestoreUnsubscribe = null; }
-    showLoginScreen();
+// 도어락 현황 공유 링크(?public=doorlock)는 로그인 절차를 아예 건너뛴다 — Firebase 인증 상태
+// 구독 자체를 등록하지 않아, 링크를 연 사람의 기기에 로그인 세션이 없어도 로그인 화면이
+// 뜨지 않는다.
+function isPublicDoorlockShareUrl(){
+  return new URLSearchParams(location.search).get('public') === 'doorlock';
+}
+async function initPublicDoorlockView(){
+  DOORLOCK_PUBLIC_VIEW = true;
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('pendingScreen').style.display = 'none';
+  document.getElementById('app').style.display = '';
+  document.querySelector('#app > header.top').style.display = 'none';
+  DB = { doorlocks: [], doorlockPrevSnapshot: null, doorlockImportDate: '', doorlockHistory: [],
+    doorlockBranchNameOverrides: {}, doorlockBranchNotes: {}, doorlockActionTags: {} };
+  try{
+    const snap = await DOORLOCK_PUBLIC_DOC.get();
+    if(snap.exists){
+      const d = snap.data() || {};
+      DB.doorlocks = d.doorlocks || [];
+      DB.doorlockPrevSnapshot = d.doorlockPrevSnapshot || null;
+      DB.doorlockImportDate = d.doorlockImportDate || '';
+      DB.doorlockHistory = d.doorlockHistory || [];
+      DB.doorlockBranchNameOverrides = d.doorlockBranchNameOverrides || {};
+      DB.doorlockBranchNotes = d.doorlockBranchNotes || {};
+    }
+  }catch(e){
+    console.error('공유용 도어락 데이터 조회 실패:', e);
   }
-});
+  UI.doorlockHistoryOffset = 0;
+  const requestedDate = new URLSearchParams(location.search).get('date');
+  if(requestedDate){
+    const idx = DB.doorlockHistory.findIndex(h=> h.date === requestedDate);
+    if(idx >= 0) UI.doorlockHistoryOffset = DB.doorlockHistory.length - 1 - idx;
+  }
+  const main = document.getElementById('main');
+  main.innerHTML = '';
+  main.appendChild(renderDoorlockView());
+}
+
+let suppressAuthHandling = false;
+if(isPublicDoorlockShareUrl()){
+  initPublicDoorlockView();
+} else {
+  firebase.auth().onAuthStateChanged(user=>{
+    if(suppressAuthHandling) return;
+    if(user){ initApp(user); }
+    else {
+      CURRENT_USER = null; USER_ROLE = null;
+      if(firestoreUnsubscribe){ firestoreUnsubscribe(); firestoreUnsubscribe = null; }
+      showLoginScreen();
+    }
+  });
+}
 // PC를 계속 켜둔 채 로그인 화면을 새로고침 없이 며칠씩 열어두면 initApp()이 다시 실행되지
 // 않아 날짜가 바뀌어도 자동 백업/리터치 자동 예약이 안 갱신된다. 그래서 별도로 주기적으로
 // (1시간마다) 오늘 백업이 있는지, 새로 리터치 예약 대상이 된 방이 있는지 확인한다.
