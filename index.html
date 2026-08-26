@@ -6353,8 +6353,7 @@ function renderDoorlockDisconnectedSection(records){
         const chip = document.createElement('span');
         chip.className = 'badge';
         chip.style.cssText = `background:${colors.bg}; color:${colors.fg};`;
-        const tagInfo = DB.doorlockActionTags && DB.doorlockActionTags[r.serial];
-        chip.textContent = doorlockRoomLabel(r) + (tagInfo ? ` · ${tagInfo.tag}` : '');
+        chip.textContent = doorlockRoomLabel(r);
         chip.title = r.lastConnected ? `마지막 연결: ${r.lastConnected}` : '연결 기록 없음';
         if(canEdit()){
           chip.style.cursor = 'pointer';
