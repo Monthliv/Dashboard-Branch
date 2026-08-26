@@ -6003,8 +6003,13 @@ function applyDoorlockBuildingSplit(branchGroup, deviceName){
 // "호텔스테이"처럼 짧은 단어("스테이")를 포함하는 합성어도 통째로 지워진다.
 const DOORLOCK_GENERIC_WORDS = ['먼슬리브','레지던스','원룸텔','호텔스테이','스테이'].sort((a,b)=> b.length-a.length);
 function doorlockStripGenericWords(s){
+  // "스테이"/"호텔스테이"는 먼슬리브 소속 기기의 일반적인 명칭 표기(예: "먼슬리브강남스테이"
+  // -> "강남")일 때만 지운다. "먼슬리브"가 아예 없는 곳(다른 업체·건물의 고유 명칭)에 들어있는
+  // "스테이"는 그 이름의 일부이므로 그대로 유지한다.
+  const hasMonthliv = s.includes('먼슬리브');
   let cleaned = s;
   DOORLOCK_GENERIC_WORDS.forEach(w=>{
+    if((w === '스테이' || w === '호텔스테이') && !hasMonthliv) return;
     // 바로 뒤에 숫자가 오면(예: "스테이79") 일반 명칭이 아니라 그 지점 고유의 이름 일부일
     // 수 있어 지우지 않는다.
     const re = new RegExp(w + '(?!\\d)', 'g');
