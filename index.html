@@ -6415,7 +6415,11 @@ function renderDoorlockDisconnectedSection(records, prevRecords, dateForTitle, e
     if(chipsSorted.length===0){
       roomTd.innerHTML = '<span style="color:var(--ink-soft);">전체 연결됨</span>';
     } else {
-      roomTd.style.cssText = 'display:flex; flex-wrap:wrap; gap:6px;';
+      // td 자체에 display:flex를 주면 table-cell 레이아웃을 벗어나 border-collapse 시
+      // 옆 칸(특이사항)이 줄바꿈으로 길어질 때 테두리 줄이 어긋나 보이는 문제가 있어,
+      // td는 그대로 두고 안에 래퍼 div로만 flex를 적용한다.
+      const chipsWrap = document.createElement('div');
+      chipsWrap.style.cssText = 'display:flex; flex-wrap:wrap; gap:6px;';
       chipsSorted.forEach(c=>{
         const r = c.record;
         const colors = DOORLOCK_STATUS_COLORS[c.status];
@@ -6428,8 +6432,9 @@ function renderDoorlockDisconnectedSection(records, prevRecords, dateForTitle, e
           chip.style.cursor = 'pointer';
           chip.onclick = ()=> showDoorlockActionModal(r.serial, `${label} ${doorlockRoomLabel(r)}`);
         }
-        roomTd.appendChild(chip);
+        chipsWrap.appendChild(chip);
       });
+      roomTd.appendChild(chipsWrap);
     }
     const noteTd = document.createElement('td');
     const note = group.keys.map(k=> DB.doorlockBranchNotes && DB.doorlockBranchNotes[k]).find(Boolean) || '';
