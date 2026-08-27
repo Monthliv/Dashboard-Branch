@@ -21,6 +21,7 @@
     --st-vacant:#8B96A0;   --st-vacant-bg:#EEF0F2;
     --st-forsale:#2F6FED;  --st-forsale-bg:#E8EFFD;
     --st-occupied:#10767A; --st-occupied-bg:#E1F1F1;
+    --st-confirmed:#3B7A9E; --st-confirmed-bg:#E5F1F7;
     --st-leaving:#C98A2C;  --st-leaving-bg:#FBF0DD;
     --st-hold:#C0473F;     --st-hold-bg:#FBE7E5;
     --st-presell:#6C5FC7;  --st-presell-bg:#EDEBFA;
@@ -643,8 +644,8 @@ function syncBranchSelectOption(branch){
   if(opt) opt.textContent = branchLabel(branch);
 }
 
-const STATUS_LIST = ['이용중','이용중판매','단기판매','판매중','퇴실확정','공실','판매보류'];
-const STATUS_LIST_MANUAL = STATUS_LIST.filter(s => !['이용중','이용중판매','단기판매','퇴실확정'].includes(s));
+const STATUS_LIST = ['이용중','입실확정','이용중판매','단기판매','판매중','퇴실확정','공실','판매보류'];
+const STATUS_LIST_MANUAL = STATUS_LIST.filter(s => !['이용중','입실확정','이용중판매','단기판매','퇴실확정'].includes(s));
 const STATUS_LIST_STATS = STATUS_LIST.filter(s => !['이용중판매','단기판매'].includes(s));
 function roomBranch(room){ return DB.branches.find(b=>b.id===room.branchId); }
 // 제주점만 "이용중" 집계 기준이 다르다: 당일 기준 실제 재실 입실자가 있는 방만 이용중으로 센다.
@@ -1130,6 +1131,7 @@ function statusMeta(s){
     '공실':        { fg:'var(--st-vacant)',   bg:'var(--st-vacant-bg)' },
     '판매중':      { fg:'var(--st-forsale)',  bg:'var(--st-forsale-bg)' },
     '이용중':      { fg:'var(--st-occupied)', bg:'var(--st-occupied-bg)' },
+    '입실확정':    { fg:'var(--st-confirmed)', bg:'var(--st-confirmed-bg)' },
     '이용중판매':  { fg:'var(--st-presell)',  bg:'var(--st-presell-bg)' },
     '단기판매':    { fg:'var(--st-shortsale)', bg:'var(--st-shortsale-bg)' },
     '퇴실확정':    { fg:'var(--st-leaving)',  bg:'var(--st-leaving-bg)' },
@@ -2184,22 +2186,36 @@ function branchExternalParkingList(branch){
 function branchExternalParkingCount(branch){
   return branchExternalParkingList(branch).length;
 }
+// 오늘 날짜와 ISO 날짜 문자열(YYYY-MM-DD) 사이의 일수 차이. 미래 날짜면 양수.
+function daysUntilISO(dateStr){
+  return Math.round((new Date(dateStr) - new Date(todayISO())) / 86400000);
+}
 function effectiveRoomStatus(room){
-  // "이용중"/"이용중판매"/"단기판매"는 오늘 날짜 기준 재실·예약 여부로 자동 판정하며 수동 설정 불가.
-  // 실제로 거주 중인 입실자가 있으면 기본은 "이용중"입니다. 다만 그 입실자가 퇴실 예정(scheduledToLeave)
-  // 상태이고 판매 상태가 "판매중"이면 다음 입실자를 미리 구하는 중이라는 뜻이므로 "이용중판매"로
-  // 표시합니다(이용중/판매중 탭 모두에 노출, roomTabs 참고). 미래 입실예정자만 있는 상태에서
-  // 판매중으로 지정해두면 입실예정일이 임박했더라도(단기판매) 계속 "판매중" 집계(이용중/판매중
-  // 탭 모두에 노출)에 포함됩니다 — 아직 실제로 입실 전이라 판매중 상태를 그대로 반영합니다.
-  // 단, 제주점은 예외입니다: 당일 기준 실제 재실 입실자가 없으면(입실예정자만 있어도) "이용중"으로
-  // 자동 전환하지 않고 지정해둔 판매 상태를 그대로 보여줍니다.
+  // "이용중"/"입실확정"/"이용중판매"/"단기판매"는 오늘 날짜 기준 재실·예약 여부로 자동 판정하며
+  // 수동 설정 불가. 실제로 거주 중인 입실자가 있으면 기본은 "이용중"입니다. 다만 그 입실자가
+  // 퇴실 예정(scheduledToLeave) 상태이고 판매 상태가 "판매중"이면 다음 입실자를 미리 구하는
+  // 중이라는 뜻이므로 "이용중판매"로 표시합니다(이용중/판매중 탭 모두에 노출, roomTabs 참고).
+  // 실거주자 없이 입실예정자만 있는 경우(판매중이 아닐 때), 입실예정일이 오늘 기준 5일 이내
+  // (D-5 이내)면 임박한 입실이라 "이용중"으로, 6일 이상 남았으면(D-6 이상) 아직 임박하지 않은
+  // 예약이라는 뜻으로 "입실확정"으로 구분합니다 — 한참 남은 예약 건까지 "이용중" 집계에 섞이지
+  // 않도록 하기 위함입니다. 판매중으로 지정해두면 입실예정일이 임박했더라도(단기판매) 계속
+  // "판매중" 집계(이용중/판매중 탭 모두에 노출)에 포함됩니다 — 아직 실제로 입실 전이라 판매중
+  // 상태를 그대로 반영합니다. 단, 제주점은 예외입니다: 당일 기준 실제 재실 입실자가 없으면
+  // (입실예정자만 있어도) "이용중"/"입실확정"으로 자동 전환하지 않고 지정해둔 판매 상태를
+  // 그대로 보여줍니다.
   if(roomHasActiveResident(room)){
     const hasCurrent = DB.residents.some(p => p.roomId===room.id && isCurrentlyResiding(p));
     if(hasCurrent){
       if(room.saleStatus === '판매중' && roomHasScheduledLeaveResident(room)) return '이용중판매';
       return '이용중';
     }
-    if(room.saleStatus !== '판매중') return isJejuBranch(roomBranch(room)) ? room.saleStatus : '이용중';
+    if(room.saleStatus !== '판매중'){
+      if(isJejuBranch(roomBranch(room))) return room.saleStatus;
+      const nearestUpcoming = DB.residents.filter(p=> p.roomId===room.id && isUpcoming(p))
+        .sort((a,b)=> a.moveIn.localeCompare(b.moveIn))[0];
+      if(nearestUpcoming && daysUntilISO(nearestUpcoming.moveIn) >= 6) return '입실확정';
+      return '이용중';
+    }
     return '단기판매';
   }
   return room.saleStatus;
