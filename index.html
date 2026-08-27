@@ -651,13 +651,14 @@ function roomBranch(room){ return DB.branches.find(b=>b.id===room.branchId); }
 // 제주점만 "이용중" 집계 기준이 다르다: 당일 기준 실제 재실 입실자가 있는 방만 이용중으로 센다.
 // 다른 지점은 입실예정자만 있어도(아직 입실 전) 이용중으로 잡는 기존 기준을 그대로 쓴다.
 function isJejuBranch(branch){ return !!branch && cleanKeyLoose(branch.name).includes('제주'); }
-// 퇴실청소/리터치 자동 플래그(flagUpcomingCleaning·autoFlagDueRetouch)에서 제외할 지점 목록.
-// 이 지점들은 일반 고시원과 운영 방식이 달라(현장에서 별도로 청소 관리) 본사 대시보드가 자동으로
-// 청소/리터치를 걸 필요가 없다. 위 이용중 집계 예외(isJejuBranch)와는 별개 목록이다 — 제주는 두
-// 예외 모두에 해당하지만, 새로 추가되는 지점(예: 오산)은 이 청소/리터치 예외에만 해당할 수 있다.
-const AUTO_CLEANING_EXCLUDED_BRANCH_NAMES = ['제주', '오산'];
+// 퇴실청소/리터치 자동 플래그(flagUpcomingCleaning·autoFlagDueRetouch)에서 제외할지 여부는 지점
+// 정보 화면(renderBranchInfoBar)에서 지점별로 직접 켜고 끌 수 있는 branch.autoCleaningExcluded
+// 필드로 관리한다(코드 수정 없이 담당자가 직접 관리). 위 이용중 집계 예외(isJejuBranch)와는
+// 별개 설정이다 — 제주는 둘 다 켜져 있지만, 새로 추가되는 지점은 이 청소/리터치 설정에만
+// 해당할 수 있다. 예전에 하드코딩돼 있던 기본값(제주·오산)은 applyLoadedCore의 1회성
+// 마이그레이션에서만 참고한다.
 function isAutoCleaningExcludedBranch(branch){
-  return !!branch && AUTO_CLEANING_EXCLUDED_BRANCH_NAMES.some(name => cleanKeyLoose(branch.name).includes(name));
+  return !!branch && !!branch.autoCleaningExcluded;
 }
 /* 탭 노출 규칙: 이용중=입실자가 있으면 무조건, 판매중=판매중 상태면 무조건이라 이용중판매/단기판매는
    두 탭 모두에 걸친다. 호실 카드 배지에는 이용중판매/단기판매를 그대로 보여주고(플래그는 유지),
@@ -1061,6 +1062,15 @@ function applyLoadedCore(parsed){
   DB.residents = parsed.residents;
   DB.channelList = (parsed.channelList && parsed.channelList.length) ? parsed.channelList : [...DEFAULT_CHANNEL_LIST];
   DB.shortcuts = parsed.shortcuts || [];
+  // 마이그레이션: 지점 화면에서 직접 켜고 끄는 "청소/리터치 자동 지정 제외" 설정을 도입하기 전에도
+  // 이미 있던 지점은, 예전에 코드에 하드코딩돼 있던 기본값(제주·오산)으로 딱 한 번만 채워준다.
+  // 값이 이미 있으면(담당자가 이미 화면에서 설정했으면) 절대 덮어쓰지 않는다.
+  const LEGACY_AUTO_CLEANING_EXCLUDED_NAMES = ['제주', '오산'];
+  DB.branches.forEach(b=>{
+    if(b.autoCleaningExcluded == null){
+      b.autoCleaningExcluded = LEGACY_AUTO_CLEANING_EXCLUDED_NAMES.some(name => cleanKeyLoose(b.name).includes(name));
+    }
+  });
   DB.residents.forEach(p => {
     if(p.originalMoveIn == null) p.originalMoveIn = p.moveIn || '';
     if(p.scheduledToLeave == null) p.scheduledToLeave = false;
@@ -1747,12 +1757,32 @@ function renderBranchInfoBar(branch){
       }
     };
   }
+  function boolField(field, trueLabel, falseLabel, logLabel){
+    return {
+      view: ()=> document.createTextNode(branch[field] ? trueLabel : falseLabel),
+      edit: ()=>{
+        const label = document.createElement('label');
+        label.style.cssText = 'display:flex; align-items:center; gap:6px; font-weight:400; cursor:pointer;';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = !!branch[field];
+        checkbox.addEventListener('change', ()=>{
+          logChange(`"${branch.name}" ${logLabel} ${checkbox.checked ? '설정' : '해제'}`);
+          branch[field] = checkbox.checked; scheduleSave(); render();
+        });
+        label.appendChild(checkbox);
+        label.appendChild(document.createTextNode(trueLabel));
+        return label;
+      }
+    };
+  }
 
   const infoRows = [
     { label:'주차', view: parkingView, edit: parkingEdit },
     { label:'주차비용', ...textField('parkingFee', '예: 30000원', '주차비용') },
     { label:'엘리베이터', ...textField('elevator', '예: 있음', '엘리베이터 정보') },
     { label:'난방방식', ...textField('heatingType', '예: 개별난방', '난방방식') },
+    { label:'청소/리터치 자동설정', ...boolField('autoCleaningExcluded', '자동 지정 제외 (현장에서 별도 관리)', '사용', '청소/리터치 자동 지정 제외') },
     { label:'헤어드라이기', ...textField('hairDryer', '예: 있음', '헤어드라이기 정보') },
     { label:'청소비', ...feeField('cleaningFee', '예: 50000', '청소비') },
     { label:'1인 추가금', ...textField('doubleOccupancyFee', '예: 100000원', '1인 추가금') },
