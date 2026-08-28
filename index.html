@@ -6403,8 +6403,19 @@ function renderDoorlockActionSummary(){
   box.appendChild(grid);
   return box;
 }
+// 마지막 연결(lastConnected, "YYYY-MM-DD HH:MM:SS")로부터 오늘까지 며칠 지났는지. 연결 기록이
+// 아예 없거나 날짜를 못 읽으면 가장 오래된 것으로 취급한다(Infinity) — 기록이 없다는 것 자체가
+// 이미 한참 방치됐다는 뜻이므로.
+function doorlockDaysSinceLastConnected(record){
+  if(!record.lastConnected) return Infinity;
+  const parsed = new Date(record.lastConnected.slice(0, 10));
+  if(isNaN(parsed.getTime())) return Infinity;
+  return Math.round((new Date(todayISO()) - parsed) / 86400000);
+}
+const DOORLOCK_LONG_OVERDUE_DAYS = 30;
 // 직전 붙여넣기(doorlockPrevSnapshot) 대비 현재 미연결 기기의 상태를 분류한다.
-// existing: 그때도 미연결·지금도 미연결 / new: 그때는 괜찮았는데 지금 미연결(또는 신규 기기).
+// existing: 그때도 미연결·지금도 미연결 / new: 그때는 괜찮았는데 지금 미연결(또는 신규 기기) /
+// longOverdue: existing인데 마지막 연결로부터 30일 이상 지난 것(장기 미연결, 회색으로 구분).
 // "정상 연결됨"(그때 미연결이었는데 지금은 연결됨)은 이 목록에 섞지 않고 상단의 별도
 // 카드(renderDoorlockResolvedSection)에서 하루만 보여준 뒤 자연히 빠진다.
 function computeDoorlockChipList(records, prevRecords){
@@ -6413,14 +6424,22 @@ function computeDoorlockChipList(records, prevRecords){
   records.forEach(r=>{
     if(!r.connected){
       const prev = prevBySerial.get(r.serial);
-      chips.push({ record: r, status: (prev && prev.connected===false) ? 'existing' : 'new' });
+      const isExisting = !!(prev && prev.connected===false);
+      let status;
+      if(isExisting && doorlockDaysSinceLastConnected(r) >= DOORLOCK_LONG_OVERDUE_DAYS) status = 'longOverdue';
+      else status = isExisting ? 'existing' : 'new';
+      chips.push({ record: r, status });
     }
   });
   return chips;
 }
+// 기존(existing)과 신규(new)가 둘 다 따뜻한 톤(amber/red)이라 구분이 잘 안 된다는 피드백으로,
+// 기존은 차가운 톤(cyan)으로 바꿔 신규(red)와 뚜렷이 대비되게 했다. 장기 미연결은 회색
+// (--st-vacant, 공실 배지와 같은 색을 재사용 — 새 CSS 변수를 추가하지 않아도 됨).
 const DOORLOCK_STATUS_COLORS = {
-  existing: { bg:'var(--st-leaving-bg)', fg:'var(--st-leaving)' },
-  new: { bg:'var(--st-hold-bg)', fg:'var(--st-hold)' }
+  existing: { bg:'var(--st-imported-bg)', fg:'var(--st-imported)' },
+  new: { bg:'var(--st-hold-bg)', fg:'var(--st-hold)' },
+  longOverdue: { bg:'var(--st-vacant-bg)', fg:'var(--st-vacant)' }
 };
 // 지점 구분: 소속명(affiliation)에 "먼슬리브"가 들어있으면 먼슬리브 직영 지점, 그렇지 않고
 // 다른 회사 브랜드로 표기돼 있으면(예: 달해스테이·더쉼·블루스테이 등) 입점고시원으로 분류한다.
@@ -6443,8 +6462,9 @@ function renderDoorlockDisconnectedSection(records, prevRecords, dateForTitle, e
     <div style="display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:12px;">
       <h3 style="margin:0;font-size:16px;">지점별 도어락 미연결 정보 (${esc(dateSlash)})</h3>
       <div style="display:flex; gap:14px; flex-wrap:wrap; font-size:11.5px; color:var(--ink-soft);">
-        <span>${legendDot('var(--st-leaving)')}기존 미연결</span>
+        <span>${legendDot('var(--st-imported)')}기존 미연결</span>
         <span>${legendDot('var(--st-hold)')}신규 미연결</span>
+        <span>${legendDot('var(--st-vacant)')}${DOORLOCK_LONG_OVERDUE_DAYS}일 이상 미연결</span>
       </div>
     </div>`;
 
