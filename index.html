@@ -1109,6 +1109,7 @@ function applyDoorlockCore(parsed){
   DB.doorlockBranchNameOverrides = parsed.doorlockBranchNameOverrides || {};
   DB.doorlockActionTags = parsed.doorlockActionTags || {};
   DB.doorlockBranchNotes = parsed.doorlockBranchNotes || {};
+  DB.doorlockBranchLinks = parsed.doorlockBranchLinks || {};
   DB.doorlockHistory = parsed.doorlockHistory || [];
   // 마이그레이션: 이 기능 추가 전에 이미 doorlocks/doorlockPrevSnapshot가 쌓여있던 경우,
   // 히스토리가 비어있으면 최소한 그 두 스냅샷으로 채워 넣어 화살표 이동이 바로 동작하게 한다.
@@ -4960,6 +4961,7 @@ function downloadFullBackup(){
     doorlocks: DB.doorlocks, doorlockPrevSnapshot: DB.doorlockPrevSnapshot, doorlockImportDate: DB.doorlockImportDate,
     doorlockBranchNameOverrides: DB.doorlockBranchNameOverrides, doorlockActionTags: DB.doorlockActionTags,
     doorlockBranchNotes: DB.doorlockBranchNotes, doorlockHistory: DB.doorlockHistory,
+    doorlockBranchLinks: DB.doorlockBranchLinks,
     backedUpAt: new Date().toISOString()
   };
   const blob = new Blob([JSON.stringify(backup)], { type:'application/json' });
@@ -6267,6 +6269,7 @@ function saveDoorlockState(){
     doorlockBranchNameOverrides: DB.doorlockBranchNameOverrides || {},
     doorlockActionTags: DB.doorlockActionTags || {},
     doorlockBranchNotes: DB.doorlockBranchNotes || {},
+    doorlockBranchLinks: DB.doorlockBranchLinks || {},
     updatedAt: new Date().toISOString()
   }).catch(e=>{
     console.error('도어락 데이터 저장 실패:', e);
@@ -6489,6 +6492,35 @@ function doorlockCategoryForGroup(group){
   const isHotelStay = group.records.some(r=> (r.deviceName||'').includes('호텔스테이'));
   return isHotelStay ? '호텔스테이' : '먼슬리브';
 }
+// 도어락 지점명(기기명에서 뽑아낸 것)을 실제 대시보드에 등록된 지점과 이름 기준으로 자동
+// 매칭한다 — 회사 공통 단어(먼슬리브 등, doorlockStripGenericWords 재사용)와 끝의 "점"을 지운
+// 뒤 서로 포함 관계면 같은 지점으로 본다. 완벽하지 않을 수 있어 doorlockBranchLinks로 직접
+// 연결을 지정해 덮어쓸 수 있게 해둔다(그쪽이 항상 우선). DB.branches가 없는 화면(공유 링크 등
+// 도어락 데이터만 불러온 상태)에서는 조용히 null을 반환한다.
+function normalizeForDoorlockBranchMatch(s){
+  let cleaned = String(s||'').replace(/[\s_]+/g,'');
+  cleaned = doorlockStripGenericWords(cleaned);
+  return cleaned.replace(/점$/, '');
+}
+function autoMatchDoorlockBranch(doorlockLabel){
+  if(!DB.branches) return null;
+  const norm = normalizeForDoorlockBranchMatch(doorlockLabel);
+  if(!norm) return null;
+  return DB.branches.find(b=>{
+    const bn = normalizeForDoorlockBranchMatch(b.name);
+    return bn && (bn.includes(norm) || norm.includes(bn));
+  }) || null;
+}
+// 화면에 보여줄 지점 라벨(병합된 행)에 대해, 수동으로 연결해둔 실제 지점(doorlockBranchLinks)이
+// 있으면 그걸 우선 쓰고, 없으면 이름 기준 자동 매칭 결과를 쓴다.
+function doorlockResolveBranchLink(group, label){
+  const linkedId = group.keys.map(k=> DB.doorlockBranchLinks && DB.doorlockBranchLinks[k]).find(Boolean);
+  if(linkedId && DB.branches){
+    const linked = DB.branches.find(b=> b.id === linkedId);
+    if(linked) return linked;
+  }
+  return autoMatchDoorlockBranch(label);
+}
 function renderDoorlockDisconnectedSection(records, prevRecords, dateForTitle, editable){
   const box = document.createElement('div');
   box.className = 'stat-section';
@@ -6541,6 +6573,11 @@ function renderDoorlockDisconnectedSection(records, prevRecords, dateForTitle, e
     });
     const chipsSorted = Array.from(byRoomLabel.values())
       .sort((a,b)=> doorlockRoomLabel(a.record).localeCompare(doorlockRoomLabel(b.record), 'ko', {numeric:true}));
+    // 방에 입실자가 있는지 확인하려면, 이 도어락 지점을 실제 대시보드에 등록된 지점과 먼저
+    // 연결해야 한다(이름 자동 매칭, 안 맞으면 아래 select로 직접 지정). DB.branches가 없는
+    // 화면(공유 링크)에서는 doorlockResolveBranchLink가 그냥 null을 반환해 이 기능 전체가
+    // 조용히 꺼진다.
+    const linkedBranch = doorlockResolveBranchLink(group, label);
     const tr = document.createElement('tr');
     const branchTd = document.createElement('td');
     branchTd.style.cssText = 'font-weight:700;white-space:nowrap;';
@@ -6583,6 +6620,46 @@ function renderDoorlockDisconnectedSection(records, prevRecords, dateForTitle, e
     } else {
       branchTd.textContent = label;
     }
+    // 실제 지점 연결 표시 — 입실자 유무를 확인하려면 이 지점이 실제 등록된 지점 중 어디인지
+    // 알아야 한다. 이름으로 자동 매칭되지만 틀릴 수 있어 직접 고를 수 있게 한다.
+    if(DB.branches){
+      const linkRow = document.createElement('div');
+      linkRow.style.cssText = 'font-size:10.5px; color:var(--ink-soft); font-weight:400; margin-top:2px;';
+      if(canEdit() && editable){
+        const linkSelect = document.createElement('select');
+        linkSelect.style.cssText = 'font-size:10.5px; max-width:130px;';
+        linkSelect.title = '입실자 유무 확인을 위해 실제 지점과 연결합니다(이름으로 자동 매칭됨, 다르면 직접 선택)';
+        const noneOpt = document.createElement('option');
+        noneOpt.value = ''; noneOpt.textContent = '지점 연결 안 함';
+        linkSelect.appendChild(noneOpt);
+        DB.branches.slice().sort((a,b)=> branchLabel(a).localeCompare(branchLabel(b),'ko')).forEach(b=>{
+          const opt = document.createElement('option');
+          opt.value = b.id; opt.textContent = branchLabel(b);
+          if(linkedBranch && linkedBranch.id===b.id) opt.selected = true;
+          linkSelect.appendChild(opt);
+        });
+        linkSelect.addEventListener('change', ()=>{
+          const val = linkSelect.value;
+          if(!DB.doorlockBranchLinks) DB.doorlockBranchLinks = {};
+          let changed = false;
+          group.keys.forEach(key=>{
+            const before = DB.doorlockBranchLinks[key];
+            if(val) DB.doorlockBranchLinks[key] = val;
+            else delete DB.doorlockBranchLinks[key];
+            if(before !== DB.doorlockBranchLinks[key]) changed = true;
+          });
+          if(changed){
+            logChange(`도어락 "${label}" 실제 지점 연결 변경`);
+            saveDoorlockState();
+          }
+          render();
+        });
+        linkRow.appendChild(linkSelect);
+      } else if(linkedBranch){
+        linkRow.textContent = `→ ${branchLabel(linkedBranch)}`;
+      }
+      branchTd.appendChild(linkRow);
+    }
     const roomTd = document.createElement('td');
     if(chipsSorted.length===0){
       roomTd.innerHTML = '<span style="color:var(--ink-soft);">전체 연결됨</span>';
@@ -6599,7 +6676,22 @@ function renderDoorlockDisconnectedSection(records, prevRecords, dateForTitle, e
         chip.className = 'badge';
         chip.style.cssText = `background:${colors.bg}; color:${colors.fg};`;
         chip.textContent = doorlockRoomLabel(r);
-        chip.title = r.lastConnected ? `마지막 연결: ${r.lastConnected}` : '연결 기록 없음';
+        const titleParts = [r.lastConnected ? `마지막 연결: ${r.lastConnected}` : '연결 기록 없음'];
+        // 방 번호가 있고(공용구역 등 번호 없는 항목은 애초에 입실자 개념이 없어 건너뜀) 실제
+        // 지점과 연결돼 있으면, 그 지점의 같은 호실번호 방에 재실 입실자가 있는지 확인해서
+        // 있는 방만 테두리로 표시한다(입실자가 없는 방은 급하지 않으므로 굳이 표시하지 않음).
+        if(linkedBranch && r.roomNumber){
+          const realRoom = DB.rooms.find(rm=> rm.branchId===linkedBranch.id && rm.number===r.roomNumber);
+          if(realRoom){
+            if(roomHasActiveResident(realRoom)){
+              chip.style.border = '2px solid var(--accent)';
+              titleParts.push('입실자 있음');
+            } else {
+              titleParts.push('공실');
+            }
+          }
+        }
+        chip.title = titleParts.join(' · ');
         if(canEdit() && editable){
           chip.style.cursor = 'pointer';
           chip.onclick = ()=> showDoorlockActionModal(r.serial, `${label} ${doorlockRoomLabel(r)}`);
@@ -6789,13 +6881,14 @@ function renderDoorlockView(){
       resetBtn.className = 'btn danger';
       resetBtn.textContent = '데이터 초기화';
       resetBtn.onclick = ()=>{
-        showConfirm('도어락 데이터를 모두 초기화할까요?\n지금까지 붙여넣은 데이터, 이전 비교 기록, 지점명 수정 내역, 처리 방법 태그, 특이사항 메모, 히스토리가 모두 삭제됩니다.', ()=>{
+        showConfirm('도어락 데이터를 모두 초기화할까요?\n지금까지 붙여넣은 데이터, 이전 비교 기록, 지점명 수정 내역, 처리 방법 태그, 특이사항 메모, 실제 지점 연결, 히스토리가 모두 삭제됩니다.', ()=>{
           DB.doorlocks = [];
           DB.doorlockPrevSnapshot = null;
           DB.doorlockImportDate = '';
           DB.doorlockBranchNameOverrides = {};
           DB.doorlockActionTags = {};
           DB.doorlockBranchNotes = {};
+          DB.doorlockBranchLinks = {};
           DB.doorlockHistory = [];
           UI.doorlockHistoryOffset = 0;
           logChange('도어락 데이터 초기화');
