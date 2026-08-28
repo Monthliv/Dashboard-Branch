@@ -1757,14 +1757,18 @@ function renderBranchInfoBar(branch){
       }
     };
   }
-  function boolField(field, trueLabel, falseLabel, logLabel){
+  function boolField(field, trueLabel, falseLabel, logLabel, hint){
     return {
       view: ()=> document.createTextNode(branch[field] ? trueLabel : falseLabel),
       edit: ()=>{
         const label = document.createElement('label');
-        label.style.cssText = 'display:flex; align-items:center; gap:6px; font-weight:400; cursor:pointer;';
+        label.style.cssText = 'display:flex; align-items:center; gap:6px; font-weight:400; cursor:pointer; white-space:nowrap;';
+        if(hint) label.title = hint;
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
+        // .branch-info-table input{ width:100% } 규칙이 체크박스에도 그대로 걸려서(다른 텍스트
+        // 입력칸용 규칙인데) 왼쪽 박스 줄과 어긋나 보였다 — 체크박스는 원래 크기로 고정한다.
+        checkbox.style.cssText = 'width:auto; flex:none;';
         checkbox.checked = !!branch[field];
         checkbox.addEventListener('change', ()=>{
           logChange(`"${branch.name}" ${logLabel} ${checkbox.checked ? '설정' : '해제'}`);
@@ -1782,7 +1786,7 @@ function renderBranchInfoBar(branch){
     { label:'주차비용', ...textField('parkingFee', '예: 30000원', '주차비용') },
     { label:'엘리베이터', ...textField('elevator', '예: 있음', '엘리베이터 정보') },
     { label:'난방방식', ...textField('heatingType', '예: 개별난방', '난방방식') },
-    { label:'청소/리터치 자동설정', ...boolField('autoCleaningExcluded', '자동 지정 제외 (현장에서 별도 관리)', '사용', '청소/리터치 자동 지정 제외') },
+    { label:'청소/리터치 자동설정', ...boolField('autoCleaningExcluded', '자동 지정 제외', '사용', '청소/리터치 자동 지정 제외', '체크하면 이 지점은 퇴실확정되어도 청소/리터치가 자동으로 걸리지 않습니다 (현장에서 별도 관리).') },
     { label:'헤어드라이기', ...textField('hairDryer', '예: 있음', '헤어드라이기 정보') },
     { label:'청소비', ...feeField('cleaningFee', '예: 50000', '청소비') },
     { label:'1인 추가금', ...textField('doubleOccupancyFee', '예: 100000원', '1인 추가금') },
@@ -1831,7 +1835,7 @@ function renderBranchInfoBar(branch){
     if(editOn){
       const memoArea = document.createElement('textarea');
       memoArea.placeholder = '지점 전체 공지/특이사항';
-      memoArea.value = branch.memo;
+      memoArea.value = branch.memo || '';
       memoArea.addEventListener('input', ()=>{ logChange(`"${branch.name}" 특이사항 메모 수정`); branch.memo = memoArea.value; scheduleSave(); });
       memoCol.appendChild(memoArea);
       memoCol.appendChild(renderMemoStyleControls(branch, 'memoColor', 'memoBold'));
