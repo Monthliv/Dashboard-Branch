@@ -5927,6 +5927,7 @@ function appendCleaningPager(header, totalPages, currentPage, onPage){
 }
 
 function renderTodayCleaningCard(list){
+  const today = todayISO();
   const card = document.createElement('div');
   card.className = 'stat-section cleaning-card';
 
@@ -5994,6 +5995,25 @@ function renderTodayCleaningCard(list){
       const kindSpan = document.createElement('span');
       kindSpan.className = 'kind';
       kindSpan.innerHTML = kindBadge;
+      // "오늘 청소방"에는 정확히 오늘 예정인 방뿐 아니라, 예전에 청소/리터치가 걸렸는데 아직
+      // 완료 처리되지 않은 방(지연)과 애초에 예정일이 없던 방(추가청소 등)도 함께 섞여 들어온다
+      // (collectCleaningEntries·renderCleaningCards의 todayList 필터 참고). 지금까지는 이 셋이
+      // 화면에서 전혀 구분되지 않았으므로, 오늘이 아닌 경우 실제 예정일(또는 미정 여부)을
+      // 배지로 보여준다 — 지연은 눈에 띄도록 빨간색으로 표시한다.
+      if(!x.date){
+        const noteSpan = document.createElement('span');
+        noteSpan.className = 'mdate';
+        noteSpan.textContent = '예정일 미정';
+        noteSpan.title = '예정일이 지정되지 않았습니다.';
+        kindSpan.appendChild(noteSpan);
+      } else if(x.date < today){
+        const noteSpan = document.createElement('span');
+        noteSpan.className = 'mdate';
+        noteSpan.style.color = 'var(--st-hold)';
+        noteSpan.textContent = `${x.date} 지연`;
+        noteSpan.title = `원래 예정일: ${x.date} (아직 완료 처리되지 않았습니다)`;
+        kindSpan.appendChild(noteSpan);
+      }
       if(canEdit() && x.room[MAINT_KIND_FIELD[x.type]]){
         const doneBtn = document.createElement('button');
         doneBtn.className = 'btn small primary';
