@@ -1074,8 +1074,28 @@ function applyLoadedCore(parsed){
   DB.residents.forEach(p => {
     if(p.originalMoveIn == null) p.originalMoveIn = p.moveIn || '';
     if(p.scheduledToLeave == null) p.scheduledToLeave = false;
+    if(p.memoPrevDay == null) p.memoPrevDay = '';
+    if(p.memoSnapshotDate == null) p.memoSnapshotDate = '';
     p.resStatus = computeResStatus(p);
   });
+}
+// 매일 처음 불러오는 시점의 메모 값을 "전날 메모"(memoPrevDay)로 얼려서 오늘 메모(p.memo)와
+// 분리해 따로 기억해둔다. 이후 p.memo를 수정하거나 그대로 둬도 memoPrevDay는 건드리지 않고,
+// 다음 날 이 함수가 다시 실행될 때만 그 시점의 값으로 갱신된다 — 그래서 "오늘 메모는 어제 메모를
+// 기본값으로 시작해서 수정 전까지는 그대로 유지"라는 동작이 자연스럽게 성립한다(애초에 p.memo를
+// 매일 초기화하지 않으므로). 새로 생긴 입실자 등 memoSnapshotDate가 없던 경우는 최초 1회에 한해
+// 지금 값을 기준으로 시작한다.
+function rollResidentMemoSnapshots(){
+  const today = localDateKey();
+  let changed = false;
+  DB.residents.forEach(p=>{
+    if(p.memoSnapshotDate !== today){
+      p.memoPrevDay = p.memo || '';
+      p.memoSnapshotDate = today;
+      changed = true;
+    }
+  });
+  if(changed) scheduleSave();
 }
 // 도어락 데이터는 DOORLOCK_DOC(별도 문서)에서 따로 불러와 적용한다 — applyLoadedCore와 분리해둔
 // 이유는, 지점/호실/입실자 실시간 동기화(onSnapshot on FIRESTORE_DOC)가 갱신될 때마다
@@ -2600,6 +2620,14 @@ function renderResidentView(p, room, isSecondary){
       if(p.memoBold) memo.style.fontWeight = '700';
       block.appendChild(memo);
     }
+    if(p.memoPrevDay && p.memoPrevDay !== p.memo){
+      const prevMemo = document.createElement('div');
+      prevMemo.className = 'resident-memo';
+      prevMemo.style.cssText = 'font-size:11px; color:var(--ink-soft); font-weight:400;';
+      prevMemo.textContent = `전날 메모: ${p.memoPrevDay}`;
+      prevMemo.title = p.memoPrevDay;
+      block.appendChild(prevMemo);
+    }
   }
   return block;
 }
@@ -3055,6 +3083,14 @@ function renderResidentEditCard(p, isSecondary, isDraft, room){
   memo.addEventListener('input', ()=>{ p.memo = memo.value; maybeSave(); });
   card.appendChild(memo);
   card.appendChild(renderMemoStyleControls(p, 'memoColor', 'memoBold', true));
+  // 오늘 메모(p.memo)는 매일 처음 불러올 때의 값을 전날 메모(memoPrevDay)로 얼려서 따로 기억해둔다
+  // (rollResidentMemoSnapshots). 오늘 수정해서 전날과 달라졌을 때만, 비교용으로 전날 값을 보여준다.
+  if(p.memoPrevDay && p.memoPrevDay !== p.memo){
+    const prevMemoHint = document.createElement('div');
+    prevMemoHint.style.cssText = 'font-size:11px; color:var(--ink-soft); margin-top:2px; white-space:pre-line;';
+    prevMemoHint.textContent = `전날 메모: ${p.memoPrevDay}`;
+    card.appendChild(prevMemoHint);
+  }
 
   if(room && !isDraft && !UI.draftResident[room.id] && !roomHasUpcomingResident(room) && roomHasVacatingResident(room)){
     const addRow = document.createElement('div');
@@ -7274,6 +7310,7 @@ async function initApp(user){
   if(canEdit()) processScheduledLeaves();
   if(canEdit()) processPendingRoomMoves();
   if(canEdit()) autoFlagDueRetouch();
+  if(canEdit()) rollResidentMemoSnapshots();
   let statusFixed = false;
   DB.rooms.forEach(room=>{
     if(!roomHasActiveResident(room) && !STATUS_LIST_MANUAL.includes(room.saleStatus)){
@@ -7614,7 +7651,7 @@ if(isPublicDoorlockShareUrl()){
 // PC를 계속 켜둔 채 로그인 화면을 새로고침 없이 며칠씩 열어두면 initApp()이 다시 실행되지
 // 않아 날짜가 바뀌어도 자동 백업/리터치 자동 예약이 안 갱신된다. 그래서 별도로 주기적으로
 // (1시간마다) 오늘 백업이 있는지, 새로 리터치 예약 대상이 된 방이 있는지 확인한다.
-setInterval(()=>{ if(canEdit()){ maybeCreateDailyBackup(); autoFlagDueRetouch(); } }, 60*60*1000);
+setInterval(()=>{ if(canEdit()){ maybeCreateDailyBackup(); autoFlagDueRetouch(); rollResidentMemoSnapshots(); } }, 60*60*1000);
 
 // 관제센터 특성상 PC를 끄지 않고 탭을 며칠씩 열어두는 경우가 많다. 예전에는 그렇게 오래 열린
 // 세션이 로그인 시점의(=시간이 지날수록 오래된) 데이터를 계속 들고 있다가 저장 시 다른 곳의
