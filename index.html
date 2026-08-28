@@ -6644,9 +6644,24 @@ function renderDoorlockDisconnectedSection(records, prevRecords, dateForTitle, e
 
   return box;
 }
+// 같은 방을 가리키는 기기가 여러 개(재스캔 등으로 일련번호만 다르게 중복 등록)일 때, 화면에
+// 보여줄 지점+방 라벨이 같으면 하나만 남긴다(먼저 나온 것을 유지) — 지점별 미연결 표
+// (renderDoorlockDisconnectedSection)의 방 칩 중복 제거와 같은 기준을 이 두 상단 카드
+// (신규 추가된 미연결 방·정상 연결됨)에도 동일하게 적용한다.
+function dedupeDoorlockRecordsByLabel(records){
+  const seen = new Set();
+  const out = [];
+  records.forEach(r=>{
+    const key = doorlockBranchLabel(r.branchGroup) + '__' + doorlockRoomLabel(r);
+    if(seen.has(key)) return;
+    seen.add(key);
+    out.push(r);
+  });
+  return out;
+}
 function renderDoorlockNewIssuesSection(prevRecords, currRecords){
   const prevBySerial = new Map((prevRecords||[]).map(r=>[r.serial, r]));
-  const added = currRecords.filter(r=> !prevBySerial.has(r.serial) && !r.connected)
+  const added = dedupeDoorlockRecordsByLabel(currRecords.filter(r=> !prevBySerial.has(r.serial) && !r.connected))
     .sort((a,b)=> doorlockBranchLabel(a.branchGroup).localeCompare(doorlockBranchLabel(b.branchGroup),'ko'));
   const box = document.createElement('div');
   box.className = 'stat-section cleaning-card';
@@ -6673,10 +6688,10 @@ function renderDoorlockNewIssuesSection(prevRecords, currRecords){
 // 다음 붙여넣기 때는 "그 전날"이 이미 연결 상태였던 것으로 비교되어 더 이상 여기 나오지 않는다.
 function renderDoorlockResolvedSection(prevRecords, currRecords){
   const prevBySerial = new Map((prevRecords||[]).map(r=>[r.serial, r]));
-  const resolved = currRecords.filter(r=>{
+  const resolved = dedupeDoorlockRecordsByLabel(currRecords.filter(r=>{
     const prev = prevBySerial.get(r.serial);
     return prev && prev.connected===false && r.connected===true;
-  }).sort((a,b)=> doorlockBranchLabel(a.branchGroup).localeCompare(doorlockBranchLabel(b.branchGroup),'ko'));
+  })).sort((a,b)=> doorlockBranchLabel(a.branchGroup).localeCompare(doorlockBranchLabel(b.branchGroup),'ko'));
   const box = document.createElement('div');
   box.className = 'stat-section cleaning-card';
   box.innerHTML = `<h3 style="margin:0;">정상 연결됨 <span class="cnt-badge">${resolved.length}</span></h3>`;
