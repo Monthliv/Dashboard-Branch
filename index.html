@@ -6469,7 +6469,13 @@ function getDoorlockSnapshotAt(offsetFromLatest){
   if(idx < 0 || idx >= hist.length) return null;
   const current = hist[idx];
   const prev = idx > 0 ? hist[idx-1] : null;
-  return { date: current.date, records: current.records, prevRecords: prev ? prev.records : null, actionTags: current.actionTags || {} };
+  // 오늘(offsetFromLatest===0)은 항상 DB.doorlockActionTags(라이브 값)를 우선한다 — 히스토리
+  // 항목의 actionTags는 원래 그 라이브 값을 그대로 미러링해두는 캐시일 뿐인데, 오래된 탭이
+  // 배포 전 코드로 태그만 바꾸고 히스토리 쪽 동기화를 안 하는 경우(코드가 그 동기화 호출을
+  // 아직 모르는 상태) 등으로 어긋날 수 있다. 과거 날짜는 그 시점의 값 외엔 알 방법이 없으므로
+  // current.actionTags를 그대로 쓴다.
+  const actionTags = offsetFromLatest === 0 ? (DB.doorlockActionTags || {}) : (current.actionTags || {});
+  return { date: current.date, records: current.records, prevRecords: prev ? prev.records : null, actionTags };
 }
 function showDoorlockPasteModal(){
   const overlay = document.createElement('div');
