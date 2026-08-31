@@ -6399,17 +6399,12 @@ function importDoorlockRecords(records, onImported){
   if(prevRecords.length > 0){
     DB.doorlockPrevSnapshot = { date: DB.doorlockImportDate || '이전', records: prevRecords };
   }
-  // 미연결 -> 연결로 정상화된 기기는 더 이상 조치가 필요 없으므로 처리 방법(아톡/청소방/
-  // 현장출동) 태그를 자동으로 지운다.
-  if(DB.doorlockActionTags){
-    const newBySerial = new Map(records.map(r=>[r.serial, r]));
-    prevRecords.forEach(prevRec=>{
-      if(prevRec.connected === false){
-        const curr = newBySerial.get(prevRec.serial);
-        if(curr && curr.connected === true) delete DB.doorlockActionTags[prevRec.serial];
-      }
-    });
-  }
+  // 상단 "처리 방법별 방 목록"(아톡/청소방/현장출동)은 새 데이터를 붙여넣을 때마다 통째로
+  // 초기화한다 — 예전엔 미연결->연결로 정상화된 기기의 태그만 선택적으로 지웠지만, 매번
+  // 새로 붙여넣는 시점에 이전 처리 방법 표시는 모두 리셋해달라는 요청으로 전체 초기화로
+  // 바뀌었다. 지점명 수정(doorlockBranchNameOverrides)·특이사항 메모(doorlockBranchNotes)는
+  // 이 초기화 대상이 아니며 기존 규칙대로 계속 유지된다.
+  DB.doorlockActionTags = {};
   DB.doorlocks = records;
   DB.doorlockImportDate = localDateKey();
   // 최근 5일치 히스토리를 남겨서 화살표로 지난 날짜를 넘겨볼 수 있게 한다(오래된 순).
