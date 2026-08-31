@@ -5821,10 +5821,16 @@ function renderRefundPendingStatsCard(){
     group.entries.forEach(item=>{
       const row = document.createElement('div');
       row.style.cssText = 'display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:4px 0;';
+      const refundDate = item.p.refundPendingDate || todayISO();
+      // 환불(계약취소) 시점에 아직 입실일이 오지 않은 "입실예정" 상태였다면, 실제로 거주한 적이
+      // 없으므로 "퇴실 처리"(moveIn~환불일을 이용 기간으로 이력에 남김)는 의미가 없을 뿐 아니라
+      // 입실일보다 이른 퇴실일이 남아 "9월2일~8월31일"처럼 역순 기간이 기록되는 오류가 생긴다.
+      // 이 경우는 애초에 입실이 없었던 것이므로 이력 없이 "예약 취소"(그냥 삭제)로 처리한다.
+      const neverMovedIn = !!(item.p.moveIn && item.p.moveIn > refundDate);
       const info = document.createElement('span');
       info.className = 'badge';
       info.style.cssText = 'background:var(--st-hold-bg); color:var(--st-hold); cursor:pointer;';
-      info.textContent = `${item.room.number}호 ${item.p.name || '(이름 미입력)'} (환불일: ${item.p.refundPendingDate || '미상'})`;
+      info.textContent = `${item.room.number}호 ${item.p.name || '(이름 미입력)'} (환불일: ${item.p.refundPendingDate || '미상'})${neverMovedIn ? ' · 입실 전 취소' : ''}`;
       info.title = '해당 호실로 이동';
       info.onclick = ()=>{
         if(!item.branch) return;
@@ -5836,13 +5842,25 @@ function renderRefundPendingStatsCard(){
       if(canEdit()){
         const leaveBtn = document.createElement('button');
         leaveBtn.className = 'btn small danger';
-        leaveBtn.textContent = '퇴실 처리';
-        leaveBtn.title = '이 입실자를 환불 계약일 기준으로 퇴실 처리합니다';
+        leaveBtn.textContent = neverMovedIn ? '예약 취소' : '퇴실 처리';
+        leaveBtn.title = neverMovedIn
+          ? '입실 전에 계약이 취소된 경우입니다. 입실자 정보를 삭제합니다(이용 기간이 없으므로 퇴실 이력에는 남기지 않습니다)'
+          : '이 입실자를 환불 계약일 기준으로 퇴실 처리합니다';
         leaveBtn.onclick = ()=>{
-          showConfirm(`"${item.p.name || '이 입실자'}"를 환불 계약일(${item.p.refundPendingDate || '미상'}) 기준으로 퇴실 처리할까요?\n정보는 히스토리로 이동되고, 이 자리에 새 입실자를 등록할 수 있게 됩니다.`, ()=>{
-            moveResidentToHistory(item.p, item.p.refundPendingDate || todayISO());
-            scheduleSave(); render();
-          });
+          if(neverMovedIn){
+            showConfirm(`"${item.p.name || '이 입실자'}"는 입실 예정일(${item.p.moveIn}) 전에 계약이 취소되었습니다.\n실제 이용한 적이 없으므로 퇴실 이력을 남기지 않고 입실자 정보를 삭제할까요?`, ()=>{
+              delete UI.residentSnapshots[item.p.id];
+              delete UI.residentFieldEdit[item.p.id];
+              logChange(`"${item.p.name || '입실자'}" 입실 전 계약 취소로 삭제`);
+              DB.residents = DB.residents.filter(x=>x.id!==item.p.id);
+              scheduleSave(); render();
+            });
+          } else {
+            showConfirm(`"${item.p.name || '이 입실자'}"를 환불 계약일(${item.p.refundPendingDate || '미상'}) 기준으로 퇴실 처리할까요?\n정보는 히스토리로 이동되고, 이 자리에 새 입실자를 등록할 수 있게 됩니다.`, ()=>{
+              moveResidentToHistory(item.p, item.p.refundPendingDate || todayISO());
+              scheduleSave(); render();
+            });
+          }
         };
         const dismissBtn = document.createElement('button');
         dismissBtn.className = 'btn small';
