@@ -4942,23 +4942,25 @@ function renderStatsView(){
   table.className = 'branch-table';
   table.innerHTML = `<thead><tr><th>지점</th><th>호실수</th><th>이용중</th><th>판매중</th><th>입실율</th><th>예약</th><th>판매보류</th></tr></thead>`;
   const tbody = document.createElement('tbody');
-  const totals = { total:0, occupied:0, forSale:0, hold:0, reserved:0, activeCount:0 };
+  const totals = { total:0, occupied:0, forSale:0, hold:0, reserved:0 };
   allowedBranches().forEach(b=>{
     const rms = DB.rooms.filter(r=>r.branchId===b.id);
     const total = rms.length;
-    let occupied=0, forSale=0, activeCount=0;
+    let occupied=0, forSale=0;
     const holdRooms = [];
     rms.forEach(r=>{
       const tabs = roomTabs(r);
       if(tabs.includes('이용중')) occupied++;
       if(tabs.includes('판매중')) forSale++;
       if(tabs.includes('판매보류')) holdRooms.push(r);
-      if(roomHasActiveResident(r)) activeCount++;
     });
     const reserved = rms.filter(r=> r.reserved).length;
-    const occRate = total ? Math.round((activeCount/total)*100) : 0;
+    // 입실율 = 이용중 / 호실수 * 100. "입실확정"(입실예정일이 많이 남아 이용중과 별도로
+    // 구분되는 상태, effectiveRoomStatus 참고)이나 roomHasActiveResident(입실확정 포함)
+    // 기준으로 계산하면 "이용중" 칸의 숫자와 입실율이 서로 안 맞아 보이는 문제가 있었다.
+    const occRate = total ? Math.round((occupied/total)*100) : 0;
     totals.total += total; totals.occupied += occupied; totals.forSale += forSale;
-    totals.hold += holdRooms.length; totals.reserved += reserved; totals.activeCount += activeCount;
+    totals.hold += holdRooms.length; totals.reserved += reserved;
     const occColor = occRate >= 90 ? 'var(--ink)' : (occRate >= 80 ? 'var(--st-forsale)' : 'var(--st-hold)');
     const holdText = holdRooms.length
       ? holdRooms.map(r=> esc(r.note ? `${r.number}: ${r.note}` : `${r.number}`)).join('<br>')
@@ -4969,7 +4971,7 @@ function renderStatsView(){
       <td>${total}</td>${tabCell('이용중', occupied)}${tabCell('판매중', forSale)}<td style="color:${occColor};font-weight:700;">${occRate}%</td>${tabCell('예약', reserved)}${tabCell('판매보류', holdText)}`;
     tbody.appendChild(tr);
   });
-  const totalOccRate = totals.total ? Math.round((totals.activeCount/totals.total)*100) : 0;
+  const totalOccRate = totals.total ? Math.round((totals.occupied/totals.total)*100) : 0;
   const totalOccColor = totalOccRate >= 90 ? 'var(--ink)' : (totalOccRate >= 80 ? 'var(--st-forsale)' : 'var(--st-hold)');
   const totalTr = document.createElement('tr');
   totalTr.className = 'branch-table-total';
