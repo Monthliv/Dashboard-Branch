@@ -1778,7 +1778,7 @@ function renderBranchInfoBar(branch){
       }
     };
   }
-  function boolField(field, trueLabel, falseLabel, logLabel, hint){
+  function boolField(field, trueLabel, falseLabel, logLabel, hint, onChange){
     return {
       view: ()=> document.createTextNode(branch[field] ? trueLabel : falseLabel),
       edit: ()=>{
@@ -1793,7 +1793,9 @@ function renderBranchInfoBar(branch){
         checkbox.checked = !!branch[field];
         checkbox.addEventListener('change', ()=>{
           logChange(`"${branch.name}" ${logLabel} ${checkbox.checked ? '설정' : '해제'}`);
-          branch[field] = checkbox.checked; scheduleSave(); render();
+          branch[field] = checkbox.checked;
+          if(onChange) onChange(checkbox.checked);
+          scheduleSave(); render();
         });
         label.appendChild(checkbox);
         label.appendChild(document.createTextNode(trueLabel));
@@ -1807,7 +1809,8 @@ function renderBranchInfoBar(branch){
     { label:'주차비용', ...textField('parkingFee', '예: 30000원', '주차비용') },
     { label:'엘리베이터', ...textField('elevator', '예: 있음', '엘리베이터 정보') },
     { label:'난방방식', ...textField('heatingType', '예: 개별난방', '난방방식') },
-    { label:'청소/리터치 자동설정', ...boolField('autoCleaningExcluded', '자동 지정 제외', '사용', '청소/리터치 자동 지정 제외', '체크하면 이 지점은 퇴실확정되어도 청소/리터치가 자동으로 걸리지 않습니다 (현장에서 별도 관리).') },
+    { label:'청소/리터치 자동설정', ...boolField('autoCleaningExcluded', '자동 지정 제외', '사용', '청소/리터치 자동 지정 제외', '체크하면 이 지점은 퇴실확정되어도 청소/리터치가 자동으로 걸리지 않습니다 (현장에서 별도 관리).',
+      (checked)=>{ if(checked) clearCleaningFlagsForExcludedBranches(); }) },
     { label:'헤어드라이기', ...textField('hairDryer', '예: 있음', '헤어드라이기 정보') },
     { label:'청소비', ...feeField('cleaningFee', '예: 50000', '청소비') },
     { label:'1인 추가금', ...textField('doubleOccupancyFee', '예: 100000원', '1인 추가금') },
@@ -5775,6 +5778,42 @@ function autoFlagDueRetouch(){
   });
   if(changed) scheduleSave();
 }
+// 청소/리터치가 예정된 방이라도, 실제로 입실자가 들어와 살기 시작하면(재실 중) 그 예정은 더
+// 이상 의미가 없다고 보고 자동으로 초기화한다 — 입실 전에 이미 청소가 끝났다고 보는 게
+// 자연스럽고, 직원이 "청소완료"/"리터치완료" 버튼 누르는 걸 잊었을 때를 위한 안전장치이기도
+// 하다. 추가청소(needsExtraCleaning)는 별개로 수동 관리되는 항목이라 건드리지 않는다.
+function clearCleaningFlagsOnMoveIn(){
+  let changed = false;
+  DB.rooms.forEach(room=>{
+    if(!(room.needsCleaning || room.needsRetouch)) return;
+    if(!DB.residents.some(p=> p.roomId===room.id && isCurrentlyResiding(p))) return;
+    room.needsCleaning = false;
+    room.needsRetouch = false;
+    room.maintenanceDate = '';
+    room.maintenanceMemo = '';
+    room.cleaningFlagSourceId = null;
+    changed = true;
+  });
+  if(changed) scheduleSave();
+}
+// 청소/리터치 자동 지정에서 제외된 지점(autoCleaningExcluded)의 방에 이미 청소/리터치 예정이
+// 걸려 있으면(제외 설정 이전에 걸렸거나, 체크박스를 막 켠 시점 등) 지워준다. 체크박스를 켜는
+// 순간 즉시 한 번(그 지점만) + 로그인 시·매시간 전체 지점을 대상으로 다시 확인해서, 어떤
+// 경로로 걸렸든 계속 남아있지 않게 한다.
+function clearCleaningFlagsForExcludedBranches(){
+  let changed = false;
+  DB.rooms.forEach(room=>{
+    if(!isAutoCleaningExcludedBranch(roomBranch(room))) return;
+    if(!(room.needsCleaning || room.needsRetouch)) return;
+    room.needsCleaning = false;
+    room.needsRetouch = false;
+    room.maintenanceDate = '';
+    room.maintenanceMemo = '';
+    room.cleaningFlagSourceId = null;
+    changed = true;
+  });
+  if(changed) scheduleSave();
+}
 
 /* 청소 관리 주간표에 "완료" 플래그로 표시할, 이미 처리된 청소 이력(room.cleaningHistory) 목록. */
 function collectCleaningDoneEntries(){
@@ -7406,6 +7445,8 @@ async function initApp(user){
   if(canEdit()) processScheduledLeaves();
   if(canEdit()) processPendingRoomMoves();
   if(canEdit()) autoFlagDueRetouch();
+  if(canEdit()) clearCleaningFlagsOnMoveIn();
+  if(canEdit()) clearCleaningFlagsForExcludedBranches();
   if(canEdit()) rollResidentMemoSnapshots();
   let statusFixed = false;
   DB.rooms.forEach(room=>{
@@ -7747,7 +7788,7 @@ if(isPublicDoorlockShareUrl()){
 // PC를 계속 켜둔 채 로그인 화면을 새로고침 없이 며칠씩 열어두면 initApp()이 다시 실행되지
 // 않아 날짜가 바뀌어도 자동 백업/리터치 자동 예약이 안 갱신된다. 그래서 별도로 주기적으로
 // (1시간마다) 오늘 백업이 있는지, 새로 리터치 예약 대상이 된 방이 있는지 확인한다.
-setInterval(()=>{ if(canEdit()){ maybeCreateDailyBackup(); autoFlagDueRetouch(); rollResidentMemoSnapshots(); } }, 60*60*1000);
+setInterval(()=>{ if(canEdit()){ maybeCreateDailyBackup(); autoFlagDueRetouch(); clearCleaningFlagsOnMoveIn(); clearCleaningFlagsForExcludedBranches(); rollResidentMemoSnapshots(); } }, 60*60*1000);
 
 // 관제센터 특성상 PC를 끄지 않고 탭을 며칠씩 열어두는 경우가 많다. 예전에는 그렇게 오래 열린
 // 세션이 로그인 시점의(=시간이 지날수록 오래된) 데이터를 계속 들고 있다가 저장 시 다른 곳의
