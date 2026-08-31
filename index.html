@@ -5855,7 +5855,11 @@ function collectCleaningEntries(){
   });
   // roomUpcomingLeaveDate는 방 카드 배지와 동일한 기준(퇴실확정된 입실자 유무 + 방 카드에서
   // "퇴실청소" 칩으로 취소한 적이 있는지)을 쓰므로, 방 카드에서 취소하면 여기서도 함께 사라진다.
-  DB.rooms.filter(r=> !roomMaintKind(r) && hasBranchAccess(r.branchId)).forEach(r=>{
+  // 이 미리보기는 room.needsCleaning을 실제로 걸지 않고 계산만 하므로, 청소/리터치 자동 지정
+  // 제외 지점(isAutoCleaningExcludedBranch)의 방은 여기서도 제외해야 한다 — 안 그러면 목록에는
+  // 뜨는데 needsCleaning이 걸린 적이 없어(자동 지정 자체가 막혀 있으므로) "청소완료" 버튼이 영영
+  // 나타나지 않는 상태로 남는다(제주 A202호 등에서 보고된 증상).
+  DB.rooms.filter(r=> !roomMaintKind(r) && hasBranchAccess(r.branchId) && !isAutoCleaningExcludedBranch(roomBranch(r))).forEach(r=>{
     const date = roomUpcomingLeaveDate(r);
     if(!date) return;
     const branch = DB.branches.find(b=>b.id===r.branchId);
