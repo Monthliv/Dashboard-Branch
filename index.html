@@ -2528,7 +2528,7 @@ function renderResidentView(p, room, isSecondary){
   const block = document.createElement('div');
   block.className = 'resident-block';
 
-  if(!isSecondary && (p.channel !== '독립생활' || isOverdue(p) || p.scheduledToLeave || isUpcoming(p) || p.pendingRoomMove || p.justImported || p.doubleOccupancy)){
+  if(!isSecondary && (p.channel !== '독립생활' || isOverdue(p) || p.scheduledToLeave || isUpcoming(p) || p.pendingRoomMove || p.justImported || p.refundPending || p.doubleOccupancy)){
     const doubleMeta = statusMeta('2인 거주');
     const flagsLine = document.createElement('div');
     flagsLine.className = 'resident-flags';
@@ -2538,6 +2538,7 @@ function renderResidentView(p, room, isSecondary){
       ${p.scheduledToLeave ? '<span class="badge res-status leaving">퇴실확정</span>' : ''}
       ${p.pendingRoomMove ? `<span class="badge res-status moving">방이동예정 (${esc(p.pendingRoomMove.date)})</span>` : ''}
       ${p.justImported ? `<span class="badge" style="background:var(--st-imported-bg);color:var(--st-imported)">계약 확인 필요</span>` : ''}
+      ${p.refundPending ? `<span class="badge" style="background:var(--st-hold-bg);color:var(--st-hold)">⚠ 환불 처리 필요</span>` : ''}
       ${p.doubleOccupancy ? `<span class="badge" style="background:${doubleMeta.bg};color:${doubleMeta.fg}">2인 거주</span>` : ''}
       ${p.channel !== '독립생활' ? `<span class="badge" style="background:#F1EFE8;color:${channelColor(p.channel)}">${esc(p.channel)}</span>` : ''}
     `;
@@ -4090,13 +4091,17 @@ function importContractGrid(headerCells, dataRows, onImported){
     return;
   }
 
+  // 결제구분에 "환불"이 포함된 행은 계약(취소/변경) 자체는 그대로 이력에 남기되, 아래의 "빈
+  // 방이면 새 입실자 등록" 로직에서는 완전히 제외한다 — 환불 행을 최신 계약으로 잡아 새 입실자를
+  // 만들어버리면 안 되기 때문이다. 별도로 refundRows에서만 다룬다.
+  const isRefundRow = c=> /환불/.test(c.paymentCategory || '');
   // 호실별로 계약일이 가장 최신인 건 하나만 골라, 빈 방이면 그 계약 정보로 입실자를 새로 등록한다.
   // (한 번에 여러 건의 계약 이력이 붙여넣기 될 수 있으므로, 입실자 등록은 호실당 최신 계약 1건에만 적용)
   // 이미 입실자가 있는 방은 정보를 건드리지 않는다 — 계약 이력만 저장하고, 담당자가 확인할 수 있도록
   // "계약 확인 필요" 표시만 남긴다(최신 계약의 종료일과 퇴실예정일이 다르면 "계약현황" 버튼의
   // 기존 하이라이트도 함께 뜬다). 신규 등록이든 기존 입실자든 지점별로 한 곳에서 모아 볼 수 있다.
   const latestByRoom = new Map();
-  newContracts.forEach(c=>{
+  newContracts.filter(c=> !isRefundRow(c)).forEach(c=>{
     const prev = latestByRoom.get(c.roomId);
     if(!prev || (c.contractDate||'') >= (prev.contractDate||'')) latestByRoom.set(c.roomId, c);
   });
@@ -4127,12 +4132,35 @@ function importContractGrid(headerCells, dataRows, onImported){
     residentSyncActions.push({ room, newResident });
   });
 
+  // 환불 행: 그 방에 재실 중이면서 이름이 일치하는 입실자가 있고, 과거(이번에 함께 붙여넣는
+  // 행 포함) 같은 방·계약자로 실제 결제금액이 찍힌 계약이 있으면 "환불 처리 필요"로 표시한다.
+  // 여기서는 표시만 하고, 실제 퇴실 처리는 담당자가 화면에서 버튼을 눌러 직접 확정해야 한다 —
+  // 방/이름이 잘못 매칭되는 경우 실거주자를 실수로 퇴실 처리해버리면 되돌리기 어렵기 때문이다.
+  const allContractsForPaymentCheck = [...DB.contracts, ...newContracts];
+  const refundFlagActions = [];
+  newContracts.filter(isRefundRow).forEach(c=>{
+    const room = DB.rooms.find(r=>r.id===c.roomId);
+    if(!room) return;
+    const refundName = cleanKeyLoose(c.resident || c.contractor);
+    if(!refundName) return;
+    const matchedResident = DB.residents.find(p=> p.roomId===room.id && cleanKeyLoose(p.name)===refundName);
+    if(!matchedResident) return;
+    const hasPriorPayment = allContractsForPaymentCheck.some(existing=>
+      existing.roomId===room.id && !isRefundRow(existing) &&
+      cleanKeyLoose(existing.resident || existing.contractor)===refundName &&
+      Number(normalizeAmountStr(existing.paymentAmount)) > 0
+    );
+    if(!hasPriorPayment) return;
+    refundFlagActions.push({ p: matchedResident, room, contractId: c.id, refundDate: normalizeFlexDate(c.contractDate) || c.contractDate || '' });
+  });
+
   showConfirm(
     `계약 데이터 ${newContracts.length}건을 가져올까요?`
       + (duplicateCount ? `\n(이미 등록된 중복 ${duplicateCount}건은 제외됩니다)` : '')
       + (unmatched.length ? `\n(호실을 찾지 못한 ${unmatched.length}건은 제외됩니다)` : '')
       + (residentSyncActions.length ? `\n\n빈 호실 ${residentSyncActions.length}곳에 새 계약자 정보로 입실자를 등록합니다.` : '')
       + (existingResidentsToFlag.length ? `\n기존 입실자가 있는 호실 ${existingResidentsToFlag.length}곳은 계약 이력만 저장하고 "계약 확인 필요"로 표시합니다.` : '')
+      + (refundFlagActions.length ? `\n환불 처리된 계약 ${refundFlagActions.length}건은 해당 입실자를 "환불 처리 필요"로 표시합니다(자동으로 퇴실 처리하지 않습니다).` : '')
       + (residentSkipCount ? `\n(계약기간·입실자 정보가 불명확해 입실자 등록을 건너뛴 호실: ${residentSkipCount}곳)` : ''),
     ()=>{
       DB.contracts.push(...newContracts);
@@ -4140,11 +4168,17 @@ function importContractGrid(headerCells, dataRows, onImported){
       refreshContractsCache();
       residentSyncActions.forEach(action=> DB.residents.push(action.newResident));
       existingResidentsToFlag.forEach(p=> p.justImported = true);
-      logChange(`계약 데이터 가져오기: ${newContracts.length}건 추가${duplicateCount ? ` (중복 ${duplicateCount}건 제외)` : ''}${unmatched.length ? ` (미매칭 ${unmatched.length}건)` : ''}${residentSyncActions.length ? ` / 빈 호실 입실자 등록 ${residentSyncActions.length}건` : ''}${existingResidentsToFlag.length ? ` / 계약 확인 필요 표시 ${existingResidentsToFlag.length}건` : ''}`);
+      refundFlagActions.forEach(action=>{
+        action.p.refundPending = true;
+        action.p.refundPendingDate = action.refundDate;
+        action.p.refundPendingContractId = action.contractId;
+      });
+      logChange(`계약 데이터 가져오기: ${newContracts.length}건 추가${duplicateCount ? ` (중복 ${duplicateCount}건 제외)` : ''}${unmatched.length ? ` (미매칭 ${unmatched.length}건)` : ''}${residentSyncActions.length ? ` / 빈 호실 입실자 등록 ${residentSyncActions.length}건` : ''}${existingResidentsToFlag.length ? ` / 계약 확인 필요 표시 ${existingResidentsToFlag.length}건` : ''}${refundFlagActions.length ? ` / 환불 처리 필요 표시 ${refundFlagActions.length}건` : ''}`);
       scheduleSave(); render();
       if(typeof onImported === 'function') onImported();
       showAlert(`${newContracts.length}건을 가져왔습니다.`
         + ((residentSyncActions.length || existingResidentsToFlag.length) ? `\n확인이 필요한 곳: ${residentSyncActions.length + existingResidentsToFlag.length}곳 (신규 등록 ${residentSyncActions.length}곳 + 기존 입실자 ${existingResidentsToFlag.length}곳)\n각 지점 화면의 "계약 확인 필요" 탭 또는 대시보드에서 모아볼 수 있고, 정보를 수정하면 목록에서 사라집니다.` : '')
+        + (refundFlagActions.length ? `\n환불 처리 필요: ${refundFlagActions.length}건 — 대시보드의 "환불 처리 필요" 목록에서 확인 후 퇴실 처리해주세요.` : '')
         + (duplicateCount ? `\n이미 등록되어 제외된 중복 데이터: ${duplicateCount}건` : '')
         + (unmatched.length ? `\n\n호실을 찾지 못한 항목:\n${unmatched.slice(0,20).join('\n')}${unmatched.length>20 ? `\n...외 ${unmatched.length-20}건` : ''}` : ''));
     }
@@ -4865,6 +4899,7 @@ function renderStatsView(){
     wrap.appendChild(renderOverdueStatsCard());
     wrap.appendChild(renderPendingMoveStatsCard());
     wrap.appendChild(renderJustImportedStatsCard());
+    wrap.appendChild(renderRefundPendingStatsCard());
   }
 
   const branchSection = document.createElement('div');
@@ -5707,6 +5742,88 @@ function renderJustImportedStatsCard(){
       chipRow.appendChild(chip);
     });
     groupWrap.appendChild(chipRow);
+    card.appendChild(groupWrap);
+  });
+
+  return card;
+}
+// 계약 가져오기에서 결제구분이 "환불"인 행이 감지되고, 그 방에 재실 중인 입실자와 이름이
+// 일치하며 과거 결제 이력도 있으면(importContractGrid 참고) 여기에 표시된다. 실거주자를
+// 잘못 퇴실 처리하는 사고를 막기 위해 자동으로는 표시만 하고, 담당자가 "퇴실 처리" 버튼을
+// 눌러야 실제로 퇴실(moveResidentToHistory)이 진행된다 — 오매칭이면 "무시"로 표시만 지운다.
+function renderRefundPendingStatsCard(){
+  const items = [];
+  DB.residents.filter(p=>p.refundPending).forEach(p=>{
+    const room = DB.rooms.find(r=>r.id===p.roomId);
+    if(!room || !hasBranchAccess(room.branchId)) return;
+    const branch = DB.branches.find(b=>b.id===room.branchId);
+    items.push({ p, room, branch });
+  });
+  if(items.length===0) return document.createDocumentFragment();
+
+  const groupMap = new Map();
+  items.forEach(item=>{
+    const key = item.branch ? item.branch.id : '__none__';
+    if(!groupMap.has(key)) groupMap.set(key, { branch: item.branch, entries: [] });
+    groupMap.get(key).entries.push(item);
+  });
+  const groups = [...groupMap.values()].sort((a,b)=> (a.branch?branchLabel(a.branch):'').localeCompare(b.branch?branchLabel(b.branch):''));
+
+  const card = document.createElement('div');
+  card.className = 'stat-section cleaning-card';
+  card.style.borderColor = 'var(--st-hold)';
+  card.innerHTML = `<h3 style="color:var(--st-hold);">⚠ 환불 처리 필요 <span class="cnt-badge" style="background:var(--st-hold-bg);color:var(--st-hold);">${items.length}</span></h3>
+    <div style="font-size:11px;color:var(--ink-soft);margin-bottom:8px;">계약이 환불 처리되어 해당 입실자의 퇴실 처리가 필요할 수 있습니다. 확인 후 처리해주세요.</div>`;
+
+  groups.forEach(group=>{
+    const groupWrap = document.createElement('div');
+    groupWrap.className = 'overdue-branch-group';
+    const branchName = document.createElement('div');
+    branchName.className = 'overdue-branch-name';
+    branchName.textContent = group.branch ? branchLabel(group.branch) : '(지점 정보 없음)';
+    groupWrap.appendChild(branchName);
+
+    group.entries.forEach(item=>{
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:4px 0;';
+      const info = document.createElement('span');
+      info.className = 'badge';
+      info.style.cssText = 'background:var(--st-hold-bg); color:var(--st-hold); cursor:pointer;';
+      info.textContent = `${item.room.number}호 ${item.p.name || '(이름 미입력)'} (환불일: ${item.p.refundPendingDate || '미상'})`;
+      info.title = '해당 호실로 이동';
+      info.onclick = ()=>{
+        if(!item.branch) return;
+        UI.view = 'branch';
+        UI.branchId = item.branch.id;
+        scrollToRoomCard(item.room);
+      };
+      row.appendChild(info);
+      if(canEdit()){
+        const leaveBtn = document.createElement('button');
+        leaveBtn.className = 'btn small danger';
+        leaveBtn.textContent = '퇴실 처리';
+        leaveBtn.title = '이 입실자를 환불 계약일 기준으로 퇴실 처리합니다';
+        leaveBtn.onclick = ()=>{
+          showConfirm(`"${item.p.name || '이 입실자'}"를 환불 계약일(${item.p.refundPendingDate || '미상'}) 기준으로 퇴실 처리할까요?\n정보는 히스토리로 이동되고, 이 자리에 새 입실자를 등록할 수 있게 됩니다.`, ()=>{
+            moveResidentToHistory(item.p, item.p.refundPendingDate || todayISO());
+            scheduleSave(); render();
+          });
+        };
+        const dismissBtn = document.createElement('button');
+        dismissBtn.className = 'btn small';
+        dismissBtn.textContent = '무시';
+        dismissBtn.title = '오매칭이거나 처리가 필요 없으면 표시만 지웁니다(입실자 정보는 그대로 유지)';
+        dismissBtn.onclick = ()=>{
+          delete item.p.refundPending;
+          delete item.p.refundPendingDate;
+          delete item.p.refundPendingContractId;
+          logChange(`"${item.p.name}" 환불 처리 필요 표시 해제(무시)`);
+          scheduleSave(); render();
+        };
+        row.appendChild(leaveBtn); row.appendChild(dismissBtn);
+      }
+      groupWrap.appendChild(row);
+    });
     card.appendChild(groupWrap);
   });
 
