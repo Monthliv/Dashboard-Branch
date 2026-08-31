@@ -5899,15 +5899,25 @@ function autoFlagDueRetouch(){
   });
   if(changed) scheduleSave();
 }
-// 청소/리터치가 예정된 방이라도, 실제로 입실자가 들어와 살기 시작하면(재실 중) 그 예정은 더
-// 이상 의미가 없다고 보고 자동으로 초기화한다 — 입실 전에 이미 청소가 끝났다고 보는 게
-// 자연스럽고, 직원이 "청소완료"/"리터치완료" 버튼 누르는 걸 잊었을 때를 위한 안전장치이기도
-// 하다. 추가청소(needsExtraCleaning)는 별개로 수동 관리되는 항목이라 건드리지 않는다.
+// 청소/리터치가 예정된 방에 "새로운" 입실자가 들어와 살기 시작하면 그 예정은 더 이상 의미가
+// 없다고 보고 자동으로 초기화한다 — 입실 전에 이미 청소가 끝났다고 보는 게 자연스럽고, 직원이
+// "청소완료"/"리터치완료" 버튼 누르는 걸 잊었을 때를 위한 안전장치이기도 하다. 추가청소
+// (needsExtraCleaning)는 별개로 수동 관리되는 항목이라 건드리지 않는다.
+// 주의: 재실 중인 입실자가 있다고 해서 무조건 초기화하면 안 된다 — 퇴실확정(scheduledToLeave)
+// 상태로 청소 예정을 미리 걸어둔 그 사람 본인은, 실제 퇴실 처리(모두 퇴실 처리 버튼을 누르기
+// 전)가 될 때까지 여전히 "재실 중"으로 간주된다(moveIn<=오늘). 이 경우까지 "새 입실자가
+// 들어왔다"고 오인해 청소 예정을 지워버리면, 정작 퇴실일 당일에 청소완료 버튼이 사라져버리는
+// 문제가 생긴다(신삼B동 402호 등에서 보고됨). room.cleaningFlagSourceId(청소 예정을 만든
+// 원인 입실자 id, flagUpcomingCleaning 참고)가 지금 재실 중인 바로 그 사람과 같으면 "그 사람
+// 본인이 아직 안 나간 것"이므로 건드리지 않고, 다르면(또는 원래 없었으면, 즉 실제 퇴실 처리
+// 시점에 걸린 경우) 진짜 새 입실자로 보고 초기화한다.
 function clearCleaningFlagsOnMoveIn(){
   let changed = false;
   DB.rooms.forEach(room=>{
     if(!(room.needsCleaning || room.needsRetouch)) return;
-    if(!DB.residents.some(p=> p.roomId===room.id && isCurrentlyResiding(p))) return;
+    const currentResident = DB.residents.find(p=> p.roomId===room.id && isCurrentlyResiding(p));
+    if(!currentResident) return;
+    if(room.cleaningFlagSourceId && room.cleaningFlagSourceId === currentResident.id) return;
     room.needsCleaning = false;
     room.needsRetouch = false;
     room.maintenanceDate = '';
