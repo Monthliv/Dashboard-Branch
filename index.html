@@ -599,6 +599,7 @@
         <span class="sub" id="loggedInAs"></span>
         <button class="btn small" id="cleaningBtn">청소 관리</button>
         <button class="btn small" id="doorlockBtn">도어락 관리</button>
+        <button class="btn small" id="settlementBtn">정산 계산기</button>
         <button class="btn small" id="shortcutsBtn">바로가기</button>
         <button class="btn small" id="adminBtn" style="display:none;">관리자 설정</button>
         <button class="btn small" id="changePwBtn">비밀번호 변경</button>
@@ -683,6 +684,27 @@ function branchDoubleOccupancyFee(branch){
   if(!branch) return 0;
   const digits = String(branch.doubleOccupancyFee||'').replace(/[^0-9]/g,'');
   return digits ? Number(digits) : 0;
+}
+// 정산 수수료율(%). 지점별로 다르게 설정할 수 있고, 설정 전에는 표준 7%를 쓴다.
+const SETTLEMENT_DEFAULT_COMMISSION_RATE = 7;
+function branchCommissionRate(branch){
+  if(!branch) return SETTLEMENT_DEFAULT_COMMISSION_RATE;
+  const v = Number(branch.commissionRate);
+  return (isFinite(v) && v >= 0) ? v : SETTLEMENT_DEFAULT_COMMISSION_RATE;
+}
+// 이미 정산이 끝난 뒤 환불이 발생하면, 회사는 원장에게 정산해준 금액을 되돌려받아야 한다.
+// 이때 환불액 전액이 아니라 "선차감했던 수수료 중 이 환불분에 해당하는 몫"을 빼고 돌려받는다
+// (정산표의 환불 행과 동일한 계산: 판매금액 × 수수료율을 수수료로 돌려주고 나머지만 회수).
+// 예) 환불 435,000 / 수수료율 7% → 수수료 30,450을 회사가 부담하고 404,550만 회수.
+// 보증금은 매출이 아니라 예치금이라 수수료 대상이 아니므로, 별도 항목으로 분리해 계산한다.
+function calcSettlementReturn(refundAmount, ratePercent, depositRefund){
+  const refund = Math.max(0, Math.round(Number(refundAmount) || 0));
+  const rate = Math.max(0, Number(ratePercent) || 0);
+  const deposit = Math.max(0, Math.round(Number(depositRefund) || 0));
+  // 정산표와 동일하게 원 단위에서 반올림한다.
+  const commissionBack = Math.round(refund * rate / 100);
+  const reclaim = refund - commissionBack;
+  return { refund, rate, commissionBack, reclaim, deposit, total: reclaim + deposit };
 }
 /* 방 가격은 호실별이 아니라 지점+타입별로 관리한다. 같은 지점의 같은 타입 호실은 항상 같은 가격을 쓴다.
    입실자가 "2인 거주"로 체크되어 있으면 지점에 설정된 1인 추가금을 더해서 보여준다. */
@@ -1070,6 +1092,12 @@ function applyLoadedCore(parsed){
     if(b.autoCleaningExcluded == null){
       b.autoCleaningExcluded = LEGACY_AUTO_CLEANING_EXCLUDED_NAMES.some(name => cleanKeyLoose(b.name).includes(name));
     }
+    // 정산 관련 지점 설정. 값이 없던 기존 지점은 표준 수수료율(7%)/보증금 미관리로 시작하고,
+    // 담당자가 지점 정보에서 바꾸거나 엑셀 일괄 등록으로 채워넣는다.
+    if(b.commissionRate == null) b.commissionRate = SETTLEMENT_DEFAULT_COMMISSION_RATE;
+    if(b.managesDeposit == null) b.managesDeposit = false;
+    if(b.depositAmount == null) b.depositAmount = 0;
+    if(b.refundAccount == null) b.refundAccount = '';
   });
   DB.residents.forEach(p => {
     if(p.originalMoveIn == null) p.originalMoveIn = p.moveIn || '';
@@ -1185,6 +1213,7 @@ function render(){
   if(UI.view === 'admin'){ main.appendChild(renderAdminView()); return; }
   if(UI.view === 'cleaning'){ main.appendChild(renderCleaningView()); return; }
   if(UI.view === 'doorlock'){ main.appendChild(renderDoorlockView()); return; }
+  if(UI.view === 'settlement'){ main.appendChild(renderSettlementView()); return; }
   if(UI.view === 'shortcuts'){ main.appendChild(renderShortcutsView()); return; }
   main.appendChild(renderBranchView());
 }
@@ -1214,6 +1243,10 @@ function renderTopNav(){
   const shortcutsBtn = document.getElementById('shortcutsBtn');
   shortcutsBtn.className = 'btn small' + (UI.view==='shortcuts' ? ' primary' : '');
   shortcutsBtn.onclick = ()=>{ UI.view = 'shortcuts'; render(); };
+
+  const settlementBtn = document.getElementById('settlementBtn');
+  settlementBtn.className = 'btn small' + (UI.view==='settlement' ? ' primary' : '');
+  settlementBtn.onclick = ()=>{ UI.view = 'settlement'; render(); };
 
   const doorlockBtn = document.getElementById('doorlockBtn');
   doorlockBtn.className = 'btn small' + (UI.view==='doorlock' ? ' primary' : '');
@@ -1758,6 +1791,24 @@ function renderBranchInfoBar(branch){
       }
     };
   }
+  // 수수료율(%)은 소수점이 들어갈 수 있어(예: 6.5%) feeField(원 단위 정수)와 따로 둔다.
+  function rateField(field, logLabel){
+    return {
+      view: ()=> document.createTextNode(`${branchCommissionRate(branch)}%`),
+      edit: ()=>{
+        const input = document.createElement('input');
+        input.type = 'number'; input.min = '0'; input.max = '100'; input.step = '0.1';
+        input.placeholder = String(SETTLEMENT_DEFAULT_COMMISSION_RATE);
+        input.value = branchCommissionRate(branch);
+        input.addEventListener('input', ()=>{
+          logChange(`"${branch.name}" ${logLabel} 수정`);
+          branch[field] = input.value === '' ? SETTLEMENT_DEFAULT_COMMISSION_RATE : (Number(input.value) || 0);
+          scheduleSave();
+        });
+        return input;
+      }
+    };
+  }
   function boolField(field, trueLabel, falseLabel, logLabel, hint, onChange){
     return {
       view: ()=> document.createTextNode(branch[field] ? trueLabel : falseLabel),
@@ -1795,7 +1846,11 @@ function renderBranchInfoBar(branch){
     { label:'청소비', ...feeField('cleaningFee', '예: 50000', '청소비') },
     { label:'1인 추가금', ...textField('doubleOccupancyFee', '예: 100000원', '1인 추가금') },
     { label:'공용 주방 위치', ...textField('sharedKitchenLocation', '예: 2층 복도 끝', '공용 주방 위치') },
-    { label:'종량제 봉투', ...textField('trashBagLocation', '예: 1층 관리실', '종량제 봉투 보관위치') }
+    { label:'종량제 봉투', ...textField('trashBagLocation', '예: 1층 관리실', '종량제 봉투 보관위치') },
+    { label:'정산 수수료율', ...rateField('commissionRate', '정산 수수료율') },
+    { label:'보증금 관리', ...boolField('managesDeposit', '관리함', '관리 안 함', '보증금 관리', '체크하면 정산 계산기에서 이 지점의 보증금 환불액을 함께 안내합니다.') },
+    { label:'보증금', ...feeField('depositAmount', '예: 100000', '보증금') },
+    { label:'환불계좌', ...textField('refundAccount', '예: 국민 123456-78-901234 (홍길동)', '환불계좌') }
   ];
 
   if(infoOpen){
@@ -5768,6 +5823,285 @@ function renderJustImportedStatsCard(){
   });
 
   return card;
+}
+/* ---------------- 정산 반환 금액 계산기 ---------------- */
+// 지점별 정산 설정(수수료율/보증금/환불계좌)을 엑셀 표에서 한 번에 등록하기 위한 헤더 매핑.
+// 헤더는 공백을 모두 지운 뒤 정확히 일치하는 것만 인식한다("보증금관리"와 "보증금"이 서로
+// 다른 열로 구분되어야 하므로 접두어 매칭은 쓰지 않는다).
+const SETTLEMENT_FIELD_BY_HEADER = {
+  '고시원명':'branchName', '고시원':'branchName', '고시원이름':'branchName',
+  '지점명':'branchName', '지점':'branchName',
+  '수수료율':'commissionRate', '수수료':'commissionRate', '정산수수료율':'commissionRate',
+  '보증금관리':'managesDeposit', '보증금관리여부':'managesDeposit',
+  '보증금':'depositAmount', '보증금금액':'depositAmount',
+  '환불계좌':'refundAccount', '환부계좌':'refundAccount', '환급계좌':'refundAccount',
+  '계좌':'refundAccount', '계좌번호':'refundAccount'
+};
+function parseSettlementBool(s){
+  const v = cleanKeyLoose(s).toUpperCase();
+  if(!v) return false;
+  return ['O','Y','YES','TRUE','1','V','관리','관리함','관리O','있음','예'].includes(v);
+}
+function importSettlementGrid(headerCells, dataRows, onImported){
+  const idx = {};
+  headerCells.forEach((h, i)=>{
+    const key = SETTLEMENT_FIELD_BY_HEADER[cleanKeyLoose(h).replace(/\s+/g,'')];
+    if(key) idx[key] = i;
+  });
+  if(idx.branchName == null){
+    showAlert('헤더 행에서 "고시원명"(또는 지점명) 열을 찾을 수 없습니다.\n첫 줄이 헤더인지 확인해주세요.');
+    return;
+  }
+  const updates = [];
+  const unmatched = [];
+  dataRows.forEach((cells, i)=>{
+    const get = (k)=> (idx[k]!=null && cells[idx[k]]!=null) ? String(cells[idx[k]]).trim() : '';
+    const nameRaw = cleanKeyLoose(get('branchName'));
+    if(!nameRaw) return;
+    const resolved = BRANCH_NAME_ALIASES[nameRaw] || nameRaw;
+    const branch = DB.branches.find(b=> cleanKeyLoose(b.name).toLowerCase() === resolved.toLowerCase());
+    if(!branch){ unmatched.push(`[${i+2}행] ${nameRaw}`); return; }
+    const patch = {};
+    if(idx.commissionRate != null){
+      const raw = get('commissionRate').replace(/[^0-9.]/g,'');
+      if(raw !== ''){
+        let rate = Number(raw) || 0;
+        // "0.07"처럼 비율로 적힌 경우도 7%로 받아들인다 — 실제 운영상 1% 미만 수수료율은
+        // 쓰이지 않으므로, 0과 1 사이 값은 소수 비율로 보고 100을 곱한다.
+        if(rate > 0 && rate < 1) rate = rate * 100;
+        patch.commissionRate = rate;
+      }
+    }
+    if(idx.managesDeposit != null) patch.managesDeposit = parseSettlementBool(get('managesDeposit'));
+    if(idx.depositAmount != null){
+      const raw = get('depositAmount').replace(/[^0-9]/g,'');
+      if(raw !== '') patch.depositAmount = Number(raw);
+    }
+    if(idx.refundAccount != null){
+      const raw = get('refundAccount');
+      if(raw && raw !== '-') patch.refundAccount = raw;
+    }
+    updates.push({ branch, patch });
+  });
+  if(updates.length === 0){
+    showAlert('등록할 지점을 찾지 못했습니다.'
+      + (unmatched.length ? `\n\n이름이 일치하는 지점이 없는 행:\n${unmatched.slice(0,20).join('\n')}` : ''));
+    return;
+  }
+  showConfirm(
+    `${updates.length}개 지점의 정산 설정을 업데이트할까요?`
+      + (unmatched.length ? `\n(지점을 찾지 못한 ${unmatched.length}건은 제외됩니다)` : ''),
+    ()=>{
+      updates.forEach(u=> Object.assign(u.branch, u.patch));
+      logChange(`지점 정산 설정 일괄 등록: ${updates.length}건`);
+      scheduleSave(); render();
+      if(typeof onImported === 'function') onImported();
+      showAlert(`${updates.length}개 지점의 정산 설정을 업데이트했습니다.`
+        + (unmatched.length ? `\n\n지점을 찾지 못해 제외된 행:\n${unmatched.slice(0,20).join('\n')}` : ''));
+    }
+  );
+}
+function showSettlementPasteModal(){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  const box = document.createElement('div');
+  box.className = 'modal-box';
+  box.style.maxWidth = '640px';
+  const close = ()=> overlay.remove();
+  box.innerHTML = `
+    <div class="modal-msg" style="margin-bottom:10px;font-weight:700;">지점 정산 설정 붙여넣기</div>
+    <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:10px;line-height:1.6;">
+      엑셀에서 헤더 행을 포함해 복사한 표를 붙여넣어주세요.<br>
+      인식하는 열: <b>고시원명</b>(필수), 수수료율, 보증금관리, 보증금, 환불계좌<br>
+      보증금관리는 O / X (또는 Y/N, 관리/미관리)로 적어주세요.
+    </div>`;
+  const textarea = document.createElement('textarea');
+  textarea.rows = 10;
+  textarea.style.cssText = 'width:100%;font-family:monospace;font-size:11.5px;';
+  textarea.placeholder = '고시원명\t수수료율\t보증금관리\t보증금\t환불계좌';
+  box.appendChild(textarea);
+  const btnRow = document.createElement('div');
+  btnRow.className = 'modal-btn-row';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'btn'; cancelBtn.textContent = '취소'; cancelBtn.onclick = close;
+  const importBtn = document.createElement('button');
+  importBtn.className = 'btn primary'; importBtn.textContent = '가져오기';
+  importBtn.onclick = ()=>{
+    const lines = textarea.value.replace(/\r/g,'').split('\n').filter(l=> l.trim()!=='');
+    if(lines.length < 2){ showAlert('헤더 행과 데이터 행이 포함된 표를 붙여넣어주세요.'); return; }
+    importSettlementGrid(lines[0].split('\t'), lines.slice(1).map(l=> l.split('\t')), close);
+  };
+  btnRow.appendChild(cancelBtn); btnRow.appendChild(importBtn);
+  box.appendChild(btnRow);
+  overlay.addEventListener('click', (e)=>{ if(e.target===overlay) close(); });
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+  setTimeout(()=> textarea.focus(), 0);
+}
+function renderSettlementView(){
+  const wrap = document.createElement('div');
+  const state = UI.settlementCalc || (UI.settlementCalc = { branchId:'', refund:'', deposit:'' });
+  const branches = allowedBranches();
+
+  const card = document.createElement('div');
+  card.className = 'stat-section';
+  card.appendChild(el('h3', null, '정산 반환 금액 계산기'));
+  card.appendChild(el('div', null,
+    '이미 정산이 끝난 뒤 환불이 발생한 경우, 원장에게서 회수할 금액을 계산합니다. 환불액 전액이 아니라, 선차감했던 수수료 중 환불분에 해당하는 몫을 제외하고 회수합니다.',
+    'font-size:11.5px;color:var(--ink-soft);line-height:1.6;margin-bottom:14px;'));
+
+  const form = document.createElement('div');
+  form.style.cssText = 'display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; margin-bottom:14px;';
+
+  // 고시원 선택
+  const branchWrap = document.createElement('div');
+  branchWrap.style.cssText = 'flex:1 1 200px;';
+  branchWrap.appendChild(el('label', 'field-label', '고시원'));
+  const branchSel = document.createElement('select');
+  branchSel.style.width = '100%';
+  branchSel.innerHTML = `<option value="">(직접 입력)</option>` +
+    branches.map(b=> `<option value="${b.id}">${esc(branchLabel(b))}</option>`).join('');
+  branchSel.value = state.branchId || '';
+  branchWrap.appendChild(branchSel);
+  form.appendChild(branchWrap);
+
+  // 수수료율
+  const rateWrap = document.createElement('div');
+  rateWrap.style.cssText = 'flex:0 0 110px;';
+  rateWrap.appendChild(el('label', 'field-label', '수수료율(%)'));
+  const rateInput = document.createElement('input');
+  rateInput.type = 'number'; rateInput.min = '0'; rateInput.max = '100'; rateInput.step = '0.1';
+  rateInput.style.width = '100%';
+  rateWrap.appendChild(rateInput);
+  form.appendChild(rateWrap);
+
+  // 환불금액
+  const refundWrap = document.createElement('div');
+  refundWrap.style.cssText = 'flex:1 1 160px;';
+  refundWrap.appendChild(el('label', 'field-label', '환불금액(입실료)'));
+  const refundInput = document.createElement('input');
+  refundInput.type = 'text'; refundInput.inputMode = 'numeric'; refundInput.placeholder = '예: 435000';
+  refundInput.style.width = '100%';
+  refundInput.value = state.refund || '';
+  refundWrap.appendChild(refundInput);
+  form.appendChild(refundWrap);
+
+  // 보증금 환불액(보증금 관리 지점에서만 노출)
+  const depositWrap = document.createElement('div');
+  depositWrap.style.cssText = 'flex:1 1 160px;';
+  depositWrap.appendChild(el('label', 'field-label', '보증금 환불액'));
+  const depositInput = document.createElement('input');
+  depositInput.type = 'text'; depositInput.inputMode = 'numeric'; depositInput.placeholder = '예: 100000';
+  depositInput.style.width = '100%';
+  depositInput.value = state.deposit || '';
+  depositWrap.appendChild(depositInput);
+  form.appendChild(depositWrap);
+
+  card.appendChild(form);
+  const resultBox = document.createElement('div');
+  card.appendChild(resultBox);
+
+  const digitsOf = (s)=> String(s||'').replace(/[^0-9]/g,'');
+  function selectedBranch(){ return branches.find(b=> b.id === state.branchId) || null; }
+
+  function syncBranchDependentInputs(){
+    const branch = selectedBranch();
+    // 지점을 고르면 그 지점의 수수료율을 기본값으로 채운다(여기서 직접 고쳐 계산해볼 수도 있다).
+    if(branch && state.rate == null) state.rate = branchCommissionRate(branch);
+    if(state.rate == null) state.rate = SETTLEMENT_DEFAULT_COMMISSION_RATE;
+    rateInput.value = state.rate;
+    const managesDeposit = !!(branch && branch.managesDeposit);
+    // 보증금을 관리하지 않는 지점은 보증금 환불 자체가 없으므로 입력칸을 숨긴다.
+    depositWrap.style.display = managesDeposit ? '' : 'none';
+    if(!managesDeposit){ state.deposit = ''; depositInput.value = ''; }
+  }
+
+  function renderResult(){
+    const branch = selectedBranch();
+    const refund = Number(digitsOf(state.refund)) || 0;
+    const deposit = Number(digitsOf(state.deposit)) || 0;
+    const r = calcSettlementReturn(refund, state.rate, deposit);
+    resultBox.innerHTML = '';
+    if(refund <= 0 && deposit <= 0){
+      resultBox.appendChild(el('div', null, '환불금액을 입력하면 회수 금액이 계산됩니다.',
+        'font-size:12px;color:var(--ink-soft);padding:10px 0;'));
+      return;
+    }
+    const rows = [
+      ['환불금액 (입실료)', formatWon(r.refund), ''],
+      [`반환 수수료 (${r.rate}%)`, '− ' + formatWon(r.commissionBack), 'color:var(--st-hold);'],
+      ['원장 반환 요청액', formatWon(r.reclaim), 'font-weight:800;color:var(--accent-ink);border-top:1px solid var(--line);']
+    ];
+    if(branch && branch.managesDeposit){
+      rows.push(['보증금 반환액 (수수료 없음)', formatWon(r.deposit), '']);
+      rows.push(['합계', formatWon(r.total), 'font-weight:800;border-top:1px solid var(--line);']);
+    }
+    const table = document.createElement('table');
+    table.style.cssText = 'width:100%;border-collapse:collapse;font-size:13px;';
+    table.innerHTML = rows.map(([label, value, style])=>
+      `<tr><td style="padding:7px 4px;${style}">${esc(label)}</td>
+           <td style="padding:7px 4px;text-align:right;font-family:'JetBrains Mono',monospace;${style}">${esc(value)}</td></tr>`
+    ).join('');
+    resultBox.appendChild(table);
+    if(branch && branch.managesDeposit && branch.refundAccount){
+      resultBox.appendChild(el('div', null, `환불계좌: ${branch.refundAccount}`,
+        'font-size:12px;color:var(--ink-soft);margin-top:8px;'));
+    }
+  }
+
+  branchSel.addEventListener('change', ()=>{
+    state.branchId = branchSel.value;
+    state.rate = null; // 지점이 바뀌면 그 지점의 기본 수수료율로 다시 채운다
+    const branch = selectedBranch();
+    if(branch && branch.managesDeposit && branch.depositAmount && !state.deposit){
+      state.deposit = String(branch.depositAmount);
+      depositInput.value = state.deposit;
+    }
+    syncBranchDependentInputs();
+    renderResult();
+  });
+  rateInput.addEventListener('input', ()=>{ state.rate = rateInput.value === '' ? 0 : Number(rateInput.value); renderResult(); });
+  refundInput.addEventListener('input', ()=>{ state.refund = refundInput.value; renderResult(); });
+  depositInput.addEventListener('input', ()=>{ state.deposit = depositInput.value; renderResult(); });
+
+  syncBranchDependentInputs();
+  renderResult();
+  wrap.appendChild(card);
+
+  // 지점별 정산 설정 현황(엑셀 일괄 등록 결과를 여기서 바로 확인/수정할 수 있다)
+  const settingsCard = document.createElement('div');
+  settingsCard.className = 'stat-section';
+  const settingsHead = document.createElement('div');
+  settingsHead.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;';
+  settingsHead.appendChild(el('h3', null, '지점별 정산 설정', 'margin:0;'));
+  if(canEdit()){
+    const pasteBtn = document.createElement('button');
+    pasteBtn.className = 'btn small primary';
+    pasteBtn.textContent = '엑셀 붙여넣기';
+    pasteBtn.onclick = showSettlementPasteModal;
+    settingsHead.appendChild(pasteBtn);
+  }
+  settingsCard.appendChild(settingsHead);
+  settingsCard.appendChild(el('div', null, '각 지점의 값은 지점 화면 상단 "지점 정보"에서도 직접 수정할 수 있습니다.',
+    'font-size:11.5px;color:var(--ink-soft);margin:6px 0 10px;'));
+  const sTable = document.createElement('table');
+  sTable.className = 'branch-table';
+  sTable.innerHTML = `<thead><tr><th>지점</th><th>수수료율</th><th>보증금 관리</th><th>보증금</th><th>환불계좌</th></tr></thead>`;
+  const sBody = document.createElement('tbody');
+  branches.forEach(b=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td style="font-weight:700;">${esc(branchLabel(b))}</td>
+      <td>${branchCommissionRate(b)}%</td>
+      <td>${b.managesDeposit ? '관리함' : '<span style="color:var(--ink-soft);">-</span>'}</td>
+      <td>${b.managesDeposit && b.depositAmount ? esc(formatWon(b.depositAmount)) : '<span style="color:var(--ink-soft);">-</span>'}</td>
+      <td>${b.refundAccount ? esc(b.refundAccount) : '<span style="color:var(--ink-soft);">-</span>'}</td>`;
+    sBody.appendChild(tr);
+  });
+  sTable.appendChild(sBody);
+  settingsCard.appendChild(sTable);
+  wrap.appendChild(settingsCard);
+
+  return wrap;
 }
 // 계약 가져오기에서 결제구분이 "환불"인 행이 감지되고, 그 방에 재실 중인 입실자와 이름이
 // 일치하며 과거 결제 이력도 있으면(importContractGrid 참고) 여기에 표시된다. 실거주자를
