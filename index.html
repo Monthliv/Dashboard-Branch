@@ -5916,6 +5916,46 @@ function importSettlementGrid(headerCells, dataRows, onImported){
     }
   );
 }
+// 빈 양식이 아니라 현재 등록된 지점 목록과 지금 설정값을 그대로 채워서 내려준다 — 담당자는
+// 값만 고쳐 다시 올리면 되고, 고시원명을 직접 타이핑하지 않아도 되니 매칭 실패도 줄어든다.
+function downloadSettlementTemplate(){
+  if(typeof XLSX === 'undefined'){ showAlert('엑셀 라이브러리를 불러오지 못했습니다. 네트워크 연결을 확인해주세요.'); return; }
+  const headers = ['고시원명','수수료율','보증금관리','보증금','환불계좌'];
+  const rows = allowedBranches().map(b=>({
+    고시원명: branchLabel(b),
+    수수료율: branchCommissionRate(b),
+    보증금관리: b.managesDeposit ? 'O' : 'X',
+    보증금: b.depositAmount || 0,
+    환불계좌: b.refundAccount || ''
+  }));
+  if(rows.length === 0) rows.push({ 고시원명:'먼슬리브 성수', 수수료율:7, 보증금관리:'X', 보증금:0, 환불계좌:'' });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows, { header: headers }), '정산설정');
+  XLSX.writeFile(wb, `monthliv_고시원별_정산설정_${todayISO()}.xlsx`);
+}
+function handleSettlementExcelFile(file, onImported){
+  if(typeof XLSX === 'undefined'){ showAlert('엑셀 라이브러리를 불러오지 못했습니다. 네트워크 연결을 확인해주세요.'); return; }
+  const reader = new FileReader();
+  reader.onload = (e)=>{
+    let grid;
+    try{
+      const wb = XLSX.read(new Uint8Array(e.target.result), { type:'array' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      grid = XLSX.utils.sheet_to_json(sheet, { header:1, defval:'' });
+    }catch(err){
+      showAlert('엑셀 파일을 읽는 중 오류가 발생했습니다: ' + err.message);
+      return;
+    }
+    if(!grid || grid.length < 2){
+      showAlert('헤더 행과 데이터 행이 포함된 엑셀 파일을 업로드해주세요.');
+      return;
+    }
+    const headerCells = grid[0].map(v=> v==null ? '' : String(v));
+    const dataRows = grid.slice(1).map(row=> row.map(v=> v==null ? '' : v));
+    importSettlementGrid(headerCells, dataRows, onImported);
+  };
+  reader.readAsArrayBuffer(file);
+}
 function showSettlementPasteModal(){
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
@@ -6085,14 +6125,38 @@ function renderSettlementView(){
   settingsHead.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;';
   settingsHead.appendChild(el('h3', null, '지점별 정산 설정', 'margin:0;'));
   if(canEdit()){
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex; gap:6px; flex-wrap:wrap;';
+    const templateBtn = document.createElement('button');
+    templateBtn.className = 'btn small';
+    templateBtn.textContent = '⬇ 양식 다운로드';
+    templateBtn.title = '현재 지점 목록과 설정값이 채워진 엑셀 양식을 내려받습니다. 값만 고쳐서 다시 올리면 됩니다.';
+    templateBtn.onclick = downloadSettlementTemplate;
+    const uploadBtn = document.createElement('button');
+    uploadBtn.className = 'btn small primary';
+    uploadBtn.textContent = '⬆ 엑셀 업로드';
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = '.xlsx,.xls';
+    fileInput.style.display = 'none';
+    uploadBtn.onclick = ()=> fileInput.click();
+    fileInput.addEventListener('change', ()=>{
+      if(fileInput.files && fileInput.files[0]){
+        handleSettlementExcelFile(fileInput.files[0]);
+        fileInput.value = '';
+      }
+    });
     const pasteBtn = document.createElement('button');
-    pasteBtn.className = 'btn small primary';
-    pasteBtn.textContent = '엑셀 붙여넣기';
+    pasteBtn.className = 'btn small';
+    pasteBtn.textContent = '붙여넣기';
+    pasteBtn.title = '엑셀에서 표를 복사해 직접 붙여넣습니다';
     pasteBtn.onclick = showSettlementPasteModal;
-    settingsHead.appendChild(pasteBtn);
+    btnRow.appendChild(templateBtn); btnRow.appendChild(uploadBtn);
+    btnRow.appendChild(fileInput); btnRow.appendChild(pasteBtn);
+    settingsHead.appendChild(btnRow);
   }
   settingsCard.appendChild(settingsHead);
-  settingsCard.appendChild(el('div', null, '각 지점의 값은 지점 화면 상단 "지점 정보"에서도 직접 수정할 수 있습니다.',
+  settingsCard.appendChild(el('div', null, '"양식 다운로드"로 현재 값이 채워진 엑셀을 받아 수정한 뒤 "엑셀 업로드"로 올리면 한 번에 반영됩니다. 각 지점의 값은 지점 화면 상단 "지점 정보"에서도 직접 수정할 수 있습니다.',
     'font-size:11.5px;color:var(--ink-soft);margin:6px 0 10px;'));
   const sTable = document.createElement('table');
   sTable.className = 'branch-table';
