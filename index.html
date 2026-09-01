@@ -6445,11 +6445,16 @@ function importDoorlockRecords(records, onImported){
   // 같은 날 여러 번 붙여넣으면 그날 기록만 최신 내용으로 갱신한다.
   if(!DB.doorlockHistory) DB.doorlockHistory = [];
   const lastEntry = DB.doorlockHistory[DB.doorlockHistory.length - 1];
+  // 특이사항 메모(doorlockBranchNotes)는 actionTags와 달리 붙여넣기로 초기화되지 않고 계속
+  // 이어지는 값이지만, "그날의 메모가 무엇이었는지"도 actionTags처럼 그날 히스토리 항목에
+  // 얼려서 남겨둔다 — 그래야 화살표로 지난 날짜를 봐도 그날 실제로 적혀 있던 메모를 보여줄 수
+  // 있고, 오늘 메모를 고쳐도 이미 지나간 날짜의 기록은 그대로 유지된다.
   if(lastEntry && lastEntry.date === DB.doorlockImportDate){
     lastEntry.records = records;
     lastEntry.actionTags = DB.doorlockActionTags;
+    lastEntry.branchNotes = DB.doorlockBranchNotes || {};
   } else {
-    DB.doorlockHistory.push({ date: DB.doorlockImportDate, records, actionTags: DB.doorlockActionTags });
+    DB.doorlockHistory.push({ date: DB.doorlockImportDate, records, actionTags: DB.doorlockActionTags, branchNotes: DB.doorlockBranchNotes || {} });
     if(DB.doorlockHistory.length > 5) DB.doorlockHistory.shift();
   }
   logChange(`도어락 데이터 붙여넣기: ${records.length}건 갱신`);
@@ -6509,7 +6514,12 @@ function getDoorlockSnapshotAt(offsetFromLatest){
   // 아직 모르는 상태) 등으로 어긋날 수 있다. 과거 날짜는 그 시점의 값 외엔 알 방법이 없으므로
   // current.actionTags를 그대로 쓴다.
   const actionTags = offsetFromLatest === 0 ? (DB.doorlockActionTags || {}) : (current.actionTags || {});
-  return { date: current.date, records: current.records, prevRecords: prev ? prev.records : null, actionTags };
+  // 특이사항 메모도 actionTags와 같은 이유로 오늘은 항상 라이브 값(DB.doorlockBranchNotes)을
+  // 우선한다 — 히스토리 항목의 branchNotes는 얼려둔 캐시일 뿐이라, 오늘 메모를 수정한 직후에는
+  // (동기화 호출 전이거나 옛 코드가 실행 중인 탭이면) 캐시가 아직 갱신 전일 수 있다. 지나간
+  // 날짜는 그 시점에 얼려둔 값 외엔 알 방법이 없으므로 current.branchNotes를 그대로 쓴다.
+  const branchNotes = offsetFromLatest === 0 ? (DB.doorlockBranchNotes || {}) : (current.branchNotes || {});
+  return { date: current.date, records: current.records, prevRecords: prev ? prev.records : null, actionTags, branchNotes };
 }
 function showDoorlockPasteModal(){
   const overlay = document.createElement('div');
@@ -6574,6 +6584,13 @@ const DOORLOCK_ACTION_TAGS = ['아톡', '청소방', '현장출동'];
 function syncDoorlockActionTagsToTodayHistory(){
   if(!DB.doorlockHistory || !DB.doorlockHistory.length) return;
   DB.doorlockHistory[DB.doorlockHistory.length - 1].actionTags = DB.doorlockActionTags;
+}
+// 특이사항 메모도 같은 이유로 오늘(최신) 히스토리 항목에 맞춰준다 — actionTags와 마찬가지로
+// Firestore 저장/로딩을 거치면 DB.doorlockBranchNotes와 히스토리 항목의 branchNotes가 서로
+// 다른 객체가 되므로, 메모를 수정할 때마다 명시적으로 다시 동기화해야 한다.
+function syncDoorlockBranchNotesToTodayHistory(){
+  if(!DB.doorlockHistory || !DB.doorlockHistory.length) return;
+  DB.doorlockHistory[DB.doorlockHistory.length - 1].branchNotes = DB.doorlockBranchNotes;
 }
 function showDoorlockActionModal(serial, label){
   const overlay = document.createElement('div');
@@ -6743,7 +6760,8 @@ function doorlockResolveBranchLink(group, label){
   }
   return autoMatchDoorlockBranch(label);
 }
-function renderDoorlockDisconnectedSection(records, prevRecords, dateForTitle, editable){
+function renderDoorlockDisconnectedSection(records, prevRecords, dateForTitle, editable, branchNotes){
+  branchNotes = branchNotes || {};
   const box = document.createElement('div');
   box.className = 'stat-section';
   const dateSlash = (dateForTitle || localDateKey()).replace(/-/g,'/');
@@ -6923,7 +6941,7 @@ function renderDoorlockDisconnectedSection(records, prevRecords, dateForTitle, e
       roomTd.appendChild(chipsWrap);
     }
     const noteTd = document.createElement('td');
-    const note = group.keys.map(k=> DB.doorlockBranchNotes && DB.doorlockBranchNotes[k]).find(Boolean) || '';
+    const note = group.keys.map(k=> branchNotes[k]).find(Boolean) || '';
     if(canEdit() && editable){
       const noteSpan = document.createElement('span');
       noteSpan.textContent = note || '메모 추가';
@@ -6948,6 +6966,7 @@ function renderDoorlockDisconnectedSection(records, prevRecords, dateForTitle, e
             if(before !== DB.doorlockBranchNotes[key]) changed = true;
           });
           if(changed){
+            syncDoorlockBranchNotesToTodayHistory();
             logChange(`도어락 "${label}" 특이사항 수정`);
             saveDoorlockState();
             syncDoorlockPublicMirror();
@@ -7135,7 +7154,7 @@ function renderDoorlockView(){
   if(UI.doorlockHistoryOffset == null || UI.doorlockHistoryOffset > maxOffset) UI.doorlockHistoryOffset = Math.min(UI.doorlockHistoryOffset || 0, maxOffset);
   const offset = UI.doorlockHistoryOffset;
   const snap = getDoorlockSnapshotAt(offset) ||
-    { date: DB.doorlockImportDate, records, prevRecords: (DB.doorlockPrevSnapshot && DB.doorlockPrevSnapshot.records) || null, actionTags: DB.doorlockActionTags || {} };
+    { date: DB.doorlockImportDate, records, prevRecords: (DB.doorlockPrevSnapshot && DB.doorlockPrevSnapshot.records) || null, actionTags: DB.doorlockActionTags || {}, branchNotes: DB.doorlockBranchNotes || {} };
   const viewRecords = snap.records;
   const viewPrevRecords = snap.prevRecords;
   const isLatest = offset === 0;
@@ -7198,7 +7217,7 @@ function renderDoorlockView(){
     diffGrid.appendChild(renderDoorlockResolvedSection(viewPrevRecords, viewRecords));
     wrap.appendChild(diffGrid);
   }
-  wrap.appendChild(renderDoorlockDisconnectedSection(viewRecords, viewPrevRecords, snap.date, isLatest));
+  wrap.appendChild(renderDoorlockDisconnectedSection(viewRecords, viewPrevRecords, snap.date, isLatest, snap.branchNotes));
 
   return wrap;
 }
