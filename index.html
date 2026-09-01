@@ -3946,7 +3946,24 @@ function parseAndImportContracts(text, onImported){
     return;
   }
   const headerCells = lines[0].split('\t');
-  const dataRows = lines.slice(1).map(l=> l.split('\t'));
+  // 계약 관리 화면의 "▸ 추가결제 N건"처럼 한 셀 안에 줄바꿈이 들어있는 항목을 그대로
+  // 복사하면, 그 셀 내부 줄바꿈이 실제 행 구분자(\n)와 구분되지 않아 계약 한 건이
+  // 여러 줄로 쪼개져 붙여넣기되고, 그 결과 열이 하나씩 밀려 계약일/계약기간 등이
+  // 엉뚱한 값으로 들어가거나 지점/호실 매칭에 실패한다(도어락 붙여넣기 파서가 이미
+  // 겪었던 것과 같은 종류의 문제). 계약일(YY.MM.DD)로 시작하는 줄만 "새 계약 행의
+  // 시작"으로 보고, 그렇지 않은 줄은 모두 바로 위 행에 줄바꿈으로 이어붙여 원래
+  // 한 셀 안의 값으로 복원한다 — 도어락 파서의 시리얼 넘버 앵커 방식과 같은 원리.
+  const ROW_START = /^\d{2}\.\d{2}\.\d{2}(\t|$)/;
+  const dataLines = [];
+  for(let i=1;i<lines.length;i++){
+    const line = lines[i];
+    if(dataLines.length===0 || ROW_START.test(line)){
+      dataLines.push(line);
+    } else {
+      dataLines[dataLines.length-1] += '\n' + line;
+    }
+  }
+  const dataRows = dataLines.map(l=> l.split('\t'));
   importContractGrid(headerCells, dataRows, onImported);
 }
 
