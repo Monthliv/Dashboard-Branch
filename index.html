@@ -693,18 +693,30 @@ function branchCommissionRate(branch){
   return (isFinite(v) && v >= 0) ? v : SETTLEMENT_DEFAULT_COMMISSION_RATE;
 }
 // 이미 정산이 끝난 뒤 환불이 발생하면, 회사는 원장에게 정산해준 금액을 되돌려받아야 한다.
-// 이때 환불액 전액이 아니라 "선차감했던 수수료 중 이 환불분에 해당하는 몫"을 빼고 돌려받는다
-// (정산표의 환불 행과 동일한 계산: 판매금액 × 수수료율을 수수료로 돌려주고 나머지만 회수).
-// 예) 환불 435,000 / 수수료율 7% → 수수료 30,450을 회사가 부담하고 404,550만 회수.
-// 보증금은 매출이 아니라 예치금이라 수수료 대상이 아니므로, 별도 항목으로 분리해 계산한다.
-function calcSettlementReturn(refundAmount, ratePercent, depositRefund){
-  const refund = Math.max(0, Math.round(Number(refundAmount) || 0));
-  const rate = Math.max(0, Number(ratePercent) || 0);
-  const deposit = Math.max(0, Math.round(Number(depositRefund) || 0));
+// 운영팀 정산 로직 기준:
+//   정산 기준 금액 = 총 판매가 − 원장님 쿠폰   (플랫폼 쿠폰/포인트는 정산 기준에서 빠지지 않음)
+//   실결제금       = 총 판매가 − 쿠폰/포인트
+//   고객 환불액    = 실결제금 − 차감액
+//   원장 반환액    = (총 판매가 − 차감액) × (1 − 수수료율)
+// 원장 반환액에 (1 − 수수료율)을 곱하는 이유는, 선차감했던 수수료 중 환불분에 해당하는 몫은
+// 회사가 부담하고 나머지만 회수하기 때문이다(정산표의 "환불" 행과 같은 계산).
+// 보증금은 원장에게 청구하는 항목이 아니라서 이 계산에서 완전히 제외한다.
+function calcSettlementReturn(input){
+  const num = (v)=> Math.max(0, Math.round(Number(String(v==null?'':v).replace(/[^0-9]/g,'')) || 0));
+  const gross = num(input.gross);
+  const ownerCoupon = num(input.ownerCoupon);
+  const platformCoupon = num(input.platformCoupon);
+  const deduction = num(input.deduction);
+  const rate = Math.max(0, Number(input.rate) || 0);
+  const settlementBase = gross - ownerCoupon;
+  const actualPaid = settlementBase - platformCoupon;
+  const customerRefund = actualPaid - deduction;
+  const ownerReturnBase = gross - deduction;
   // 정산표와 동일하게 원 단위에서 반올림한다.
-  const commissionBack = Math.round(refund * rate / 100);
-  const reclaim = refund - commissionBack;
-  return { refund, rate, commissionBack, reclaim, deposit, total: reclaim + deposit };
+  const commissionBack = Math.round(ownerReturnBase * rate / 100);
+  const ownerReturn = ownerReturnBase - commissionBack;
+  return { gross, ownerCoupon, platformCoupon, deduction, rate,
+           settlementBase, actualPaid, customerRefund, ownerReturnBase, commissionBack, ownerReturn };
 }
 /* 방 가격은 호실별이 아니라 지점+타입별로 관리한다. 같은 지점의 같은 타입 호실은 항상 같은 가격을 쓴다.
    입실자가 "2인 거주"로 체크되어 있으면 지점에 설정된 1인 추가금을 더해서 보여준다. */
@@ -1848,7 +1860,7 @@ function renderBranchInfoBar(branch){
     { label:'공용 주방 위치', ...textField('sharedKitchenLocation', '예: 2층 복도 끝', '공용 주방 위치') },
     { label:'종량제 봉투', ...textField('trashBagLocation', '예: 1층 관리실', '종량제 봉투 보관위치') },
     { label:'정산 수수료율', ...rateField('commissionRate', '정산 수수료율') },
-    { label:'보증금 관리', ...boolField('managesDeposit', '관리함', '관리 안 함', '보증금 관리', '체크하면 정산 계산기에서 이 지점의 보증금 환불액을 함께 안내합니다.') },
+    { label:'보증금 관리', ...boolField('managesDeposit', '관리함', '관리 안 함', '보증금 관리', '이 지점이 보증금을 관리하는지 여부입니다(참고용 — 원장 반환액 계산에는 반영되지 않습니다).') },
     { label:'보증금', ...feeField('depositAmount', '예: 100000', '보증금') },
     { label:'환불계좌', ...textField('refundAccount', '예: 국민 123456-78-901234 (홍길동)', '환불계좌') }
   ];
@@ -5940,14 +5952,14 @@ function showSettlementPasteModal(){
 }
 function renderSettlementView(){
   const wrap = document.createElement('div');
-  const state = UI.settlementCalc || (UI.settlementCalc = { branchId:'', refund:'', deposit:'' });
+  const state = UI.settlementCalc || (UI.settlementCalc = { branchId:'', gross:'', ownerCoupon:'', platformCoupon:'', deduction:'' });
   const branches = allowedBranches();
 
   const card = document.createElement('div');
   card.className = 'stat-section';
   card.appendChild(el('h3', null, '정산 반환 금액 계산기'));
   card.appendChild(el('div', null,
-    '이미 정산이 끝난 뒤 환불이 발생한 경우, 원장에게서 회수할 금액을 계산합니다. 환불액 전액이 아니라, 선차감했던 수수료 중 환불분에 해당하는 몫을 제외하고 회수합니다.',
+    '이미 정산이 끝난 뒤 환불이 발생한 경우, 원장에게서 회수할 금액(원장 반환액)을 계산합니다. 선차감했던 수수료 중 환불분에 해당하는 몫은 회사가 부담하고 나머지만 회수합니다.',
     'font-size:11.5px;color:var(--ink-soft);line-height:1.6;margin-bottom:14px;'));
 
   const form = document.createElement('div');
@@ -5975,33 +5987,29 @@ function renderSettlementView(){
   rateWrap.appendChild(rateInput);
   form.appendChild(rateWrap);
 
-  // 환불금액
-  const refundWrap = document.createElement('div');
-  refundWrap.style.cssText = 'flex:1 1 160px;';
-  refundWrap.appendChild(el('label', 'field-label', '환불금액(입실료)'));
-  const refundInput = document.createElement('input');
-  refundInput.type = 'text'; refundInput.inputMode = 'numeric'; refundInput.placeholder = '예: 435000';
-  refundInput.style.width = '100%';
-  refundInput.value = state.refund || '';
-  refundWrap.appendChild(refundInput);
-  form.appendChild(refundWrap);
-
-  // 보증금 환불액(보증금 관리 지점에서만 노출)
-  const depositWrap = document.createElement('div');
-  depositWrap.style.cssText = 'flex:1 1 160px;';
-  depositWrap.appendChild(el('label', 'field-label', '보증금 환불액'));
-  const depositInput = document.createElement('input');
-  depositInput.type = 'text'; depositInput.inputMode = 'numeric'; depositInput.placeholder = '예: 100000';
-  depositInput.style.width = '100%';
-  depositInput.value = state.deposit || '';
-  depositWrap.appendChild(depositInput);
-  form.appendChild(depositWrap);
+  // 정산 로직에 필요한 금액 입력값들(운영팀 계산 로직 기준)
+  [
+    ['gross',          '총 판매가',         '예: 1000000'],
+    ['ownerCoupon',    '원장님 쿠폰',        '예: 0'],
+    ['platformCoupon', '플랫폼 쿠폰/포인트', '예: 0'],
+    ['deduction',      '차감액',            '예: 565000']
+  ].forEach(([key, label, ph])=>{
+    const w = document.createElement('div');
+    w.style.cssText = 'flex:1 1 150px;';
+    w.appendChild(el('label', 'field-label', label));
+    const input = document.createElement('input');
+    input.type = 'text'; input.inputMode = 'numeric'; input.placeholder = ph;
+    input.style.width = '100%';
+    input.value = state[key] || '';
+    input.addEventListener('input', ()=>{ state[key] = input.value; renderResult(); });
+    w.appendChild(input);
+    form.appendChild(w);
+  });
 
   card.appendChild(form);
   const resultBox = document.createElement('div');
   card.appendChild(resultBox);
 
-  const digitsOf = (s)=> String(s||'').replace(/[^0-9]/g,'');
   function selectedBranch(){ return branches.find(b=> b.id === state.branchId) || null; }
 
   function syncBranchDependentInputs(){
@@ -6010,32 +6018,28 @@ function renderSettlementView(){
     if(branch && state.rate == null) state.rate = branchCommissionRate(branch);
     if(state.rate == null) state.rate = SETTLEMENT_DEFAULT_COMMISSION_RATE;
     rateInput.value = state.rate;
-    const managesDeposit = !!(branch && branch.managesDeposit);
-    // 보증금을 관리하지 않는 지점은 보증금 환불 자체가 없으므로 입력칸을 숨긴다.
-    depositWrap.style.display = managesDeposit ? '' : 'none';
-    if(!managesDeposit){ state.deposit = ''; depositInput.value = ''; }
   }
 
   function renderResult(){
     const branch = selectedBranch();
-    const refund = Number(digitsOf(state.refund)) || 0;
-    const deposit = Number(digitsOf(state.deposit)) || 0;
-    const r = calcSettlementReturn(refund, state.rate, deposit);
+    const r = calcSettlementReturn({
+      gross: state.gross, ownerCoupon: state.ownerCoupon,
+      platformCoupon: state.platformCoupon, deduction: state.deduction, rate: state.rate
+    });
     resultBox.innerHTML = '';
-    if(refund <= 0 && deposit <= 0){
-      resultBox.appendChild(el('div', null, '환불금액을 입력하면 회수 금액이 계산됩니다.',
+    if(r.gross <= 0){
+      resultBox.appendChild(el('div', null, '총 판매가를 입력하면 계산됩니다.',
         'font-size:12px;color:var(--ink-soft);padding:10px 0;'));
       return;
     }
     const rows = [
-      ['환불금액 (입실료)', formatWon(r.refund), ''],
+      ['정산 기준 금액  (총 판매가 − 원장님 쿠폰)', formatWon(r.settlementBase), ''],
+      ['실결제금  (총 판매가 − 쿠폰/포인트)', formatWon(r.actualPaid), ''],
+      ['고객 환불액  (실결제금 − 차감액)', formatWon(r.customerRefund), 'color:var(--st-forsale);font-weight:700;'],
+      ['반환 기준 금액  (총 판매가 − 차감액)', formatWon(r.ownerReturnBase), 'border-top:1px solid var(--line);'],
       [`반환 수수료 (${r.rate}%)`, '− ' + formatWon(r.commissionBack), 'color:var(--st-hold);'],
-      ['원장 반환 요청액', formatWon(r.reclaim), 'font-weight:800;color:var(--accent-ink);border-top:1px solid var(--line);']
+      ['원장 반환액', formatWon(r.ownerReturn), 'font-weight:800;color:var(--accent-ink);border-top:1px solid var(--line);']
     ];
-    if(branch && branch.managesDeposit){
-      rows.push(['보증금 반환액 (수수료 없음)', formatWon(r.deposit), '']);
-      rows.push(['합계', formatWon(r.total), 'font-weight:800;border-top:1px solid var(--line);']);
-    }
     const table = document.createElement('table');
     table.style.cssText = 'width:100%;border-collapse:collapse;font-size:13px;';
     table.innerHTML = rows.map(([label, value, style])=>
@@ -6043,7 +6047,18 @@ function renderSettlementView(){
            <td style="padding:7px 4px;text-align:right;font-family:'JetBrains Mono',monospace;${style}">${esc(value)}</td></tr>`
     ).join('');
     resultBox.appendChild(table);
-    if(branch && branch.managesDeposit && branch.refundAccount){
+    // 전달받은 로직은 원장 반환액을 "총 판매가 − 차감액" 기준으로 계산하는데, 원장에게 실제로
+    // 정산해준 돈은 정산 기준 금액(총 판매가 − 원장님 쿠폰) 기준이라, 원장님 쿠폰이 있으면
+    // 두 기준이 갈려 회수액이 원장님 쿠폰만큼 부풀려진다. 원장님 쿠폰이 0인 일반적인 경우엔
+    // 두 계산이 완전히 같으므로, 값이 있을 때만 확인이 필요하다고 눈에 띄게 알린다.
+    if(r.ownerCoupon > 0){
+      const altBase = Math.max(0, r.settlementBase - r.deduction);
+      const altReturn = altBase - Math.round(altBase * r.rate / 100);
+      resultBox.appendChild(el('div', null,
+        `⚠ 원장님 쿠폰이 있어 확인이 필요합니다. 전달주신 로직 그대로 총 판매가 기준으로 계산해 ${formatWon(r.ownerReturn)}이 나왔습니다. 만약 정산 기준 금액(총 판매가 − 원장님 쿠폰)을 기준으로 계산해야 한다면 ${formatWon(altReturn)}이 됩니다. 어느 쪽이 맞는지 알려주세요.`,
+        'font-size:11.5px;color:var(--st-hold);background:var(--st-hold-bg);padding:9px 11px;border-radius:6px;margin-top:10px;line-height:1.7;'));
+    }
+    if(branch && branch.refundAccount){
       resultBox.appendChild(el('div', null, `환불계좌: ${branch.refundAccount}`,
         'font-size:12px;color:var(--ink-soft);margin-top:8px;'));
     }
@@ -6052,17 +6067,20 @@ function renderSettlementView(){
   branchSel.addEventListener('change', ()=>{
     state.branchId = branchSel.value;
     state.rate = null; // 지점이 바뀌면 그 지점의 기본 수수료율로 다시 채운다
-    const branch = selectedBranch();
-    if(branch && branch.managesDeposit && branch.depositAmount && !state.deposit){
-      state.deposit = String(branch.depositAmount);
-      depositInput.value = state.deposit;
-    }
     syncBranchDependentInputs();
     renderResult();
   });
   rateInput.addEventListener('input', ()=>{ state.rate = rateInput.value === '' ? 0 : Number(rateInput.value); renderResult(); });
-  refundInput.addEventListener('input', ()=>{ state.refund = refundInput.value; renderResult(); });
-  depositInput.addEventListener('input', ()=>{ state.deposit = depositInput.value; renderResult(); });
+
+  // 운영팀 계산 로직 설명을 화면에도 그대로 남겨둔다(수치 검증용).
+  const logicBox = document.createElement('div');
+  logicBox.style.cssText = 'margin-top:16px; padding-top:12px; border-top:1px dashed var(--line); font-size:11.5px; color:var(--ink-soft); line-height:1.9;';
+  logicBox.innerHTML = `<b style="color:var(--ink);">계산 로직</b><br>
+    · <b>정산 기준 금액</b> = 총 판매가 − 원장님 쿠폰 <span style="opacity:.85">(플랫폼 쿠폰/포인트는 정산 기준에서 제외되지 않음)</span><br>
+    · <b>고객 환불액</b> = 실결제금 − 차감액 <span style="opacity:.85">(실결제금 = 총 판매가 − 쿠폰/포인트)</span><br>
+    · <b>원장 반환액</b> = (총 판매가 − 차감액) × (1 − 수수료율) <span style="opacity:.85">(정산 완료 시에만 계산)</span><br>
+    · 보증금은 원장에게 청구하는 항목이 아니므로 계산에서 제외합니다.`;
+  card.appendChild(logicBox);
 
   syncBranchDependentInputs();
   renderResult();
