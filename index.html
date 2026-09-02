@@ -484,6 +484,7 @@
   .log-row .log-email{ color:var(--accent-ink); font-weight:600; flex:none; white-space:nowrap; }
   .log-row .log-summary{ color:var(--ink); }
   .log-toolbar{ display:flex; align-items:end; gap:8px; margin-bottom:12px; flex-wrap:wrap; }
+  .log-tz-note{ font-size:11px; font-weight:500; color:var(--ink-soft); margin-left:6px; }
   .log-pager{ display:flex; gap:6px; flex-wrap:wrap; margin-top:12px; }
   .memo-style-row{ display:flex; align-items:center; gap:6px; margin-top:6px; }
   .memo-style-row .color-swatch{
@@ -4727,23 +4728,44 @@ function renderUserManagePanel(){
 }
 
 const CHANGELOG_PAGE_SIZE = 10;
+const CHANGELOG_RECENT_LIMIT = 100;
+// 변경 로그 timestamp는 writeChangeLog()에서 new Date().toISOString() (=UTC)으로 저장한다.
+// 저장 형식을 UTC로 유지해야 Firestore의 문자열 정렬(orderBy 'timestamp')이 실제 시간 순서와
+// 그대로 일치하므로, 저장은 UTC 그대로 두고 "화면에 보여줄 때"만 한국시간(KST, UTC+9)으로
+// 바꾼다 — 기존에 쌓여 있는 로그도 별도 마이그레이션 없이 같은 규칙으로 읽힌다.
+const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+function formatKstStamp(iso){
+  if(!iso) return '';
+  const t = new Date(iso);
+  // 혹시 파싱이 안 되는 옛 형식이 섞여 있으면 원문을 그대로 보여준다(빈칸으로 사라지지 않게).
+  if(isNaN(t.getTime())) return String(iso).replace('T',' ').slice(0,16);
+  return new Date(t.getTime() + KST_OFFSET_MS).toISOString().replace('T',' ').slice(0,16);
+}
+// 한국시간 기준 하루(00:00~24:00 KST)를 저장 형식인 UTC ISO 문자열 범위로 변환한다.
+// UTC 하루로 조회하면 KST 09:00~다음날 09:00이 잡혀서 날짜가 어긋난다.
+function kstDayRangeUtc(dateStr){
+  return {
+    start: new Date(`${dateStr}T00:00:00.000+09:00`).toISOString(),
+    end:   new Date(`${dateStr}T23:59:59.999+09:00`).toISOString()
+  };
+}
 function renderChangeLogPanel(){
   const box = document.createElement('div');
   box.className = 'stat-section';
-  box.innerHTML = `<h3>변경 로그</h3>`;
+  box.innerHTML = `<h3>변경 로그 <span class="log-tz-note">한국시간(KST) 기준</span></h3>`;
 
   const toolbar = document.createElement('div');
   toolbar.className = 'log-toolbar';
   const dateWrap = document.createElement('div');
   const dateLabel = document.createElement('label');
-  dateLabel.className = 'field-label'; dateLabel.textContent = '날짜 조회 (하루 단위)';
+  dateLabel.className = 'field-label'; dateLabel.textContent = '날짜 조회 (한국시간 하루 단위)';
   const dateInput = document.createElement('input');
   dateInput.type = 'date';
   dateWrap.appendChild(dateLabel); dateWrap.appendChild(dateInput);
   const searchBtn = document.createElement('button');
   searchBtn.className = 'btn small primary'; searchBtn.textContent = '조회';
   const resetBtn = document.createElement('button');
-  resetBtn.className = 'btn small'; resetBtn.textContent = '최근 50건 보기';
+  resetBtn.className = 'btn small'; resetBtn.textContent = `최근 ${CHANGELOG_RECENT_LIMIT}건 보기`;
   toolbar.appendChild(dateWrap); toolbar.appendChild(searchBtn); toolbar.appendChild(resetBtn);
   box.appendChild(toolbar);
 
@@ -4765,7 +4787,7 @@ function renderChangeLogPanel(){
     if(currentPage > totalPages) currentPage = totalPages;
     const start = (currentPage - 1) * CHANGELOG_PAGE_SIZE;
     currentLogs.slice(start, start + CHANGELOG_PAGE_SIZE).forEach(d=>{
-      const time = (d.timestamp || '').replace('T',' ').slice(0,16);
+      const time = formatKstStamp(d.timestamp);
       const row = document.createElement('div');
       row.className = 'log-row';
       row.innerHTML = `
@@ -4789,7 +4811,7 @@ function renderChangeLogPanel(){
   function loadDefault(){
     body.textContent = '불러오는 중…';
     pager.innerHTML = '';
-    CHANGELOG_COL.orderBy('timestamp','desc').limit(50).get().then(snap=>{
+    CHANGELOG_COL.orderBy('timestamp','desc').limit(CHANGELOG_RECENT_LIMIT).get().then(snap=>{
       currentLogs = []; snap.forEach(doc=> currentLogs.push(doc.data()));
       currentPage = 1;
       renderPage();
@@ -4799,8 +4821,7 @@ function renderChangeLogPanel(){
   function loadByDate(dateStr){
     body.textContent = '불러오는 중…';
     pager.innerHTML = '';
-    const dayStart = dateStr + 'T00:00:00.000Z';
-    const dayEnd = dateStr + 'T23:59:59.999Z';
+    const { start: dayStart, end: dayEnd } = kstDayRangeUtc(dateStr);
     CHANGELOG_COL.where('timestamp','>=',dayStart).where('timestamp','<=',dayEnd)
       .orderBy('timestamp','desc').limit(500).get().then(snap=>{
         currentLogs = []; snap.forEach(doc=> currentLogs.push(doc.data()));
