@@ -1369,13 +1369,42 @@ function buildGlobalSearchIndex(){
     if(!branch || !hasBranchAccess(branch.id)) return null;
     return { kind:'reservation', room, branch };
   }).filter(Boolean);
-  return [...current, ...past, ...reservations];
+  // 계약현황(DB.contracts)의 계약자/입실자도 검색 대상에 포함한다 — 계약만 붙여넣어져 있고
+  // 아직 입실자로 반영되지 않은 경우(예: "계약 확인 필요" 상태) 지금까지는 검색으로 전혀
+  // 찾을 수 없었다. 이미 입실중/이력으로 잡히는 사람과 같은 방·같은 이름·같은 연락처로
+  // 중복 표시되면 헷갈리므로, current·past에 이미 있는 사람은 계약 쪽에서는 제외한다.
+  // 같은 방에 계약 이력이 여러 건 쌓여 있어도(연장 등) 사람당 한 줄만 나오도록, 방+이름+
+  // 연락처 기준으로 묶어 계약일이 가장 최근인 것 하나만 대표로 남긴다.
+  const coveredKeys = new Set(
+    [...current, ...past].map(item=> `${item.room.id}|${cleanKeyLoose(item.p.name)}|${cleanKeyLoose(item.p.phone)}`)
+  );
+  const contractGroupMap = new Map();
+  DB.contracts.forEach(c=>{
+    const room = DB.rooms.find(r=>r.id===c.roomId);
+    if(!room) return;
+    const branch = DB.branches.find(b=>b.id===room.branchId);
+    if(!branch || !hasBranchAccess(branch.id)) return;
+    const name = (c.resident || c.contractor || '').trim();
+    if(!name) return;
+    const key = `${room.id}|${cleanKeyLoose(name)}|${cleanKeyLoose(c.contractorPhone)}`;
+    if(coveredKeys.has(key)) return;
+    const prev = contractGroupMap.get(key);
+    if(!prev || (c.contractDate||'') >= (prev.c.contractDate||'')) contractGroupMap.set(key, { c, room, branch });
+  });
+  const contracts = [...contractGroupMap.values()].map(({c, room, branch})=> ({ kind:'contract', c, room, branch }));
+  return [...current, ...past, ...reservations, ...contracts];
 }
 function globalSearchHaystack(item){
   if(item.kind === 'reservation'){
     const { room, branch } = item;
     const phoneDigits = (room.reservationPhone||'').replace(/\D/g,'');
     return [room.reservationName, room.reservationPhone, phoneDigits, room.number, branch.name, branch.shortName]
+      .filter(Boolean).join(' ').toLowerCase();
+  }
+  if(item.kind === 'contract'){
+    const { c, room, branch } = item;
+    const phoneDigits = (c.contractorPhone||'').replace(/\D/g,'');
+    return [c.resident, c.contractor, c.contractorPhone, phoneDigits, room.number, branch.name, branch.shortName]
       .filter(Boolean).join(' ').toLowerCase();
   }
   const { p, room, branch } = item;
@@ -1417,6 +1446,28 @@ function renderGlobalSearchResults(query){
           UI.view = 'branch';
           UI.branchId = branch.id;
           scrollToRoomCard(room);
+          const input = document.getElementById('globalSearchInput');
+          if(input) input.value = '';
+          box.style.display = 'none'; box.innerHTML = '';
+        });
+        box.appendChild(row);
+        return;
+      }
+
+      if(item.kind === 'contract'){
+        const { c } = item;
+        const top = document.createElement('div'); top.className = 'hs-top';
+        const displayName = c.resident || c.contractor || '이름 미입력';
+        top.appendChild(el('span', null, maskViewerName(displayName)));
+        top.appendChild(el('span', 'badge muted', '계약'));
+        row.appendChild(top);
+        row.appendChild(el('div', 'hs-sub', `${c.contractorPhone || '연락처 미입력'} · ${branchLabel(branch)} ${room.number}호 (계약기간 ${c.contractPeriod || '-'})`));
+        row.title = '입실자로 반영되지 않았거나 이미 퇴실 처리된 계약 이력입니다. 클릭하면 계약현황을 확인할 수 있습니다.';
+        row.addEventListener('click', ()=>{
+          UI.view = 'branch';
+          UI.branchId = branch.id;
+          scrollToRoomCard(room);
+          showContractHistoryModal(room);
           const input = document.getElementById('globalSearchInput');
           if(input) input.value = '';
           box.style.display = 'none'; box.innerHTML = '';
