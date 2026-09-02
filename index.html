@@ -507,6 +507,13 @@
   table.branch-table .branch-table-total td{ border-bottom:2px solid var(--accent); color:var(--accent-ink); }
   table.branch-table .stat-cell-link{ color:inherit; text-decoration:none; display:block; }
   table.branch-table .stat-cell-link:hover{ color:var(--accent-ink); text-decoration:underline; }
+  /* 대시보드 "지점별 현황"의 판매보류 칸에는 호실 메모가 줄줄이 들어가서, 자동 레이아웃으로 두면
+     그 한 칸이 표 폭을 거의 다 차지하고 나머지 숫자 칸이 찌그러진다. 이 표에만 고정 레이아웃을
+     걸고 colgroup으로 열 너비를 못박아, 판매보류 내용이 아무리 길어도 표 전체의 40%를 넘지
+     못하게 한다(넘치는 부분은 칸 안에서 줄바꿈). 같은 branch-table 클래스를 쓰는 다른 표
+     (정산·주간 청소표)는 영향을 받지 않도록 별도 클래스로 분리한다. */
+  table.branch-stat-table{ table-layout:fixed; }
+  table.branch-stat-table td.hold-cell{ overflow-wrap:anywhere; word-break:break-word; }
 
   ::-webkit-scrollbar{ height:8px; width:8px; }
   ::-webkit-scrollbar-thumb{ background:#D8D2C2; border-radius:4px; }
@@ -5026,8 +5033,13 @@ function renderStatsView(){
   branchSection.className = 'stat-section';
   branchSection.innerHTML = `<h3 style="margin:0 0 12px;font-size:19px;">지점별 현황 (${localDateKey().replace(/-/g,'/')})</h3>`;
   const table = document.createElement('table');
-  table.className = 'branch-table';
-  table.innerHTML = `<thead><tr><th>지점</th><th>호실수</th><th>이용중</th><th>판매중</th><th>입실율</th><th>예약</th><th>판매보류</th></tr></thead>`;
+  table.className = 'branch-table branch-stat-table';
+  // 열 너비 합계 100% — 마지막 판매보류 열이 정확히 40%다.
+  table.innerHTML = `<colgroup>`
+    + `<col style="width:16%"><col style="width:8%"><col style="width:9%"><col style="width:9%">`
+    + `<col style="width:9%"><col style="width:9%"><col style="width:40%">`
+    + `</colgroup>`
+    + `<thead><tr><th>지점</th><th>호실수</th><th>이용중</th><th>판매중</th><th>입실율</th><th>예약</th><th>판매보류</th></tr></thead>`;
   const tbody = document.createElement('tbody');
   const totals = { total:0, occupied:0, forSale:0, hold:0, reserved:0 };
   allowedBranches().forEach(b=>{
@@ -5054,10 +5066,10 @@ function renderStatsView(){
     const holdText = holdRooms.length
       ? holdRooms.map(r=> esc(r.note ? `${r.number}: ${r.note}` : `${r.number}`)).join('<br>')
       : '-';
-    const tabCell = (tab, content)=> `<td><a href="#" data-goto="${b.id}" data-tab="${tab}" class="stat-cell-link">${content}</a></td>`;
+    const tabCell = (tab, content, cls)=> `<td${cls ? ` class="${cls}"` : ''}><a href="#" data-goto="${b.id}" data-tab="${tab}" class="stat-cell-link">${content}</a></td>`;
     const tr = document.createElement('tr');
     tr.innerHTML = `<td><a href="#" data-goto="${b.id}" data-tab="전체" style="color:var(--accent-ink);font-weight:700;text-decoration:none;">${esc(branchLabel(b))}</a></td>
-      <td>${total}</td>${tabCell('이용중', occupied)}${tabCell('판매중', forSale)}<td style="color:${occColor};font-weight:700;">${occRate}%</td>${tabCell('예약', reserved)}${tabCell('판매보류', holdText)}`;
+      <td>${total}</td>${tabCell('이용중', occupied)}${tabCell('판매중', forSale)}<td style="color:${occColor};font-weight:700;">${occRate}%</td>${tabCell('예약', reserved)}${tabCell('판매보류', holdText, 'hold-cell')}`;
     tbody.appendChild(tr);
   });
   const totalOccRate = totals.total ? Math.round((totals.occupied/totals.total)*100) : 0;
