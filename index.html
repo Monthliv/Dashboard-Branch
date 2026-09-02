@@ -3685,6 +3685,32 @@ function findSupersedingPeriodEditContract(c){
     other.importedAt && other.importedAt > c.importedAt
   ) || null;
 }
+// findSupersedingDateEditContract·findSupersedingPeriodEditContract는 "이미 둘 다 등록된
+// 뒤" 어느 쪽이 최신인지 화면에 표시하는 용도다. 여기서는 그 중복이 애초에 생기기 전, 붙여
+// 넣는/업로드하는 시점에 막는다 — 같은 방·계약자(또는 입실자)·연락처·결제금액을 가진 기존
+// 계약이 있는데 계약기간·계약일 중 정확히 하나만 다르면, 원본 관리시스템에서 그 계약의
+// 날짜만 정정된 것으로 보고 새 계약으로 추가하는 대신 기존 계약을 이 값으로 덮어쓴다(문서
+// id는 그대로 유지 — 새 문서를 만들지 않는다). pool은 이미 저장된 DB.contracts일 수도,
+// 이번에 함께 붙여넣는 다른 행들(newContracts, 아직 저장 전)일 수도 있다.
+function findEditableContractSibling(candidate, pool){
+  const name = cleanKeyLoose(candidate.resident || candidate.contractor);
+  if(!name) return null;
+  const phone = cleanKeyLoose(candidate.contractorPhone);
+  const amount = String(candidate.paymentAmount||'').trim();
+  const period = String(candidate.contractPeriod||'').trim();
+  const date = candidate.contractDate || '';
+  return pool.find(other=>
+    other !== candidate &&
+    other.roomId === candidate.roomId &&
+    cleanKeyLoose(other.resident || other.contractor) === name &&
+    cleanKeyLoose(other.contractorPhone) === phone &&
+    String(other.paymentAmount||'').trim() === amount &&
+    (
+      (String(other.contractPeriod||'').trim() === period && (other.contractDate||'') !== date) ||
+      ((other.contractDate||'') === date && String(other.contractPeriod||'').trim() !== period)
+    )
+  ) || null;
+}
 function contractProposedResidentData(c){
   if(!c) return null;
   const range = parseContractPeriodRange(c.contractPeriod);
@@ -4290,8 +4316,10 @@ function importContractGrid(headerCells, dataRows, onImported){
   const existingSigs = new Set(DB.contracts.map(contractSignature));
 
   const newContracts = [];
+  const updatedContracts = []; // 새로 만들지 않고 기존 계약을 덮어쓴 것들(문서 id 그대로, Firestore에도 set으로 갱신)
   const unmatched = [];
   let duplicateCount = 0;
+  let editedInPlaceCount = 0;
   dataRows.forEach((cells, i)=>{
     // "계약내용"처럼 버튼/아이콘만 있고 텍스트가 없는 첫 열은, 표에서 복사할 때 해당 칸의
     // 탭 문자까지 함께 누락되는 경우가 있다. 그러면 데이터 행의 칸 수가 헤더보다 모자라면서
@@ -4346,13 +4374,32 @@ function importContractGrid(headerCells, dataRows, onImported){
       // 서로 같으므로) — findSupersedingRefundContract에서 이 실제 등록 시각으로 비교한다.
       importedAt: new Date().toISOString()
     };
+    // 이미 등록된 계약 중 "날짜만 정정된 같은 계약"이 있으면, 새 계약으로 추가하지 않고 그
+    // 계약을 이 값으로 덮어써서 갱신한다 — 둘 다 남기면 나중에 취소선/일괄정리로 걸러내야
+    // 하는 중복이 계속 쌓이므로, 붙여넣는 시점에 아예 막는다.
+    const existingSibling = findEditableContractSibling(candidate, DB.contracts);
+    if(existingSibling){
+      Object.assign(existingSibling, candidate, { id: existingSibling.id });
+      updatedContracts.push(existingSibling);
+      editedInPlaceCount++;
+      return;
+    }
+    // 한 번에 여러 행을 붙여넣을 때, 이번 배치 안에서도 같은 계약의 정정 전/후 행이 함께 들어올
+    // 수 있다 — 그 경우도 마찬가지로 이번 배치에 이미 담아둔 후보를 최신 값으로 덮어쓰고, 이
+    // 행은 별도로 추가하지 않는다.
+    const batchSibling = findEditableContractSibling(candidate, newContracts);
+    if(batchSibling){
+      Object.assign(batchSibling, candidate, { id: batchSibling.id });
+      editedInPlaceCount++;
+      return;
+    }
     const sig = contractSignature(candidate);
     if(existingSigs.has(sig)){ duplicateCount++; return; }
     existingSigs.add(sig);
     newContracts.push(candidate);
   });
 
-  if(newContracts.length===0){
+  if(newContracts.length===0 && updatedContracts.length===0){
     showAlert(`가져올 수 있는 계약 데이터가 없습니다.`
       + (duplicateCount ? `\n(이미 등록된 중복 데이터 ${duplicateCount}건 제외)` : '')
       + (unmatched.length ? `\n\n${unmatched.slice(0,20).join('\n')}` : ''));
@@ -4368,8 +4415,10 @@ function importContractGrid(headerCells, dataRows, onImported){
   // 이미 입실자가 있는 방은 정보를 건드리지 않는다 — 계약 이력만 저장하고, 담당자가 확인할 수 있도록
   // "계약 확인 필요" 표시만 남긴다(최신 계약의 종료일과 퇴실예정일이 다르면 "계약현황" 버튼의
   // 기존 하이라이트도 함께 뜬다). 신규 등록이든 기존 입실자든 지점별로 한 곳에서 모아 볼 수 있다.
+  // 기존 계약을 덮어쓴 것(updatedContracts)도 그 방의 "최신 계약"이 바뀐 것이므로 새 계약과
+  // 똑같이 취급한다.
   const latestByRoom = new Map();
-  newContracts.filter(c=> !isRefundRow(c)).forEach(c=>{
+  [...newContracts, ...updatedContracts].filter(c=> !isRefundRow(c)).forEach(c=>{
     const prev = latestByRoom.get(c.roomId);
     if(!prev || (c.contractDate||'') >= (prev.contractDate||'')) latestByRoom.set(c.roomId, c);
   });
@@ -4406,7 +4455,7 @@ function importContractGrid(headerCells, dataRows, onImported){
   // 방/이름이 잘못 매칭되는 경우 실거주자를 실수로 퇴실 처리해버리면 되돌리기 어렵기 때문이다.
   const allContractsForPaymentCheck = [...DB.contracts, ...newContracts];
   const refundFlagActions = [];
-  newContracts.filter(isRefundRow).forEach(c=>{
+  [...newContracts, ...updatedContracts].filter(isRefundRow).forEach(c=>{
     const room = DB.rooms.find(r=>r.id===c.roomId);
     if(!room) return;
     const refundName = cleanKeyLoose(c.resident || c.contractor);
@@ -4424,6 +4473,7 @@ function importContractGrid(headerCells, dataRows, onImported){
 
   showConfirm(
     `계약 데이터 ${newContracts.length}건을 가져올까요?`
+      + (editedInPlaceCount ? `\n(날짜만 정정된 것으로 보이는 ${editedInPlaceCount}건은 새로 추가하지 않고 기존 계약을 갱신합니다)` : '')
       + (duplicateCount ? `\n(이미 등록된 중복 ${duplicateCount}건은 제외됩니다)` : '')
       + (unmatched.length ? `\n(호실을 찾지 못한 ${unmatched.length}건은 제외됩니다)` : '')
       + (residentSyncActions.length ? `\n\n빈 호실 ${residentSyncActions.length}곳에 새 계약자 정보로 입실자를 등록합니다.` : '')
@@ -4432,7 +4482,11 @@ function importContractGrid(headerCells, dataRows, onImported){
       + (residentSkipCount ? `\n(계약기간·입실자 정보가 불명확해 입실자 등록을 건너뛴 호실: ${residentSkipCount}곳)` : ''),
     ()=>{
       DB.contracts.push(...newContracts);
+      // updatedContracts는 이미 DB.contracts 안의 기존 항목을 그 자리에서 덮어쓴 것(같은 참조)
+      // 이라 다시 push하지 않는다 — 새로 만든 게 아니라 갱신이므로 Firestore에도 같은 문서 id로
+      // set(=업데이트)만 하면 된다.
       batchWriteDocs(CONTRACTS_COL, newContracts).catch(e=> console.error('계약 데이터 저장 실패:', e));
+      if(updatedContracts.length) batchWriteDocs(CONTRACTS_COL, updatedContracts).catch(e=> console.error('계약 데이터 갱신 실패:', e));
       refreshContractsCache();
       residentSyncActions.forEach(action=> DB.residents.push(action.newResident));
       existingResidentsToFlag.forEach(p=> p.justImported = true);
@@ -4441,10 +4495,11 @@ function importContractGrid(headerCells, dataRows, onImported){
         action.p.refundPendingDate = action.refundDate;
         action.p.refundPendingContractId = action.contractId;
       });
-      logChange(`계약 데이터 가져오기: ${newContracts.length}건 추가${duplicateCount ? ` (중복 ${duplicateCount}건 제외)` : ''}${unmatched.length ? ` (미매칭 ${unmatched.length}건)` : ''}${residentSyncActions.length ? ` / 빈 호실 입실자 등록 ${residentSyncActions.length}건` : ''}${existingResidentsToFlag.length ? ` / 계약 확인 필요 표시 ${existingResidentsToFlag.length}건` : ''}${refundFlagActions.length ? ` / 환불 처리 필요 표시 ${refundFlagActions.length}건` : ''}`);
+      logChange(`계약 데이터 가져오기: ${newContracts.length}건 추가${editedInPlaceCount ? ` / 날짜 정정 갱신 ${editedInPlaceCount}건` : ''}${duplicateCount ? ` (중복 ${duplicateCount}건 제외)` : ''}${unmatched.length ? ` (미매칭 ${unmatched.length}건)` : ''}${residentSyncActions.length ? ` / 빈 호실 입실자 등록 ${residentSyncActions.length}건` : ''}${existingResidentsToFlag.length ? ` / 계약 확인 필요 표시 ${existingResidentsToFlag.length}건` : ''}${refundFlagActions.length ? ` / 환불 처리 필요 표시 ${refundFlagActions.length}건` : ''}`);
       scheduleSave(); render();
       if(typeof onImported === 'function') onImported();
       showAlert(`${newContracts.length}건을 가져왔습니다.`
+        + (editedInPlaceCount ? `\n날짜/계약기간만 정정된 것으로 보여 새로 추가하지 않고 기존 계약을 갱신한 건: ${editedInPlaceCount}건` : '')
         + ((residentSyncActions.length || existingResidentsToFlag.length) ? `\n확인이 필요한 곳: ${residentSyncActions.length + existingResidentsToFlag.length}곳 (신규 등록 ${residentSyncActions.length}곳 + 기존 입실자 ${existingResidentsToFlag.length}곳)\n각 지점 화면의 "계약 확인 필요" 탭 또는 대시보드에서 모아볼 수 있고, 정보를 수정하면 목록에서 사라집니다.` : '')
         + (refundFlagActions.length ? `\n환불 처리 필요: ${refundFlagActions.length}건 — 대시보드의 "환불 처리 필요" 목록에서 확인 후 퇴실 처리해주세요.` : '')
         + (duplicateCount ? `\n이미 등록되어 제외된 중복 데이터: ${duplicateCount}건` : '')
