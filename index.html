@@ -364,6 +364,11 @@
   .tl-bar{ position:absolute; top:8px; height:28px; border-radius:7px; display:flex; align-items:center; padding:0 8px; font-size:11px; font-weight:700; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; border-left:2px solid var(--paper); }
   .tl-bar .tl-bar-name{ font-weight:700; flex:none; }
   .tl-bar .tl-bar-memo{ font-weight:400; opacity:.9; margin-left:5px; overflow:hidden; text-overflow:ellipsis; }
+  /* 퇴실확정 막대의 맨 마지막 날(실제 퇴실예정일)을 한눈에 알아볼 수 있도록, 막대 오른쪽
+     끝에 진한 테두리를 준다. 막대 전체가 이미 퇴실확정 색(--st-leaving)이라 그 색과 겹치지
+     않는 진한 잉크색으로 대비를 준다. */
+  .tl-bar.tl-bar-leaving-end{ border-right:4px solid var(--ink); box-shadow:inset -2px 0 0 var(--ink); }
+  .tl-bar .tl-bar-leaving-tag{ font-weight:800; margin-left:4px; flex:none; }
 
   .stat-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px; margin-bottom:20px; }
   .stat-card{ background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; }
@@ -3489,9 +3494,17 @@ function renderTimelineSection(branch){
     bar.style.left = leftPct + '%';
     bar.style.width = widthPct + '%';
     bar.style.background = entry.meta.fg;
+    // 퇴실확정 막대는 이미 전체가 퇴실확정 색으로 칠해져 있지만, 정확히 "언제 나가는지"는
+    // 막대만 봐서는 바로 안 들어온다는 요청 — 실제 퇴실예정일(막대가 월 경계로 잘린 게 아니라
+    // 진짜 마지막 날인 경우)에 진한 테두리와 "퇴실" 표시를 남겨 한눈에 알아보게 한다. 월
+    // 경계 때문에 잘린 막대(실제 퇴실일이 다음 달 이후)는 이 달의 끝이 진짜 퇴실일이 아니므로
+    // 표시하지 않는다.
+    const isLeavingEnd = entry.meta.key === '퇴실확정' && outD <= monthEnd;
+    if(isLeavingEnd) bar.classList.add('tl-bar-leaving-end');
     const memoText = entry.memo ? ` <span class="tl-bar-memo">${esc(entry.memo)}</span>` : '';
-    bar.innerHTML = `<span class="tl-bar-name">${esc(entry.name)}</span>${memoText}`;
-    bar.title = `${entry.name} · ${entry.meta.key} · ${entry.range.start} ~ ${entry.range.end}${entry.memo ? ' · ' + entry.memo : ''} (클릭 시 호실로 이동)`;
+    const leavingTag = isLeavingEnd ? ' <span class="tl-bar-leaving-tag">▶퇴실</span>' : '';
+    bar.innerHTML = `<span class="tl-bar-name">${esc(entry.name)}</span>${memoText}${leavingTag}`;
+    bar.title = `${entry.name} · ${entry.meta.key} · ${entry.range.start} ~ ${entry.range.end}${entry.memo ? ' · ' + entry.memo : ''}${isLeavingEnd ? ` · ${entry.range.end}에 퇴실확정` : ''} (클릭 시 호실로 이동)`;
     bar.style.cursor = 'pointer';
     bar.onclick = ()=> scrollToRoomCard(entry.room);
     return bar;
