@@ -3382,21 +3382,43 @@ function renderTimelineSection(branch){
       matched = (declaredName && candidates.find(p=> p.name===declaredName || p.actualResidentName===declaredName))
         || candidates[0] || null;
     }
+    // 위에서 못 찾았다면(=이 계약의 입실자가 이미 퇴실 처리되어 DB.residents에서 히스토리로
+    // 옮겨짐) 계약 기간(contractPeriod)만으로 판단하면 안 된다 — 중도퇴실 등으로 실제 퇴실일이
+    // 계약서상 종료일보다 이르면, 계약은 아직 "이용중" 기간처럼 보여서 이미 나간 사람이 타임
+    // 라인에는 계속 거주 중인 것으로 표시된다(강남일원 409호 등에서 보고됨). matched가 없을
+    // 때만 이력에서 같은 방식으로 찾아, 있으면 실제 퇴실일을 기준으로 표시한다.
+    let matchedHistory = null;
+    if(!matched){
+      matchedHistory = DB.residentHistory.find(h=>h.sourceContractId===c.id) || null;
+      if(!matchedHistory){
+        const declaredName = String(c.resident || c.contractor || '').trim();
+        const histCandidates = DB.residentHistory.filter(h=>{
+          if(!group.roomIds.has(h.roomId) || !h.moveIn) return false;
+          const hOut = h.moveOut || h.moveIn;
+          return h.moveIn <= range.end && hOut >= range.start;
+        });
+        matchedHistory = (declaredName && histCandidates.find(h=> h.name===declaredName)) || histCandidates[0] || null;
+      }
+    }
+    // 이력이 매칭됐으면 표시 기간도 계약서상 종료일이 아니라 실제 퇴실일로 잘라낸다 — 안 그러면
+    // 상태 라벨만 "퇴실"로 바뀌고 막대는 여전히 미래(계약 종료일)까지 길게 이어져 보인다.
+    const effectiveRange = matchedHistory ? { start: range.start, end: matchedHistory.moveOut || matchedHistory.moveIn } : range;
     const today = todayISO();
     let meta;
-    if(range.end < today) meta = timelineStatusMeta('퇴실');
+    if(matchedHistory) meta = timelineStatusMeta('퇴실');
+    else if(range.end < today) meta = timelineStatusMeta('퇴실');
     else if(range.start > today) meta = timelineStatusMeta('입실예정');
     else if(matched && isOverdue(matched)) meta = timelineStatusMeta('연체');
     else if(matched && matched.scheduledToLeave) meta = timelineStatusMeta('퇴실확정');
     else meta = timelineStatusMeta('이용중');
-    const rawName = matched ? residentDisplayName(matched) : (c.resident || c.contractor);
+    const rawName = matched ? residentDisplayName(matched) : (matchedHistory ? matchedHistory.name : (c.resident || c.contractor));
     // "오늘 이용중인 사람이 미리 등록해 둔 연장 계약"인지 나중에 판별하기 위한 식별자.
     // 연장 계약은 아직 입실자 레코드의 moveIn/moveOut이 새 계약 기간으로 갱신되기 전이라
     // matched(입실자 레코드) 기준으로는 서로 다른 사람처럼 보일 수 있어서, 입실자가 아니라
     // 계약서에 적힌 입실자/계약자명 자체를 기준으로 같은 사람 여부를 비교한다.
     const contractOccupantName = String(c.resident || c.contractor || '').trim();
     const matchKey = contractOccupantName ? ('n:'+contractOccupantName) : (matched ? ('id:'+matched.id) : null);
-    return { range, meta, name: maskViewerName(rawName) || '이름 미입력', memo: matched ? (matched.memo||'') : '', room, matchKey };
+    return { range: effectiveRange, meta, name: maskViewerName(rawName) || '이름 미입력', memo: matched ? (matched.memo||'') : '', room, matchKey };
   }
   function residentTimelineEntry(p, room){
     return {
