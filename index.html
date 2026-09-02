@@ -347,11 +347,19 @@
   .tl-month-nav .m-label{ font-family:'JetBrains Mono',monospace; font-weight:700; font-size:15px; min-width:110px; text-align:center; }
   .tl-wrap{ background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:auto; }
   .tl-grid{ display:grid; min-width:900px; }
-  .tl-headrow, .tl-row{ display:grid; grid-template-columns:220px 1fr; border-bottom:1px solid var(--line); }
+  /* 요일 칸 영역(오른쪽)을 1fr(=남은 공간에 맞춰 줄어듦) 대신 auto(=내용이 필요로 하는 폭
+     그대로)로 둔다 — 3개월치 날짜 칸이 화면보다 넓으면 그 넓이 그대로 그리드가 커져서
+     .tl-wrap의 가로 스크롤이 실제로 걸리게 하기 위함이다. */
+  .tl-headrow, .tl-row{ display:grid; grid-template-columns:220px auto; border-bottom:1px solid var(--line); }
   .tl-headrow{ position:sticky; top:0; background:var(--panel); z-index:2; }
   .tl-row:last-child{ border-bottom:none; }
   .tl-legend{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
-  .tl-label{ padding:10px 12px; font-size:12px; border-right:1px solid var(--line); display:flex; flex-direction:column; justify-content:center; gap:2px; }
+  /* 호실 번호가 있는 왼쪽 라벨 칸을 가로 스크롤 중에도 항상 보이도록 고정한다 — 3개월치를
+     옆으로 이어붙이면서, 스크롤해서 뒤쪽 달을 보는 동안에도 "어느 호실인지"는 계속 보여야
+     하기 때문이다. 각 행이 이미 자기 상태색으로 배경을 칠하므로(lbl.style.background),
+     뒤에 스크롤되는 막대들이 비치지 않는다. */
+  .tl-label{ padding:10px 12px; font-size:12px; border-right:1px solid var(--line); display:flex; flex-direction:column; justify-content:center; gap:2px; position:sticky; left:0; z-index:1; background:var(--panel); }
+  .tl-headrow .tl-label{ z-index:3; }
   .tl-label .tl-status-dot{ width:6px; height:6px; border-radius:50%; display:inline-block; margin-right:3px; }
   .tl-label .rm{ font-family:'JetBrains Mono',monospace; font-weight:700; }
   .tl-label .nm{ color:var(--ink-soft); font-size:11px; }
@@ -361,6 +369,10 @@
   .tl-daycell{ border-right:1px solid #EFEBE0; }
   .tl-headrow .tl-daycell{ display:flex; align-items:center; justify-content:center; font-size:10px; color:var(--ink-soft); font-family:'JetBrains Mono',monospace; }
   .tl-daycell.weekend{ background:#FBF8F1; }
+  /* 3개월이 이어져 있을 때 달이 바뀌는 첫날을 굵은 테두리로 표시해, 스크롤하다가도 지금
+     보는 곳이 어느 달인지 한눈에 알아볼 수 있게 한다. */
+  .tl-daycell.month-start{ border-left:2px solid var(--ink); }
+  .tl-headrow .tl-daycell.month-start{ font-weight:700; color:var(--ink); }
   .tl-bar{ position:absolute; top:8px; height:28px; border-radius:7px; display:flex; align-items:center; padding:0 8px; font-size:11px; font-weight:700; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; border-left:2px solid var(--paper); }
   .tl-bar .tl-bar-name{ font-weight:700; flex:none; }
   .tl-bar .tl-bar-memo{ font-weight:400; opacity:.9; margin-left:5px; overflow:hidden; text-overflow:ellipsis; }
@@ -630,7 +642,7 @@ let UI = {
   view:'stats', branchId:null, branchTab:'rooms',
   roomEditMode:{}, residentEditMode:{}, roomSnapshots:{}, residentSnapshots:{}, draftResident:{}, parkingListOpen:{}, residentFieldEdit:{},
   branchEditMode:{}, branchSnapshots:{}, branchInfoOpen:{}, historyOpen:{}, addingBranch:false, addingRoom:false, managingRoom:false, managingTypePrice:false, editingBranchId:null, branchOrderOpen:false,
-  tlYear:null, tlMonth:null, roomStatusFilter:'전체', cleanWeekStart:null, overdueTabKey:null,
+  tlYear:null, tlMonth:null, tlScrollLeft:null, roomStatusFilter:'전체', cleanWeekStart:null, overdueTabKey:null,
   cleanTodayPage:1, cleanFuturePage:1, shortcutSelectedId:null, upcomingSoonDays:7, doorlockHistoryOffset:0
 };
 
@@ -3358,7 +3370,7 @@ function renderTimelineSection(branch){
       <div class="m-label">${UI.tlYear}년 ${UI.tlMonth+1}월</div>
       <button class="btn small" id="tlNext">▶</button>
     </div>
-    <div class="sub" style="font-size:11.5px;color:var(--ink-soft);">막대 = 입실~퇴실 기간 · 회색 막대는 이번 달과 겹치는 과거 퇴실자 · 라벨만 있는 행은 현재/과거 입실자 없음</div>
+    <div class="sub" style="font-size:11.5px;color:var(--ink-soft);">막대 = 입실~퇴실 기간 · 회색 막대는 이번 달과 겹치는 과거 퇴실자 · 라벨만 있는 행은 현재/과거 입실자 없음 · 앞뒤 달까지 3개월이 이어져 있으니 좌우로 스크롤해서 달이 바뀌는 부분도 확인하세요</div>
   `;
   wrap.appendChild(toolbar);
 
@@ -3369,15 +3381,36 @@ function renderTimelineSection(branch){
   ).join('');
   wrap.appendChild(tlLegend);
 
-  const monthStart = new Date(UI.tlYear, UI.tlMonth, 1);
-  const daysInMonth = new Date(UI.tlYear, UI.tlMonth+1, 0).getDate();
-  const monthEnd = new Date(UI.tlYear, UI.tlMonth, daysInMonth);
+  // 한 달만 보이면 달이 바뀌는 경계(예: 9월 말~10월 초에 걸쳐 있는 입실자)를 확인하려고
+  // ◀/▶ 버튼으로 매번 왔다갔다해야 했다. 이번 달(가운데) 앞뒤로 한 달씩 더해 3개월을 한
+  // 그리드에 이어붙이고, 좌우 스크롤로 자유롭게 넘나들 수 있게 한다. ◀/▶ 버튼은 이 3개월
+  // 창의 중심을 옮기는 용도로 남겨둔다(먼 과거/미래로 빠르게 이동할 때 여전히 유용하다).
+  const centerMonthStart = new Date(UI.tlYear, UI.tlMonth, 1);
+  const windowStart = new Date(UI.tlYear, UI.tlMonth-1, 1);
+  const windowEnd = new Date(UI.tlYear, UI.tlMonth+2, 0);
+  const DAY_MS = 24*60*60*1000;
+  const totalDays = Math.round((windowEnd - windowStart)/DAY_MS) + 1;
+  const DAY_CELL_PX = 28;
+  // 문자열로 파싱한 날짜(예: new Date('2026-09-05'), UTC 자정 기준)와 new Date(y,m,d)로 만든
+  // 날짜(로컬 자정 기준)가 뒤섞여도 항상 정확한 일수 차이를 구하기 위해, 각 날짜의 "로컬 달력
+  // 연/월/일"만 뽑아 UTC 자정 기준값으로 다시 만든 뒤 그 차이를 쓴다 — getFullYear/getMonth/
+  // getDate는 원래 어떤 방식으로 파싱됐든 항상 정확한 로컬 날짜를 돌려주므로, 시간대 차이로
+  // 인한 반올림 오차(9시간 어긋남 등)가 생기지 않는다.
+  const windowStartUTC = Date.UTC(windowStart.getFullYear(), windowStart.getMonth(), windowStart.getDate());
+  function dayIndexOf(d){
+    const utcMs = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+    return Math.round((utcMs - windowStartUTC) / DAY_MS);
+  }
 
   const tlWrap = document.createElement('div');
   tlWrap.className = 'tl-wrap';
   const gridWrap = document.createElement('div');
   gridWrap.className = 'tl-grid';
   gridWrap.style.gridTemplateColumns = '1fr';
+  // 3개월치 날짜가 옆으로 길게 이어지므로, 요일 칸을 고정 폭(minmax의 1fr 대신 고정 px)으로
+  // 두고 그리드 전체 최소 폭을 날짜 수만큼 계산해서 넓힌다 — 그래야 화면보다 넓어져서
+  // .tl-wrap의 가로 스크롤이 실제로 동작한다(좁은 화면에 억지로 욱여넣지 않는다).
+  gridWrap.style.minWidth = (220 + totalDays*DAY_CELL_PX) + 'px';
 
   const headRow = document.createElement('div');
   headRow.className = 'tl-headrow';
@@ -3386,12 +3419,16 @@ function renderTimelineSection(branch){
   headRow.appendChild(headLabel);
   const headDays = document.createElement('div');
   headDays.className = 'tl-days';
-  headDays.style.gridTemplateColumns = `repeat(${daysInMonth}, minmax(24px,1fr))`;
-  for(let d=1; d<=daysInMonth; d++){
-    const dow = new Date(UI.tlYear, UI.tlMonth, d).getDay();
+  headDays.style.gridTemplateColumns = `repeat(${totalDays}, ${DAY_CELL_PX}px)`;
+  for(let i=0; i<totalDays; i++){
+    const d = new Date(windowStart.getTime() + i*DAY_MS);
+    const dow = d.getDay();
+    const isMonthStart = d.getDate()===1;
     const cell = document.createElement('div');
-    cell.className = 'tl-daycell' + ((dow===0||dow===6) ? ' weekend' : '');
-    cell.textContent = d;
+    // 달이 바뀌는 첫날은 테두리를 굵게 주고 "M월"을 함께 표시해, 스크롤하다가도 지금 보고
+    // 있는 게 어느 달인지 한눈에 알아볼 수 있게 한다.
+    cell.className = 'tl-daycell' + ((dow===0||dow===6) ? ' weekend' : '') + (isMonthStart ? ' month-start' : '');
+    cell.textContent = isMonthStart ? `${d.getMonth()+1}월 1` : String(d.getDate());
     headDays.appendChild(cell);
   }
   headRow.appendChild(headDays);
@@ -3410,11 +3447,12 @@ function renderTimelineSection(branch){
   function buildDayCells(){
     const days = document.createElement('div');
     days.className = 'tl-days';
-    days.style.gridTemplateColumns = `repeat(${daysInMonth}, minmax(24px,1fr))`;
-    for(let d=1; d<=daysInMonth; d++){
-      const dow = new Date(UI.tlYear, UI.tlMonth, d).getDay();
+    days.style.gridTemplateColumns = `repeat(${totalDays}, ${DAY_CELL_PX}px)`;
+    for(let i=0; i<totalDays; i++){
+      const d = new Date(windowStart.getTime() + i*DAY_MS);
+      const dow = d.getDay();
       const cell = document.createElement('div');
-      cell.className = 'tl-daycell' + ((dow===0||dow===6) ? ' weekend' : '');
+      cell.className = 'tl-daycell' + ((dow===0||dow===6) ? ' weekend' : '') + (d.getDate()===1 ? ' month-start' : '');
       days.appendChild(cell);
     }
     return days;
@@ -3533,24 +3571,24 @@ function renderTimelineSection(branch){
   function buildTimelineBar(entry){
     const inD = new Date(entry.range.start);
     const outD = new Date(entry.range.end);
-    if(outD < monthStart || inD > monthEnd) return null;
-    const clampIn = inD < monthStart ? monthStart : inD;
-    const clampOut = outD > monthEnd ? monthEnd : outD;
-    const startDay = clampIn.getDate();
-    const endDay = clampOut.getDate();
-    const leftPct = ((startDay-1)/daysInMonth)*100;
-    const widthPct = Math.max(((endDay-startDay+1)/daysInMonth)*100, (1/daysInMonth)*100);
+    if(outD < windowStart || inD > windowEnd) return null;
+    const clampIn = inD < windowStart ? windowStart : inD;
+    const clampOut = outD > windowEnd ? windowEnd : outD;
+    const startIdx = dayIndexOf(clampIn);
+    const endIdx = dayIndexOf(clampOut);
+    const leftPx = startIdx * DAY_CELL_PX;
+    const widthPx = Math.max((endIdx - startIdx + 1) * DAY_CELL_PX, DAY_CELL_PX);
     const bar = document.createElement('div');
     bar.className = 'tl-bar';
-    bar.style.left = leftPct + '%';
-    bar.style.width = widthPct + '%';
+    bar.style.left = leftPx + 'px';
+    bar.style.width = widthPx + 'px';
     bar.style.background = entry.meta.fg;
     // 퇴실확정 막대는 이미 전체가 퇴실확정 색으로 칠해져 있지만, 정확히 "언제 나가는지"는
-    // 막대만 봐서는 바로 안 들어온다는 요청 — 실제 퇴실예정일(막대가 월 경계로 잘린 게 아니라
-    // 진짜 마지막 날인 경우)에 진한 테두리와 "퇴실" 표시를 남겨 한눈에 알아보게 한다. 월
-    // 경계 때문에 잘린 막대(실제 퇴실일이 다음 달 이후)는 이 달의 끝이 진짜 퇴실일이 아니므로
+    // 막대만 봐서는 바로 안 들어온다는 요청 — 실제 퇴실예정일(막대가 창 경계로 잘린 게 아니라
+    // 진짜 마지막 날인 경우)에 진한 테두리와 "퇴실" 표시를 남겨 한눈에 알아보게 한다. 3개월
+    // 창의 끝에서 잘린 막대(실제 퇴실일이 그 이후)는 창의 끝이 진짜 퇴실일이 아니므로
     // 표시하지 않는다.
-    const isLeavingEnd = entry.meta.key === '퇴실확정' && outD <= monthEnd;
+    const isLeavingEnd = entry.meta.key === '퇴실확정' && outD <= windowEnd;
     if(isLeavingEnd) bar.classList.add('tl-bar-leaving-end');
     const memoText = entry.memo ? ` <span class="tl-bar-memo">${esc(entry.memo)}</span>` : '';
     const leavingTag = isLeavingEnd ? ' <span class="tl-bar-leaving-tag">▶퇴실</span>' : '';
@@ -3612,7 +3650,7 @@ function renderTimelineSection(branch){
           }
         });
       }
-      entries = allContractEntries.filter(e=> new Date(e.range.end) >= monthStart && new Date(e.range.start) <= monthEnd);
+      entries = allContractEntries.filter(e=> new Date(e.range.end) >= windowStart && new Date(e.range.start) <= windowEnd);
     } else {
       // 현재 입실자가 퇴실예정으로 확정되면 다음 입실자를 미리 등록해둘 수 있어서(관리자 설정과
       // 무관하게 언제나 가능), 실제로는 동시에 거주하지 않는데도 DB.residents에 그 방 레코드가
@@ -3623,13 +3661,13 @@ function renderTimelineSection(branch){
       const allResidents = DB.residents.filter(p=> group.roomIds.has(p.roomId));
       const currentResidents = allResidents.filter(p=> !isUpcoming(p));
       const residents = currentResidents.length > 0 ? currentResidents : allResidents;
-      // 과거 퇴실자는 이번 달과 겹치는 기간의 기록만 보여준다 — 그렇지 않으면 오래 운영한 방일수록
-      // 목록이 한없이 길어진다.
+      // 과거 퇴실자는 지금 보이는 3개월 창과 겹치는 기간의 기록만 보여준다 — 그렇지 않으면
+      // 오래 운영한 방일수록 목록이 한없이 길어진다.
       const history = DB.residentHistory.filter(h=>{
         if(!group.roomIds.has(h.roomId) || !h.moveIn) return false;
         const hIn = new Date(h.moveIn);
         const hOut = new Date(h.moveOut || h.moveIn);
-        return hOut >= monthStart && hIn <= monthEnd;
+        return hOut >= windowStart && hIn <= windowEnd;
       });
       entries = [
         ...residents.map(p=> residentTimelineEntry(p, group.rooms.find(r=>r.id===p.roomId) || primaryRoom)),
@@ -3657,8 +3695,16 @@ function renderTimelineSection(branch){
   setTimeout(()=>{
     const prevBtn = document.getElementById('tlPrev');
     const nextBtn = document.getElementById('tlNext');
-    if(prevBtn) prevBtn.onclick = ()=>{ UI.tlMonth--; if(UI.tlMonth<0){ UI.tlMonth=11; UI.tlYear--; } render(); };
-    if(nextBtn) nextBtn.onclick = ()=>{ UI.tlMonth++; if(UI.tlMonth>11){ UI.tlMonth=0; UI.tlYear++; } render(); };
+    if(prevBtn) prevBtn.onclick = ()=>{ UI.tlMonth--; if(UI.tlMonth<0){ UI.tlMonth=11; UI.tlYear--; } UI.tlScrollLeft = null; render(); };
+    if(nextBtn) nextBtn.onclick = ()=>{ UI.tlMonth++; if(UI.tlMonth>11){ UI.tlMonth=0; UI.tlYear++; } UI.tlScrollLeft = null; render(); };
+    // render()는 이 화면과 무관한 이유로도 앱 여기저기서 호출되므로, 스크롤해서 보던 위치가
+    // 매번 가운데(이번 달)로 되돌아가면 오히려 불편하다. ◀/▶ 버튼으로 3개월 창 자체를 옮긴
+    // 경우(위에서 UI.tlScrollLeft를 지움)나 처음 여는 경우에만 이번 달 시작 위치로 스크롤하고,
+    // 그 외엔 마지막으로 스크롤해 둔 위치를 그대로 복원한다.
+    if(tlWrap.isConnected){
+      tlWrap.scrollLeft = UI.tlScrollLeft != null ? UI.tlScrollLeft : dayIndexOf(centerMonthStart) * DAY_CELL_PX;
+      tlWrap.addEventListener('scroll', ()=>{ UI.tlScrollLeft = tlWrap.scrollLeft; });
+    }
   },0);
 
   return wrap;
