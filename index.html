@@ -3476,16 +3476,16 @@ function renderTimelineSection(branch){
     const primaryRoom = group.rooms[0];
     // 계약현황(DB.contracts)에 이 호실의 계약 기록이 하나라도 있으면 계약 기준으로 표시하고,
     // 계약 기록이 전혀 없는 호실만 입실자 카드(DB.residents/History) 기준으로 대체 표시한다.
-    // 시작일=종료일(하루도 안 되는 기간)인 계약, 환불로 대체되어 더 이상 유효하지 않은 계약
-    // (findSupersedingRefundContract), 계약기간·계약자·입실자·연락처·결제금액은 같고 계약일만
-    // 다르게 재등록된 중복 계약(findSupersedingDateEditContract)은 타임라인에 표시하지 않는다
-    // — 안 그러면 계약현황에서는 취소선으로 걸러지는 중복이 타임라인에는 완전히 같은 기간의
-    // 막대 두 개로 겹쳐 나온다.
+    // 시작일=종료일(하루도 안 되는 기간)인 계약과, 계약현황 모달에서 취소선으로 걸러지는 세 가지
+    // 중복(환불 대체·계약일 정정·계약기간 정정)은 타임라인에도 표시하지 않는다 — 안 그러면
+    // 계약현황에서는 걸러지는 중복이 타임라인에는 겹치는 막대 두 개로 나온다.
     const roomContracts = DB.contracts
       .filter(c=> group.roomIds.has(c.roomId))
       .map(c=> ({ contract:c, range: parseContractPeriodRange(c.contractPeriod) }))
       .filter(x=> x.range && x.range.start !== x.range.end
-        && !findSupersedingRefundContract(x.contract) && !findSupersedingDateEditContract(x.contract));
+        && !findSupersedingRefundContract(x.contract)
+        && !findSupersedingDateEditContract(x.contract)
+        && !findSupersedingPeriodEditContract(x.contract));
 
     let entries;
     if(roomContracts.length > 0){
@@ -3639,6 +3639,31 @@ function findSupersedingDateEditContract(c){
     String(other.paymentAmount||'').trim() === amount &&
     ((other.contractDate||'') > (c.contractDate||'')
       || ((other.contractDate||'') === (c.contractDate||'') && (other.importedAt||'') > (c.importedAt||'')))
+  ) || null;
+}
+// 계약일·계약자·입실자·연락처·결제금액이 전부 같은데 계약기간만 다르게 등록된 계약은, 원본
+// 관리시스템(어드민)에서 입실자가 날짜(계약기간)를 바꿀 때 계약일은 그대로 둔 채 그 계약
+// 자체를 수정하는 방식으로 운영되기 때문에 생긴다 — 여기서는 그 수정 내역을 새 계약 행으로
+// 다시 붙여넣거나 업로드하게 되므로, 계약일은 같고 계약기간만 다른 중복이 쌓인다(가산독산
+// 409호 등에서 보고됨). findSupersedingRefundContract는 이 중 "환불" 태그가 붙은 경우만
+// 다루는데, 결제구분과 무관하게 계약기간 정정 전체를 같은 방식으로 처리해야 한다. 계약일이
+// 같으므로 등록 시각(importedAt)으로만 최신 여부를 가른다 — findSupersedingDateEditContract
+// 처럼 결제금액까지 같아야 대상으로 삼는다(결제금액이 다르면 실제로 다른 결제 건일 수 있다).
+function findSupersedingPeriodEditContract(c){
+  const name = cleanKeyLoose(c.resident || c.contractor);
+  if(!name || !c.contractDate || !c.importedAt) return null;
+  const phone = cleanKeyLoose(c.contractorPhone);
+  const amount = String(c.paymentAmount||'').trim();
+  const period = String(c.contractPeriod||'').trim();
+  return DB.contracts.find(other=>
+    other.id !== c.id &&
+    other.roomId === c.roomId &&
+    (other.contractDate || '') === c.contractDate &&
+    cleanKeyLoose(other.resident || other.contractor) === name &&
+    cleanKeyLoose(other.contractorPhone) === phone &&
+    String(other.paymentAmount||'').trim() === amount &&
+    String(other.contractPeriod||'').trim() !== period &&
+    other.importedAt && other.importedAt > c.importedAt
   ) || null;
 }
 function contractProposedResidentData(c){
@@ -4039,7 +4064,13 @@ function renderContractManagePanel(){
   dedupeDateEditBtn.title = '계약기간·계약자·입실자·연락처·결제금액은 같고 계약일만 다르게 재등록된 계약(계약현황에서 취소선으로 표시되는 것과 같은 기준)을 찾아, 계약일이 가장 늦은 건만 남기고 나머지를 삭제합니다';
   dedupeDateEditBtn.onclick = dedupeDateEditContracts;
 
-  btnRow.appendChild(pasteBtn); btnRow.appendChild(templateBtn); btnRow.appendChild(uploadBtn); btnRow.appendChild(fileInput); btnRow.appendChild(dedupeBtn); btnRow.appendChild(dedupeDateEditBtn);
+  const dedupePeriodEditBtn = document.createElement('button');
+  dedupePeriodEditBtn.className = 'btn danger';
+  dedupePeriodEditBtn.textContent = '계약기간 정정 중복 정리';
+  dedupePeriodEditBtn.title = '계약일·계약자·입실자·연락처·결제금액은 같고 계약기간만 다르게 재등록된 계약(계약현황에서 취소선으로 표시되는 것과 같은 기준. 어드민에서 입실자 날짜를 바꿔 계약이 수정된 경우 등)을 찾아, 나중에 등록된 건만 남기고 나머지를 삭제합니다';
+  dedupePeriodEditBtn.onclick = dedupePeriodEditContracts;
+
+  btnRow.appendChild(pasteBtn); btnRow.appendChild(templateBtn); btnRow.appendChild(uploadBtn); btnRow.appendChild(fileInput); btnRow.appendChild(dedupeBtn); btnRow.appendChild(dedupeDateEditBtn); btnRow.appendChild(dedupePeriodEditBtn);
   box.appendChild(btnRow);
   box.appendChild(el('div', null, `현재 저장된 계약 이력: ${DB.contracts.length}건`, 'font-size:11.5px;color:var(--ink-soft);margin-top:8px;'));
   return box;
@@ -4089,6 +4120,28 @@ function dedupeDateEditContracts(){
     logChange(`계약일 정정 중복 계약 정리: ${removedContracts.length}건 삭제`);
     scheduleSave(); render();
     showAlert(`계약일 정정으로 대체된 중복 계약 ${removedContracts.length}건을 삭제했습니다.`);
+  });
+}
+
+// dedupeDateEditContracts()와 짝을 이루는 반대 케이스: 계약일·계약자·입실자·연락처·결제금액은
+// 같고 계약기간만 다르게 재등록된 계약을 정리한다(findSupersedingPeriodEditContract). 어드민
+// 에서 입실자가 날짜를 바꾸면 계약일은 그대로 두고 기존 계약 자체를 수정하는 방식으로 운영되기
+// 때문에, 그 수정 내역을 다시 붙여넣거나 업로드할 때마다 계약일은 같고 계약기간만 다른 중복이
+// 쌓인다(가산독산 409호 등에서 보고됨). 나중에 등록된 건만 남긴다.
+function dedupePeriodEditContracts(){
+  const removedContracts = DB.contracts.filter(c=> !!findSupersedingPeriodEditContract(c));
+  if(removedContracts.length===0){
+    showAlert('계약기간만 다르게 재등록된 중복 계약이 없습니다.');
+    return;
+  }
+  const removedIds = new Set(removedContracts.map(c=>c.id));
+  showConfirm(`계약일·계약자·입실자·연락처·결제금액은 같고 계약기간만 다르게 재등록된 중복 계약 ${removedContracts.length}건을 찾았습니다. 나중에 등록된 건만 남기고 나머지를 삭제할까요?`, ()=>{
+    DB.contracts = DB.contracts.filter(c=> !removedIds.has(c.id));
+    batchDeleteDocs(CONTRACTS_COL, [...removedIds]).catch(e=> console.error('계약기간 정정 중복 계약 삭제 실패:', e));
+    refreshContractsCache();
+    logChange(`계약기간 정정 중복 계약 정리: ${removedContracts.length}건 삭제`);
+    scheduleSave(); render();
+    showAlert(`계약기간 정정으로 대체된 중복 계약 ${removedContracts.length}건을 삭제했습니다.`);
   });
 }
 
@@ -4559,16 +4612,21 @@ function showContractHistoryModal(room){
         const tr = document.createElement('tr');
         // 계약취소/변경으로 같은 계약일에 계약기간만 바뀐 환불 계약이 나중에 등록되면, 이 계약은
         // 더 이상 유효하지 않다 — 지우지 않고 이력은 남기되 취소선으로 구분해 보여준다.
-        // 계약기간·계약자·입실자·연락처·결제금액은 모두 같고 계약일만 다르게 재등록된 경우도
-        // 같은 방식으로 처리한다(findSupersedingDateEditContract) — 둘 중 하나라도 해당하면
-        // 취소선을 긋되, 사유 표시는 서로 다르게 구분한다.
+        // 계약기간·계약자·입실자·연락처·결제금액은 모두 같고 계약일만 다르게 재등록된 경우
+        // (findSupersedingDateEditContract), 계약일·계약자·입실자·연락처·결제금액은 모두 같고
+        // 계약기간만 다르게 재등록된 경우(findSupersedingPeriodEditContract — 어드민에서 입실자
+        // 날짜를 바꾸면 계약일은 그대로 두고 계약기간만 고쳐서 다시 붙여넣는 운영 방식 때문에
+        // 생긴다)도 같은 방식으로 처리한다. 셋 중 하나라도 해당하면 취소선을 긋되, 사유 표시는
+        // 서로 다르게 구분한다.
         const supersedingRefund = findSupersedingRefundContract(c);
         const supersedingDateEdit = !supersedingRefund ? findSupersedingDateEditContract(c) : null;
-        const superseding = supersedingRefund || supersedingDateEdit;
+        const supersedingPeriodEdit = (!supersedingRefund && !supersedingDateEdit) ? findSupersedingPeriodEditContract(c) : null;
+        const superseding = supersedingRefund || supersedingDateEdit || supersedingPeriodEdit;
         const rowStyle = superseding ? 'text-decoration:line-through; color:var(--ink-soft);' : '';
         const supersededNote = supersedingRefund
           ? ' <span style="font-size:10.5px;color:var(--st-hold);text-decoration:none;">(환불로 대체됨)</span>'
-          : (supersedingDateEdit ? ' <span style="font-size:10.5px;color:var(--st-hold);text-decoration:none;">(계약일 정정으로 대체됨)</span>' : '');
+          : (supersedingDateEdit ? ' <span style="font-size:10.5px;color:var(--st-hold);text-decoration:none;">(계약일 정정으로 대체됨)</span>'
+          : (supersedingPeriodEdit ? ' <span style="font-size:10.5px;color:var(--st-hold);text-decoration:none;">(계약기간 정정으로 대체됨)</span>' : ''));
         tr.innerHTML = `
           <td style="padding:6px 8px;border-bottom:1px solid var(--line);${rowStyle}">${esc(c.contractDate||'-')}</td>
           <td style="padding:6px 8px;border-bottom:1px solid var(--line);${rowStyle}">${esc(c.contractPeriod||'-')}</td>
