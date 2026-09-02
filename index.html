@@ -6719,16 +6719,32 @@ function collectCleaningDoneEntries(){
   return entries;
 }
 
+// "오늘 청소방" 목록(collectCleaningEntries)에는 실제 플래그(needsCleaning 등)가 걸린 방뿐
+// 아니라, 퇴실확정된 입실자로 인해 미리 표시만 되는(플래그는 안 걸려 있는) 퇴실청소 항목도
+// 같이 뜬다 — 예를 들어 이 방에 이미 등록된 다음 입실자가 있는데 계약적용 경로로 등록돼
+// flagUpcomingCleaning이 호출되지 않은 경우 등(마곡발산 등에서 반복 보고됨). 예전에는 실제
+// 플래그가 없으면 버튼 자체가 안 떠서 완료 처리가 영영 불가능했다. 플래그가 있으면 그걸
+// 끄고, 없으면(=미리보기였던 경우, 항상 moveout 타입) 방 카드에서 칩을 꺼서 취소했을 때와
+// 같은 방식으로 "이 퇴실일 기준으로는 다시 자동으로 안 뜨게" cleaningDismissedMoveOut을
+// 남긴다 — 어느 경로든 이력에는 남기고 목록에서 사라지게 한다.
 function completeCleaningEntry(room, type){
   const field = MAINT_KIND_FIELD[type];
-  if(!field || !room[field]) return;
   const label = MAINT_KIND_META[type].label;
   const doneLabel = MAINT_DONE_LABEL[type] || `${label}완료`;
+  const hasFlag = !!(field && room[field]);
   const scheduledDate = room.maintenanceDate || '';
   const memo = room.maintenanceMemo || '';
-  room[field] = false;
-  room.maintenanceDate = '';
-  room.maintenanceMemo = '';
+  if(hasFlag){
+    room[field] = false;
+    room.maintenanceDate = '';
+    room.maintenanceMemo = '';
+  } else if(type === 'moveout'){
+    room.cleaningDismissedMoveOut = roomEarliestLeaverMoveOut(room) || '';
+  } else {
+    // retouch/extra는 미리보기 경로가 없어(항상 실제 플래그로만 뜬다) 여기 도달할 일이 없지만,
+    // 혹시라도 플래그가 이미 다른 곳에서 꺼진 뒤 뒤늦게 눌린 경우 조용히 무시한다.
+    return;
+  }
   if(!Array.isArray(room.cleaningHistory)) room.cleaningHistory = [];
   room.cleaningHistory.unshift({ id: uid('cl'), type, label: doneLabel, date: todayISO(), scheduledDate, memo });
   room.cleaningHistory = room.cleaningHistory.slice(0, CLEANING_HISTORY_MAX);
@@ -6989,7 +7005,9 @@ function renderTodayCleaningCard(list){
         noteSpan.title = `원래 예정일: ${x.date} (아직 완료 처리되지 않았습니다)`;
         kindSpan.appendChild(noteSpan);
       }
-      if(canEdit() && x.room[MAINT_KIND_FIELD[x.type]]){
+      // 실제 플래그 없이 미리보기로만 뜬 항목(x.room에 needsCleaning 등이 안 걸려 있는 경우)도
+      // completeCleaningEntry가 처리할 수 있으므로, 플래그 유무와 무관하게 항상 버튼을 보여준다.
+      if(canEdit()){
         const doneBtn = document.createElement('button');
         doneBtn.className = 'btn small primary';
         doneBtn.textContent = '청소완료';
