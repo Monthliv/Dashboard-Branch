@@ -345,13 +345,18 @@
   .tl-toolbar{ display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px; }
   .tl-month-nav{ display:flex; align-items:center; gap:10px; }
   .tl-month-nav .m-label{ font-family:'JetBrains Mono',monospace; font-weight:700; font-size:15px; min-width:110px; text-align:center; }
-  .tl-wrap{ background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:auto; }
-  .tl-grid{ display:grid; min-width:900px; }
+  .tl-wrap{ background:var(--panel); border:1px solid var(--line); border-radius:12px; }
+  /* 날짜 헤더(월 띠 + 일자 줄)는 방 목록과 분리된 자체 스크롤 영역이다 — 방이 많아 목록이
+     길어져도 가로 스크롤바가 맨 아래로 밀려나지 않고 항상 화면 위쪽에 붙어 있게 한다.
+     overflow-y:hidden으로 세로 스크롤은 막고(세로로 넘칠 내용이 없다) 가로만 허용한다. */
+  .tl-head-scroll{ position:sticky; top:0; z-index:3; background:var(--panel); overflow-x:auto; overflow-y:hidden; border-top-left-radius:12px; border-top-right-radius:12px; border-bottom:1px solid var(--line); scrollbar-width:thin; }
+  .tl-body-scroll{ overflow-x:auto; border-bottom-left-radius:12px; border-bottom-right-radius:12px; }
+  .tl-head-grid, .tl-grid{ display:grid; min-width:900px; }
   /* 요일 칸 영역(오른쪽)을 1fr(=남은 공간에 맞춰 줄어듦) 대신 auto(=내용이 필요로 하는 폭
      그대로)로 둔다 — 3개월치 날짜 칸이 화면보다 넓으면 그 넓이 그대로 그리드가 커져서
-     .tl-wrap의 가로 스크롤이 실제로 걸리게 하기 위함이다. */
-  .tl-headrow, .tl-row{ display:grid; grid-template-columns:220px auto; border-bottom:1px solid var(--line); }
-  .tl-headrow{ position:sticky; top:0; background:var(--panel); z-index:2; }
+     가로 스크롤이 실제로 걸리게 하기 위함이다. */
+  .tl-monthband-row, .tl-headrow, .tl-row{ display:grid; grid-template-columns:220px auto; border-bottom:1px solid var(--line); }
+  .tl-headrow{ background:var(--panel); }
   .tl-row:last-child{ border-bottom:none; }
   .tl-legend{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
   /* 호실 번호가 있는 왼쪽 라벨 칸을 가로 스크롤 중에도 항상 보이도록 고정한다 — 3개월치를
@@ -359,7 +364,7 @@
      하기 때문이다. 각 행이 이미 자기 상태색으로 배경을 칠하므로(lbl.style.background),
      뒤에 스크롤되는 막대들이 비치지 않는다. */
   .tl-label{ padding:10px 12px; font-size:12px; border-right:1px solid var(--line); display:flex; flex-direction:column; justify-content:center; gap:2px; position:sticky; left:0; z-index:1; background:var(--panel); }
-  .tl-headrow .tl-label{ z-index:3; }
+  .tl-headrow .tl-label, .tl-monthband-label{ z-index:2; }
   .tl-label .tl-status-dot{ width:6px; height:6px; border-radius:50%; display:inline-block; margin-right:3px; }
   .tl-label .rm{ font-family:'JetBrains Mono',monospace; font-weight:700; }
   .tl-label .nm{ color:var(--ink-soft); font-size:11px; }
@@ -369,10 +374,15 @@
   .tl-daycell{ border-right:1px solid #EFEBE0; }
   .tl-headrow .tl-daycell{ display:flex; align-items:center; justify-content:center; font-size:10px; color:var(--ink-soft); font-family:'JetBrains Mono',monospace; }
   .tl-daycell.weekend{ background:#FBF8F1; }
-  /* 3개월이 이어져 있을 때 달이 바뀌는 첫날을 굵은 테두리로 표시해, 스크롤하다가도 지금
-     보는 곳이 어느 달인지 한눈에 알아볼 수 있게 한다. */
-  .tl-daycell.month-start{ border-left:2px solid var(--ink); }
-  .tl-headrow .tl-daycell.month-start{ font-weight:700; color:var(--ink); }
+  /* 3개월이 이어져 있을 때 달이 바뀌는 첫날의 경계를 아주 옅게만 표시한다 — 어느 달인지는
+     위쪽 월 띠(.tl-monthband)가 이미 보여주므로, 날짜 줄에서는 숫자만 깔끔하게 두고 살짝
+     구분만 되면 충분하다. */
+  .tl-daycell.month-start{ border-left:1px solid var(--ink-soft); }
+  /* 달마다 하나의 칸으로 된 월 띠. 창(항상 온전한 3개월)의 각 달이 차지하는 폭만큼 칸이
+     생기고, 처음 진입했을 때의 기준 달(가운데 달)은 강조색으로 구분해준다. */
+  .tl-monthband{ position:relative; display:grid; height:26px; }
+  .tl-monthband-cell{ display:flex; align-items:center; justify-content:center; font-size:11.5px; font-weight:700; color:var(--ink-soft); border-right:1px solid var(--line); font-family:'JetBrains Mono',monospace; }
+  .tl-monthband-cell.current{ color:var(--accent-ink); background:var(--accent-soft); }
   .tl-bar{ position:absolute; top:8px; height:28px; border-radius:7px; display:flex; align-items:center; padding:0 8px; font-size:11px; font-weight:700; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; border-left:2px solid var(--paper); }
   .tl-bar .tl-bar-name{ font-weight:700; flex:none; }
   .tl-bar .tl-bar-memo{ font-weight:400; opacity:.9; margin-left:5px; overflow:hidden; text-overflow:ellipsis; }
@@ -3402,15 +3412,48 @@ function renderTimelineSection(branch){
     return Math.round((utcMs - windowStartUTC) / DAY_MS);
   }
 
+  // 요일 칸 영역이 화면 스크롤이 아니라 이 화면 안에서만 좌우로 스크롤되므로, 가로 스크롤바가
+  // 방이 많을 때 맨 아래(전체 행을 다 지나야 나오는 위치)에 생겨 손이 잘 안 닿았다. 날짜
+  // 헤더(월 띠 + 일자 줄)를 방 목록과 분리된 별도의 좁은 스크롤 영역으로 떼어내 맨 위에
+  // 고정해두고, 그 스크롤 위치를 아래 방 목록 영역과 서로 맞춰준다(둘 중 어디를 스크롤해도
+  // 같이 움직인다) — 위쪽에서 바로 스크롤할 수 있고, 항상 지금 보고 있는 날짜가 상단에 붙어
+  // 있어 확인하기 쉽다.
   const tlWrap = document.createElement('div');
   tlWrap.className = 'tl-wrap';
-  const gridWrap = document.createElement('div');
-  gridWrap.className = 'tl-grid';
-  gridWrap.style.gridTemplateColumns = '1fr';
-  // 3개월치 날짜가 옆으로 길게 이어지므로, 요일 칸을 고정 폭(minmax의 1fr 대신 고정 px)으로
-  // 두고 그리드 전체 최소 폭을 날짜 수만큼 계산해서 넓힌다 — 그래야 화면보다 넓어져서
-  // .tl-wrap의 가로 스크롤이 실제로 동작한다(좁은 화면에 억지로 욱여넣지 않는다).
-  gridWrap.style.minWidth = (220 + totalDays*DAY_CELL_PX) + 'px';
+  const gridTotalWidth = 220 + totalDays*DAY_CELL_PX;
+
+  const headScroll = document.createElement('div');
+  headScroll.className = 'tl-head-scroll';
+  const headGrid = document.createElement('div');
+  headGrid.className = 'tl-head-grid';
+  headGrid.style.minWidth = gridTotalWidth + 'px';
+
+  // 날짜 칸 안에 "9월 1"처럼 글자를 억지로 끼워넣는 대신, 그 위에 달마다 하나의 칸으로 된
+  // 월 띠를 따로 둔다 — 날짜 줄은 순수하게 숫자만 남아 훨씬 깔끔하고, 지금 스크롤해서 보고
+  // 있는 구간이 몇 월인지 위쪽 월 띠만 보면 바로 알 수 있다. 창(windowStart~windowEnd)은
+  // 항상 온전한 달 3개로 이뤄지므로(이전 달 1일 ~ 다음 달 말일) 딱 3칸이 나온다.
+  const monthBandRow = document.createElement('div');
+  monthBandRow.className = 'tl-monthband-row';
+  monthBandRow.appendChild(el('div', 'tl-label tl-monthband-label', ''));
+  const monthBand = document.createElement('div');
+  monthBand.className = 'tl-monthband';
+  const monthSpans = [];
+  {
+    let cy = windowStart.getFullYear(), cm = windowStart.getMonth();
+    const endY = windowEnd.getFullYear(), endM = windowEnd.getMonth();
+    while(cy < endY || (cy===endY && cm <= endM)){
+      monthSpans.push({ y:cy, m:cm, days: new Date(cy, cm+1, 0).getDate() });
+      cm++; if(cm>11){ cm=0; cy++; }
+    }
+  }
+  monthBand.style.gridTemplateColumns = monthSpans.map(ms=> (ms.days*DAY_CELL_PX)+'px').join(' ');
+  monthSpans.forEach(ms=>{
+    const isCurrent = ms.y===UI.tlYear && ms.m===UI.tlMonth;
+    const cell = el('div', 'tl-monthband-cell' + (isCurrent ? ' current' : ''), `${ms.y}년 ${ms.m+1}월`);
+    monthBand.appendChild(cell);
+  });
+  monthBandRow.appendChild(monthBand);
+  headGrid.appendChild(monthBandRow);
 
   const headRow = document.createElement('div');
   headRow.className = 'tl-headrow';
@@ -3423,16 +3466,21 @@ function renderTimelineSection(branch){
   for(let i=0; i<totalDays; i++){
     const d = new Date(windowStart.getTime() + i*DAY_MS);
     const dow = d.getDay();
-    const isMonthStart = d.getDate()===1;
     const cell = document.createElement('div');
-    // 달이 바뀌는 첫날은 테두리를 굵게 주고 "M월"을 함께 표시해, 스크롤하다가도 지금 보고
-    // 있는 게 어느 달인지 한눈에 알아볼 수 있게 한다.
-    cell.className = 'tl-daycell' + ((dow===0||dow===6) ? ' weekend' : '') + (isMonthStart ? ' month-start' : '');
-    cell.textContent = isMonthStart ? `${d.getMonth()+1}월 1` : String(d.getDate());
+    cell.className = 'tl-daycell' + ((dow===0||dow===6) ? ' weekend' : '') + (d.getDate()===1 ? ' month-start' : '');
+    cell.textContent = String(d.getDate());
     headDays.appendChild(cell);
   }
   headRow.appendChild(headDays);
-  gridWrap.appendChild(headRow);
+  headGrid.appendChild(headRow);
+  headScroll.appendChild(headGrid);
+
+  const bodyScroll = document.createElement('div');
+  bodyScroll.className = 'tl-body-scroll';
+  const gridWrap = document.createElement('div');
+  gridWrap.className = 'tl-grid';
+  gridWrap.style.gridTemplateColumns = '1fr';
+  gridWrap.style.minWidth = gridTotalWidth + 'px';
 
   const rooms = DB.rooms.filter(r=>r.branchId===branch.id)
     .sort((a,b)=> a.number.localeCompare(b.number,'ko',{numeric:true}));
@@ -3689,7 +3737,9 @@ function renderTimelineSection(branch){
     );
   });
 
-  tlWrap.appendChild(gridWrap);
+  bodyScroll.appendChild(gridWrap);
+  tlWrap.appendChild(headScroll);
+  tlWrap.appendChild(bodyScroll);
   wrap.appendChild(tlWrap);
 
   setTimeout(()=>{
@@ -3697,13 +3747,29 @@ function renderTimelineSection(branch){
     const nextBtn = document.getElementById('tlNext');
     if(prevBtn) prevBtn.onclick = ()=>{ UI.tlMonth--; if(UI.tlMonth<0){ UI.tlMonth=11; UI.tlYear--; } UI.tlScrollLeft = null; render(); };
     if(nextBtn) nextBtn.onclick = ()=>{ UI.tlMonth++; if(UI.tlMonth>11){ UI.tlMonth=0; UI.tlYear++; } UI.tlScrollLeft = null; render(); };
+    // 날짜 헤더(위쪽, headScroll)와 방 목록(아래쪽, bodyScroll)이 서로 다른 스크롤 영역으로
+    // 분리되어 있으므로, 어느 한쪽을 스크롤하면 다른 쪽도 같은 위치로 맞춰준다 — 그래야 위쪽
+    // 날짜 헤더를 스크롤해도 아래 막대들이 같이 움직이고, 반대로 방 목록 위에서 마우스 휠/
+    // 트랙패드로 옆으로 스크롤해도 위쪽 날짜가 항상 맞게 따라온다. scrollLeft를 같은 값으로
+    // 다시 대입하는 건 아무 효과가 없는 안전한 동작이라 무한 루프로 이어지지 않는다.
+    let syncing = false;
+    function syncScroll(from, to){
+      if(syncing) return;
+      syncing = true;
+      to.scrollLeft = from.scrollLeft;
+      UI.tlScrollLeft = from.scrollLeft;
+      syncing = false;
+    }
+    headScroll.addEventListener('scroll', ()=> syncScroll(headScroll, bodyScroll));
+    bodyScroll.addEventListener('scroll', ()=> syncScroll(bodyScroll, headScroll));
     // render()는 이 화면과 무관한 이유로도 앱 여기저기서 호출되므로, 스크롤해서 보던 위치가
     // 매번 가운데(이번 달)로 되돌아가면 오히려 불편하다. ◀/▶ 버튼으로 3개월 창 자체를 옮긴
     // 경우(위에서 UI.tlScrollLeft를 지움)나 처음 여는 경우에만 이번 달 시작 위치로 스크롤하고,
     // 그 외엔 마지막으로 스크롤해 둔 위치를 그대로 복원한다.
-    if(tlWrap.isConnected){
-      tlWrap.scrollLeft = UI.tlScrollLeft != null ? UI.tlScrollLeft : dayIndexOf(centerMonthStart) * DAY_CELL_PX;
-      tlWrap.addEventListener('scroll', ()=>{ UI.tlScrollLeft = tlWrap.scrollLeft; });
+    if(headScroll.isConnected){
+      const initialLeft = UI.tlScrollLeft != null ? UI.tlScrollLeft : dayIndexOf(centerMonthStart) * DAY_CELL_PX;
+      headScroll.scrollLeft = initialLeft;
+      bodyScroll.scrollLeft = initialLeft;
     }
   },0);
 
