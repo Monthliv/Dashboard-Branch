@@ -4033,7 +4033,13 @@ function renderContractManagePanel(){
   dedupeBtn.title = '지점·호실·계약일·계약자 등 모든 항목이 완전히 동일한 중복 계약 이력을 찾아 하나만 남기고 삭제합니다';
   dedupeBtn.onclick = dedupeContracts;
 
-  btnRow.appendChild(pasteBtn); btnRow.appendChild(templateBtn); btnRow.appendChild(uploadBtn); btnRow.appendChild(fileInput); btnRow.appendChild(dedupeBtn);
+  const dedupeDateEditBtn = document.createElement('button');
+  dedupeDateEditBtn.className = 'btn danger';
+  dedupeDateEditBtn.textContent = '계약일 정정 중복 정리';
+  dedupeDateEditBtn.title = '계약기간·계약자·입실자·연락처·결제금액은 같고 계약일만 다르게 재등록된 계약(계약현황에서 취소선으로 표시되는 것과 같은 기준)을 찾아, 계약일이 가장 늦은 건만 남기고 나머지를 삭제합니다';
+  dedupeDateEditBtn.onclick = dedupeDateEditContracts;
+
+  btnRow.appendChild(pasteBtn); btnRow.appendChild(templateBtn); btnRow.appendChild(uploadBtn); btnRow.appendChild(fileInput); btnRow.appendChild(dedupeBtn); btnRow.appendChild(dedupeDateEditBtn);
   box.appendChild(btnRow);
   box.appendChild(el('div', null, `현재 저장된 계약 이력: ${DB.contracts.length}건`, 'font-size:11.5px;color:var(--ink-soft);margin-top:8px;'));
   return box;
@@ -4060,6 +4066,29 @@ function dedupeContracts(){
     logChange(`중복 계약 이력 정리: ${removedContracts.length}건 삭제`);
     scheduleSave(); render();
     showAlert(`중복 계약 이력 ${removedContracts.length}건을 삭제했습니다.`);
+  });
+}
+
+// dedupeContracts()(contractSignature 기준 — 계약일까지 완전히 같아야 중복)와 달리, 계약일만
+// 정정해서 다시 등록/재업로드한 경우(계약기간·계약자·입실자·연락처·결제금액은 같고 계약일만
+// 다름)를 정리한다. 판단 기준은 계약현황 모달에서 취소선으로 표시하는 것과 완전히 같다
+// (findSupersedingDateEditContract) — 화면에서 취소선으로 걸러지던 이전 계약들을 실제로
+// 삭제해, 계약일이 가장 늦은 한 건만 남긴다. 이미 등록되어 있던 계약도 이 버튼 한 번으로
+// 전체 지점·호실을 대상으로 한꺼번에 정리된다.
+function dedupeDateEditContracts(){
+  const removedContracts = DB.contracts.filter(c=> !!findSupersedingDateEditContract(c));
+  if(removedContracts.length===0){
+    showAlert('계약일만 다르게 재등록된 중복 계약이 없습니다.');
+    return;
+  }
+  const removedIds = new Set(removedContracts.map(c=>c.id));
+  showConfirm(`계약기간·계약자·입실자·연락처·결제금액은 같고 계약일만 다르게 재등록된 중복 계약 ${removedContracts.length}건을 찾았습니다. 계약일이 가장 늦은 건만 남기고 나머지를 삭제할까요?`, ()=>{
+    DB.contracts = DB.contracts.filter(c=> !removedIds.has(c.id));
+    batchDeleteDocs(CONTRACTS_COL, [...removedIds]).catch(e=> console.error('계약일 정정 중복 계약 삭제 실패:', e));
+    refreshContractsCache();
+    logChange(`계약일 정정 중복 계약 정리: ${removedContracts.length}건 삭제`);
+    scheduleSave(); render();
+    showAlert(`계약일 정정으로 대체된 중복 계약 ${removedContracts.length}건을 삭제했습니다.`);
   });
 }
 
