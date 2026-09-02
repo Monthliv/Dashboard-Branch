@@ -3618,6 +3618,10 @@ function parseContractPeriodRange(periodStr){
   if(!start || !end) return null;
   return { start, end };
 }
+// 결제구분(paymentCategory)에 "환불"이 포함된 계약인지 — importContractGrid(붙여넣기/업로드
+// 시 빈 방 자동입실·환불 필요 표시 판정)와 showContractHistoryModal(계약현황 표에서 결제/환불
+// 배지 색 구분) 양쪽에서 같은 기준으로 써야 하므로 공용 함수로 뺀다.
+function isRefundContractRow(c){ return /환불/.test(c.paymentCategory || ''); }
 // 계약취소/중도퇴실로 계약기간이 짧아지고 결제구분이 "환불"로 바뀐 계약이 나중에 붙여넣기로
 // 추가되면, 같은 계약일에 원래(더 긴 기간) 계약이 그대로 남아있어 정보가 서로 어긋난다.
 // 같은 방·계약일·계약자(또는 입실자) 이름을 가진 계약 중 결제구분에 "환불"이 포함되고 실제
@@ -3625,7 +3629,7 @@ function parseContractPeriodRange(periodStr){
 // 본다. 계약일만으로는 둘을 구분할 수 없다(정의상 계약일이 서로 같으므로) importedAt으로
 // 판단한다 — 이 필드가 없는 옛날 계약(이 기능 도입 전 붙여넣은 것)은 항상 매칭에서 제외된다.
 function findSupersedingRefundContract(c){
-  if(/환불/.test(c.paymentCategory || '')) return null;
+  if(isRefundContractRow(c)) return null;
   const name = cleanKeyLoose(c.resident || c.contractor);
   if(!name || !c.contractDate || !c.importedAt) return null;
   return DB.contracts.find(other=>
@@ -3633,7 +3637,7 @@ function findSupersedingRefundContract(c){
     other.roomId === c.roomId &&
     (other.contractDate || '') === c.contractDate &&
     cleanKeyLoose(other.resident || other.contractor) === name &&
-    /환불/.test(other.paymentCategory || '') &&
+    isRefundContractRow(other) &&
     other.importedAt && other.importedAt > c.importedAt
   ) || null;
 }
@@ -4408,8 +4412,8 @@ function importContractGrid(headerCells, dataRows, onImported){
 
   // 결제구분에 "환불"이 포함된 행은 계약(취소/변경) 자체는 그대로 이력에 남기되, 아래의 "빈
   // 방이면 새 입실자 등록" 로직에서는 완전히 제외한다 — 환불 행을 최신 계약으로 잡아 새 입실자를
-  // 만들어버리면 안 되기 때문이다. 별도로 refundRows에서만 다룬다.
-  const isRefundRow = c=> /환불/.test(c.paymentCategory || '');
+  // 만들어버리면 안 되기 때문이다. 별도로 refundRows에서만 다룬다(isRefundContractRow는
+  // showContractHistoryModal의 결제/환불 배지 색 구분과도 같은 기준을 공유하는 공용 함수).
   // 호실별로 계약일이 가장 최신인 건 하나만 골라, 빈 방이면 그 계약 정보로 입실자를 새로 등록한다.
   // (한 번에 여러 건의 계약 이력이 붙여넣기 될 수 있으므로, 입실자 등록은 호실당 최신 계약 1건에만 적용)
   // 이미 입실자가 있는 방은 정보를 건드리지 않는다 — 계약 이력만 저장하고, 담당자가 확인할 수 있도록
@@ -4418,7 +4422,7 @@ function importContractGrid(headerCells, dataRows, onImported){
   // 기존 계약을 덮어쓴 것(updatedContracts)도 그 방의 "최신 계약"이 바뀐 것이므로 새 계약과
   // 똑같이 취급한다.
   const latestByRoom = new Map();
-  [...newContracts, ...updatedContracts].filter(c=> !isRefundRow(c)).forEach(c=>{
+  [...newContracts, ...updatedContracts].filter(c=> !isRefundContractRow(c)).forEach(c=>{
     const prev = latestByRoom.get(c.roomId);
     if(!prev || (c.contractDate||'') >= (prev.contractDate||'')) latestByRoom.set(c.roomId, c);
   });
@@ -4455,7 +4459,7 @@ function importContractGrid(headerCells, dataRows, onImported){
   // 방/이름이 잘못 매칭되는 경우 실거주자를 실수로 퇴실 처리해버리면 되돌리기 어렵기 때문이다.
   const allContractsForPaymentCheck = [...DB.contracts, ...newContracts];
   const refundFlagActions = [];
-  [...newContracts, ...updatedContracts].filter(isRefundRow).forEach(c=>{
+  [...newContracts, ...updatedContracts].filter(isRefundContractRow).forEach(c=>{
     const room = DB.rooms.find(r=>r.id===c.roomId);
     if(!room) return;
     const refundName = cleanKeyLoose(c.resident || c.contractor);
@@ -4463,7 +4467,7 @@ function importContractGrid(headerCells, dataRows, onImported){
     const matchedResident = DB.residents.find(p=> p.roomId===room.id && cleanKeyLoose(p.name)===refundName);
     if(!matchedResident) return;
     const hasPriorPayment = allContractsForPaymentCheck.some(existing=>
-      existing.roomId===room.id && !isRefundRow(existing) &&
+      existing.roomId===room.id && !isRefundContractRow(existing) &&
       cleanKeyLoose(existing.resident || existing.contractor)===refundName &&
       Number(normalizeAmountStr(existing.paymentAmount)) > 0
     );
@@ -4677,6 +4681,7 @@ function showContractHistoryModal(room){
           <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);">입실료</th>
           <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);">결제금액</th>
           <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);">계약구분</th>
+          <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);">결제구분</th>
           ${canApplyUpdate ? '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);"></th>' : ''}
         </tr></thead>
       `;
@@ -4701,6 +4706,14 @@ function showContractHistoryModal(room){
           ? ' <span style="font-size:10.5px;color:var(--st-hold);text-decoration:none;">(환불로 대체됨)</span>'
           : (supersedingDateEdit ? ' <span style="font-size:10.5px;color:var(--st-hold);text-decoration:none;">(계약일 정정으로 대체됨)</span>'
           : (supersedingPeriodEdit ? ' <span style="font-size:10.5px;color:var(--st-hold);text-decoration:none;">(계약기간 정정으로 대체됨)</span>' : ''));
+        // 결제/환불 구분: 결제구분(paymentCategory)에 "환불"이 포함된 행은 배지 색을 다르게 줘서
+        // 한눈에 구분되게 한다. 취소선(superseding)과는 별개 표시라 동시에 적용될 수 있다 —
+        // 취소선이 걸려도 이 행이 원래 환불 건이었는지는 계속 알아볼 수 있어야 하므로, 배지
+        // 자체의 배경색은 취소선 여부와 무관하게 항상 같은 기준으로 칠한다.
+        const paymentCatLabel = c.paymentCategory || '-';
+        const paymentCatBadge = isRefundContractRow(c)
+          ? `<span class="badge" style="background:var(--st-hold-bg);color:var(--st-hold);${superseding?'text-decoration:line-through;':''}">${esc(paymentCatLabel)}</span>`
+          : (c.paymentCategory ? `<span class="badge" style="background:var(--st-occupied-bg);color:var(--st-occupied);${superseding?'text-decoration:line-through;':''}">${esc(paymentCatLabel)}</span>` : esc(paymentCatLabel));
         tr.innerHTML = `
           <td style="padding:6px 8px;border-bottom:1px solid var(--line);${rowStyle}">${esc(c.contractDate||'-')}</td>
           <td style="padding:6px 8px;border-bottom:1px solid var(--line);${rowStyle}">${esc(c.contractPeriod||'-')}</td>
@@ -4710,6 +4723,7 @@ function showContractHistoryModal(room){
           <td style="padding:6px 8px;border-bottom:1px solid var(--line);${rowStyle}">${esc(c.rent||'-')}</td>
           <td style="padding:6px 8px;border-bottom:1px solid var(--line);${rowStyle}">${esc(c.paymentAmount||'-')}</td>
           <td style="padding:6px 8px;border-bottom:1px solid var(--line);${rowStyle}">${esc(c.contractCategory||'-')}${supersededNote}</td>
+          <td style="padding:6px 8px;border-bottom:1px solid var(--line);${rowStyle}">${paymentCatBadge}</td>
         `;
         if(canEdit()){
           const delTd = document.createElement('td');
