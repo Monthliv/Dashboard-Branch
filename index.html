@@ -2143,6 +2143,17 @@ function isUpcoming(p){
 function occupiesRoom(p){
   return isCurrentlyResiding(p) || isUpcoming(p);
 }
+// 특정 날짜에 이 입실자가 실제로 거주하고 있는지: 그 날짜에 이미 입실했고(입실일<=그 날짜)
+// 아직 퇴실 전(퇴실일이 없거나 그 날짜보다 이후)이어야 한다. 입실일이 그 날짜보다 미래이거나
+// 퇴실일이 그 날짜와 같거나 이전이면 해당 없음. occupiesRoom()은 "오늘" 기준으로 미래의 아무
+// 때나 입실 예정이기만 하면 무조건 true라서, 몇 달 뒤에나 입실할 예약자 때문에 "지금 나가는
+// 사람이 있는데도 방이 안 빈다"고 잘못 판단하는 문제가 있다(roomWouldBeVacantExcept 참고).
+function residesOnDate(p, dateStr){
+  if(!p.moveIn || !dateStr) return false;
+  if(p.moveIn > dateStr) return false;
+  if(p.moveOut && p.moveOut <= dateStr) return false;
+  return true;
+}
 function roomHasOverdueResident(room){
   return DB.residents.some(p => p.roomId===room.id && isOverdue(p));
 }
@@ -2166,8 +2177,16 @@ function flagUpcomingCleaning(room, cleaningBaseDate, sourceResidentId){
 // 이 입실자(excludeId)가 빠지고 나서도 그 방에 남아있는 재실/입실예정 입실자가 있는지 확인한다.
 // roomHasActiveResident와 달리, 아직 DB.residents에서 빠지지 않은(=아직 퇴실 예약 상태인)
 // 입실자 본인은 셈에서 제외해야 "이 사람이 나가면 방이 비는지"를 정확히 판단할 수 있다.
+// 예전에는 occupiesRoom()을 써서 "미래에 입실 예정"이기만 하면(아무리 먼 미래라도) 무조건
+// 방이 안 빈다고 봤는데, 그러면 몇 달 뒤에나 입실할 다음 입실자가 이미 등록돼 있다는 이유만
+// 으로 지금 나가는 사람의 퇴실청소가 걸리지 않는 문제가 있었다(마곡발산 902호 등). 이 사람이
+// 실제로 나가는 날(퇴실일) 기준으로, 그날 실제로 거주 중인 다른 입실자가 있을 때만 "방이 안
+// 빈다"고 판단해야 한다 — 다음 입실자가 그날 이후에나 들어온다면 그 사이는 빈 방이므로 청소가
+// 필요하다.
 function roomWouldBeVacantExcept(room, excludeId){
-  return !DB.residents.some(x=> x.roomId===room.id && x.id!==excludeId && occupiesRoom(x));
+  const leaver = DB.residents.find(x=> x.id===excludeId);
+  const asOfDate = (leaver && leaver.moveOut) || todayISO();
+  return !DB.residents.some(x=> x.roomId===room.id && x.id!==excludeId && residesOnDate(x, asOfDate));
 }
 // 퇴실 예약 때문에 미리 걸어둔 퇴실청소 플래그를, 정작 그 입실자가 연장해서 계속 거주하기로
 // 하면 취소한다. cleaningFlagSourceId로 "이 사람 때문에" 걸린 플래그인지 확인하므로, 다른
@@ -6378,6 +6397,11 @@ function autoFlagDueRetouch(){
   DB.rooms.forEach(room=>{
     if(isAutoCleaningExcludedBranch(roomBranch(room))) return;
     if(roomMaintKind(room)) return;
+    // 퇴실확정된 입실자가 있어 퇴실청소가 표시/예정된 방(roomUpcomingLeaveDate — 방 카드 배지와
+    // 같은 기준)에는 리터치를 자동으로 걸지 않는다. 둘 다 해당하는 상황이면 퇴실처리가 우선이고,
+    // 그 처리가 끝나야(flagUpcomingCleaning이 needsRetouch도 함께 정리한다) 리터치 자동 판단을
+    // 다시 한다.
+    if(roomUpcomingLeaveDate(room)) return;
     if(effectiveRoomStatus(room) === '공실') return;
     if(DB.residents.some(p=> p.roomId===room.id && isCurrentlyResiding(p))) return;
     const upcoming = DB.residents.filter(p=> p.roomId===room.id && isUpcoming(p))
