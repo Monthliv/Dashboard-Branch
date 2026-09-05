@@ -1635,16 +1635,21 @@ function renderBranchUpcomingCards(branch){
     .map(p=> ({ room: rooms.find(r=>r.id===p.roomId), date: p.moveOut, name: maskViewerName(p.name) || '이름 미입력' }))
     .sort((a,b)=> a.date.localeCompare(b.date));
 
+  // 계약만료 예정은 "지금 이 방에 실제로 살고 있는 입실자"를 기준으로 판단한다.
+  // 계약 기록만 보고 판단하던 예전 방식은 세 가지 문제가 있었다.
+  //  (1) 이미 퇴실해서 입실자 목록에 없는 사람도, 그 사람 계약의 종료일이 남아 있으면 계속
+  //      "곧 만료"로 노출됐다(예: 이미 비어있는 방인데 이전 입실자가 퇴실 예정으로 표시).
+  //  (2) 계약 데이터가 없는 외부 채널 예약(엔코스테이·리브애니웨어 등)은 영원히 빠졌다.
+  //  (3) "가장 최근 계약"을 계약 등록일 기준으로 골라서, 추가결제처럼 나중에 등록된 짧은
+  //      계약이 있으면 실제 만료일보다 이른 날짜가 표시됐다.
   const contractEndItems = [];
   rooms.forEach(room=>{
-    const segments = roomContractSegments(room);
-    if(segments.length===0) return;
-    const latest = segments[segments.length-1];
-    if(latest.end>=today && latest.end<=soonEnd){
-      const alreadyScheduled = DB.residents.some(p=> p.roomId===room.id && p.scheduledToLeave);
-      if(alreadyScheduled) return; // 이미 퇴실예정으로 확정된 사람은 계약만료 카드에서 제외
-      contractEndItems.push({ room, date: latest.end, name: maskViewerName(latest.contract.contractor || latest.contract.resident) || '계약자 미입력' });
-    }
+    DB.residents.filter(p=> p.roomId===room.id && isCurrentlyResiding(p)).forEach(p=>{
+      if(p.scheduledToLeave) return; // 이미 퇴실확정된 사람은 퇴실확정 카드에서 다룬다
+      const end = residentContractEndDate(p, room);
+      if(!end || end < today || end > soonEnd) return;
+      contractEndItems.push({ room, date: end, name: maskViewerName(residentDisplayName(p)) || '이름 미입력' });
+    });
   });
   contractEndItems.sort((a,b)=> a.date.localeCompare(b.date));
 
@@ -4023,6 +4028,20 @@ function roomContractSegments(room){
   //  기간 자체는 뒤죽박죽일 수 있어도, 계약일은 항상 실제 최신 순서를 반영하기 때문)
   segments.sort((a,b)=> (a.contract.contractDate||'').localeCompare(b.contract.contractDate||'') || a.start.localeCompare(b.start));
   return segments;
+}
+// 이 입실자의 계약 만료일. 계약이 있으면 그 방 계약들 중 "가장 늦은 종료일"을 쓴다 —
+// 추가결제/분할결제처럼 나중에 등록된 짧은 계약이 있어도 실제 만료일이 앞당겨지지 않게 하기
+// 위해서다(가장 최근 계약 하나만 보면 안 된다). 계약 데이터가 없는 외부 채널 예약은 입실자
+// 카드의 예약 종료일을 만료일로 본다. 방에 남아있는 계약이 이 입실자가 들어오기도 전에
+// 끝난 것이라면 이전 입실자의 계약이므로 쓰지 않는다.
+function residentContractEndDate(p, room){
+  if(isExternalChannelResident(p) && !p.sourceContractId) return p.moveOut || '';
+  const segments = roomContractSegments(room);
+  if(segments.length > 0){
+    const maxEnd = segments.reduce((m, seg)=> seg.end > m ? seg.end : m, segments[0].end);
+    if(!p.moveIn || maxEnd >= p.moveIn) return maxEnd;
+  }
+  return p.moveOut || '';
 }
 function contractEndDateMismatch(room){
   const segments = roomContractSegments(room);
