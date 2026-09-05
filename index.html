@@ -1068,7 +1068,9 @@ async function loadState(){
     } else {
       const contractsSnap = await CONTRACTS_COL.get();
       contractsFromCol = contractsSnap.docs.map(d=>d.data());
-      writeCachedCollection(CONTRACTS_CACHE_KEY, contractsFromCol);
+      // 빈 결과는 캐시하지 않는다 — 일시적인 문제로 0건을 받은 경우 그 빈 값이 캐시 유효시간
+      // (6시간) 동안 그대로 남아, 새로고침해도 계속 비어 보이게 된다.
+      if(contractsFromCol.length > 0) writeCachedCollection(CONTRACTS_CACHE_KEY, contractsFromCol);
     }
     // 예전 버전은 계약 이력을 메인 문서 안에 배열로 통째로 저장했다(문서 용량 제한 초과의 원인).
     // 새 컬렉션이 아직 비어있고 메인 문서에 예전 데이터가 남아있으면, 딱 한 번 그 데이터를 새
@@ -1080,7 +1082,12 @@ async function loadState(){
       base.contracts = contractsFromCol;
     }
   }catch(e){
+    // 조용히 넘어가면 "계약현황이 원래 비어있는 것"과 구분이 안 돼서, 권한 설정 누락 같은
+    // 문제를 아무도 눈치채지 못한 채 데이터가 없는 것처럼 보인다(도어락 때 같은 실수).
     console.error('계약 이력 불러오기 실패:', e);
+    showAlert(`계약 이력을 불러오지 못했습니다. 계약현황이 비어 보일 수 있습니다.
+
+오류 내용: ${(e && e.message) || e}`);
     base.contracts = Array.isArray(base.contracts) ? base.contracts : [];
   }
   try{
@@ -1091,7 +1098,7 @@ async function loadState(){
     } else {
       const historySnap = await RESIDENT_HISTORY_COL.get();
       historyFromCol = historySnap.docs.map(d=>d.data());
-      writeCachedCollection(HISTORY_CACHE_KEY, historyFromCol);
+      if(historyFromCol.length > 0) writeCachedCollection(HISTORY_CACHE_KEY, historyFromCol);
     }
     if(historyFromCol.length===0 && Array.isArray(base.residentHistory) && base.residentHistory.length>0){
       await batchWriteDocs(RESIDENT_HISTORY_COL, base.residentHistory);
@@ -1101,6 +1108,9 @@ async function loadState(){
     }
   }catch(e){
     console.error('퇴실 이력 불러오기 실패:', e);
+    showAlert(`퇴실 이력을 불러오지 못했습니다. 퇴실자 검색과 호실별 퇴실 이력이 비어 보일 수 있습니다.
+
+오류 내용: ${(e && e.message) || e}`);
     base.residentHistory = Array.isArray(base.residentHistory) ? base.residentHistory : [];
   }
   return base;
