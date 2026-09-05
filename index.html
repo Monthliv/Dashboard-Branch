@@ -1171,7 +1171,8 @@ async function saveState(){
     // 두 번째 호출이 건너뛰지 않도록 미리 변수에 담아 순서대로 평가한다.
     const remoteApplied = tryApplyPendingRemoteUpdate();
     const contractsApplied = tryApplyPendingContractUpserts();
-    if(remoteApplied || contractsApplied) render();
+    const historyApplied = tryApplyPendingHistoryUpserts();
+    if(remoteApplied || contractsApplied || historyApplied) render();
   }
 }
 
@@ -1287,6 +1288,24 @@ function tryApplyPendingContractUpserts(){
   refreshContractsCache();
   return true;
 }
+// 퇴실 이력(DB.residentHistory)도 계약과 같은 이유로 별도 컬렉션이라 메인 문서 구독에 안 잡힌다.
+// 지금까지는 로그인할 때 한 번만 읽고 최대 6시간 캐시를 그대로 썼기 때문에, 다른 계정이 퇴실
+// 처리한 내용이 이 탭에는 한참 뒤에야 보였다(퇴실자 검색·호실별 퇴실 이력이 비어 보이는 원인).
+// 계약과 똑같이 "내가 가진 것보다 movedAt이 늦은 것만" 구독해 비용은 거의 0으로 두면서
+// 실시간으로 받아온다.
+let pendingHistoryUpserts = [];
+let historyUnsubscribe = null;
+function tryApplyPendingHistoryUpserts(){
+  if(pendingHistoryUpserts.length===0 || anyEditInProgress()) return false;
+  const upserts = pendingHistoryUpserts;
+  pendingHistoryUpserts = [];
+  upserts.forEach(doc=>{
+    const idx = DB.residentHistory.findIndex(h=>h.id===doc.id);
+    if(idx>=0) DB.residentHistory[idx] = doc; else DB.residentHistory.push(doc);
+  });
+  refreshHistoryCache();
+  return true;
+}
 function scheduleSave(){
   clearTimeout(saveTimer);
   saveTimer = setTimeout(()=>{ saveTimer = null; saveState(); }, 250);
@@ -1341,6 +1360,7 @@ function render(){
   // 있으면 화면을 그리기 직전에 적용한다.
   tryApplyPendingRemoteUpdate();
   tryApplyPendingContractUpserts();
+  tryApplyPendingHistoryUpserts();
   renderTopNav();
   const main = document.getElementById('main');
   main.innerHTML = '';
@@ -2360,6 +2380,9 @@ function clearCleaningFlagIfSourcedFrom(room, residentId){
 function moveResidentToHistory(p, moveOutOverride){
   logChange(`${p.name || '입실자'} 퇴실 처리`);
   const historyEntry = {
+    // movedAt: 이 이력이 등록된 실제 시각. 계약의 importedAt과 같은 역할로, 실시간 구독의
+    // 커서로 쓴다(내가 이미 가진 것보다 나중에 등록된 것만 받아오기 위해).
+    movedAt: new Date().toISOString(),
     id: uid('h'), roomId: p.roomId,
     name: p.name || '(이름 미입력)', phone: p.phone || '',
     // 연장/직접 수정 등으로 입실일이 최초 등록 시점 이후 바뀌었을 수 있으므로, 항상 카드에
@@ -8825,6 +8848,30 @@ async function initApp(user){
     refreshContractsCache();
     render();
   }, err=> console.error('계약 실시간 동기화 구독 실패:', err));
+
+  // 퇴실 이력도 계약과 완전히 같은 방식으로 구독한다. 커서(movedAt)가 없는 예전 문서는 이
+  // 쿼리에 아예 걸리지 않으므로(정렬 필드가 없는 문서는 제외된다) 구독을 시작해도 예전 이력을
+  // 통째로 다시 읽지 않는다 — 무료 요금제 읽기 한도를 넘겼던 "컬렉션 전체 구독"과 다른 점이다.
+  const historyCutoff = DB.residentHistory.reduce((max,h)=> (h.movedAt||'') > max ? h.movedAt : max, '');
+  if(historyUnsubscribe) historyUnsubscribe();
+  historyUnsubscribe = RESIDENT_HISTORY_COL.where('movedAt','>',historyCutoff).onSnapshot(snap=>{
+    if(!CURRENT_USER) return;
+    if(snap.metadata.hasPendingWrites) return; // 이 탭 자신이 방금 쓴 낙관적 반영이면 무시
+    const changed = snap.docChanges()
+      .filter(dc=> dc.type==='added' || dc.type==='modified')
+      .map(dc=> dc.doc.data());
+    if(changed.length===0) return;
+    if(anyEditInProgress()){
+      pendingHistoryUpserts.push(...changed);
+      return;
+    }
+    changed.forEach(doc=>{
+      const idx = DB.residentHistory.findIndex(h=>h.id===doc.id);
+      if(idx>=0) DB.residentHistory[idx] = doc; else DB.residentHistory.push(doc);
+    });
+    refreshHistoryCache();
+    render();
+  }, err=> console.error('퇴실 이력 실시간 동기화 구독 실패:', err));
 }
 
 async function checkPendingRequests(){
@@ -9093,6 +9140,8 @@ if(isPublicDoorlockShareUrl()){
     else {
       CURRENT_USER = null; USER_ROLE = null;
       if(firestoreUnsubscribe){ firestoreUnsubscribe(); firestoreUnsubscribe = null; }
+      if(contractsUnsubscribe){ contractsUnsubscribe(); contractsUnsubscribe = null; }
+      if(historyUnsubscribe){ historyUnsubscribe(); historyUnsubscribe = null; }
       showLoginScreen();
     }
   });
