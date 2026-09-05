@@ -383,7 +383,16 @@
   .tl-monthband{ position:relative; display:grid; height:26px; }
   .tl-monthband-cell{ display:flex; align-items:center; justify-content:center; font-size:11.5px; font-weight:700; color:var(--ink-soft); border-right:1px solid var(--line); font-family:'JetBrains Mono',monospace; }
   .tl-monthband-cell.current{ color:var(--accent-ink); background:var(--accent-soft); }
-  .tl-bar{ position:absolute; top:8px; height:28px; border-radius:7px; display:flex; align-items:center; padding:0 8px; font-size:11px; font-weight:700; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; border-left:2px solid var(--paper); }
+  /* overflow는 hidden이 아니라 clip을 쓴다 — hidden은 스크롤 컨테이너를 만들어버려서 막대 안의
+     position:sticky 라벨이 바깥 가로 스크롤(.tl-body-scroll)이 아니라 막대 자신을 기준으로
+     붙어버린다(=전혀 움직이지 않는다). clip은 잘라내기만 하고 스크롤 컨테이너를 만들지 않아
+     sticky가 의도대로 동작한다. */
+  .tl-bar{ position:absolute; top:8px; height:28px; border-radius:7px; display:flex; align-items:center; padding:0 8px; font-size:11px; font-weight:700; color:#fff; white-space:nowrap; overflow:clip; border-left:2px solid var(--paper); }
+  /* 긴 막대의 시작 부분이 왼쪽으로 스크롤되어 화면 밖으로 나가도 이름/메모는 계속 보이도록,
+     막대 안쪽 라벨을 가로 스크롤 기준으로 고정한다. left 값(220px)은 왼쪽에 고정되어 있는
+     호실 라벨 칸(.tl-label, grid-template-columns의 220px)에 가려지지 않도록 맞춘 값이고,
+     막대를 벗어나서까지 따라오지는 않는다(sticky는 부모인 막대 안으로 제한된다). */
+  .tl-bar .tl-bar-sticky{ position:sticky; left:228px; display:flex; align-items:center; min-width:0; max-width:100%; overflow:clip; }
   .tl-bar .tl-bar-name{ font-weight:700; flex:none; }
   .tl-bar .tl-bar-memo{ font-weight:400; opacity:.9; margin-left:5px; overflow:hidden; text-overflow:ellipsis; }
   /* 퇴실확정 막대의 맨 마지막 날(실제 퇴실예정일)을 한눈에 알아볼 수 있도록, 막대 오른쪽
@@ -3697,7 +3706,7 @@ function renderTimelineSection(branch){
     if(entry.external) bar.classList.add('tl-bar-external');
     const memoText = entry.memo ? ` <span class="tl-bar-memo">${esc(entry.memo)}</span>` : '';
     const leavingTag = isLeavingEnd ? ' <span class="tl-bar-leaving-tag">▶퇴실</span>' : '';
-    bar.innerHTML = `<span class="tl-bar-name">${esc(entry.name)}</span>${memoText}${leavingTag}`;
+    bar.innerHTML = `<span class="tl-bar-sticky"><span class="tl-bar-name">${esc(entry.name)}</span>${memoText}${leavingTag}</span>`;
     bar.title = `${entry.name} · ${entry.meta.key} · ${entry.range.start} ~ ${entry.range.end}${entry.memo ? ' · ' + entry.memo : ''}${isLeavingEnd ? ` · ${entry.range.end}에 퇴실확정` : ''} (클릭 시 호실로 이동)`;
     bar.style.cursor = 'pointer';
     bar.onclick = ()=> scrollToRoomCard(entry.room);
