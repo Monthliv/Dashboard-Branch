@@ -390,6 +390,10 @@
      끝에 진한 테두리를 준다. 막대 전체가 이미 퇴실확정 색(--st-leaving)이라 그 색과 겹치지
      않는 진한 잉크색으로 대비를 준다. */
   .tl-bar.tl-bar-leaving-end{ border-right:4px solid var(--ink); box-shadow:inset -2px 0 0 var(--ink); }
+  /* 엔코스테이·리브애니웨어 등 외부 채널 예약은 결제 내역이 없어 계약이 아니라 입실자 카드의
+     예약 기간으로 그린다. 색만으로는 채널별 색과 상태 색이 헷갈릴 수 있어, 빗금 무늬를 함께
+     넣어 독립생활(계약 기반) 막대와 한눈에 구분되게 한다. */
+  .tl-bar.tl-bar-external{ background-image:repeating-linear-gradient(45deg, rgba(255,255,255,.28) 0 5px, transparent 5px 11px); border-left-style:dashed; }
   .tl-bar .tl-bar-leaving-tag{ font-weight:800; margin-left:4px; flex:none; }
 
   .stat-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px; margin-bottom:20px; }
@@ -1296,6 +1300,20 @@ function channelColor(c){
   const s = String(c||'');
   for(let i=0;i<s.length;i++){ hash = (hash*31 + s.charCodeAt(i)) >>> 0; }
   return CHANNEL_PALETTE[hash % CHANNEL_PALETTE.length];
+}
+// 엔코스테이·리브애니웨어 등 외부 채널로 인입된 예약은 결제 내역이 없어 계약 데이터를 만들 수
+// 없다. 그래서 계약 기준으로 그리는 화면(타임라인)에서는 통째로 빠져버리는데, 이런 건은 입실자
+// 카드에 적힌 예약 기간(입실일~퇴실일)을 기준으로 표시해야 한다. 채널이 비어 있는 예전 데이터는
+// 계약 기반(독립생활)으로 간주해, 기존에 잘 나오던 막대가 갑자기 중복으로 그려지지 않게 한다.
+const INTERNAL_CHANNEL = '독립생활';
+function isExternalChannelResident(p){
+  const ch = cleanKeyLoose(p && p.channel);
+  return !!ch && ch !== INTERNAL_CHANNEL;
+}
+function externalChannelTimelineMeta(p){
+  const ch = cleanKeyLoose(p && p.channel) || '외부채널';
+  const color = channelColor(ch);
+  return { key: `외부예약 · ${ch}`, fg: color, bg: color };
 }
 
 /* ---------------- root render ---------------- */
@@ -3412,7 +3430,8 @@ function renderTimelineSection(branch){
   tlLegend.className = 'tl-legend';
   tlLegend.innerHTML = TIMELINE_BAR_STATUSES.map(m=>
     `<span class="badge" style="background:${m.bg};color:${m.fg}"><span class="dot" style="background:${m.fg}"></span>${m.key}</span>`
-  ).join('');
+  ).join('')
+  + `<span class="badge" style="background:var(--paper);color:var(--ink-soft);border:1px dashed var(--line);">빗금 막대 = 외부 채널 예약(계약 없이 예약 기간 기준 · 채널별 색)</span>`;
   wrap.appendChild(tlLegend);
 
   // 한 달만 보이면 달이 바뀌는 경계(예: 9월 말~10월 초에 걸쳐 있는 입실자)를 확인하려고
@@ -3631,6 +3650,19 @@ function renderTimelineSection(branch){
       room
     };
   }
+  // 외부 채널 예약은 계약이 없으므로 입실자 카드의 예약 기간을 그대로 막대로 쓴다.
+  // 막대 색은 채널 색을 쓰고, 이름 앞에 채널명을 붙여 독립생활 건과 확실히 구분한다.
+  function externalResidentTimelineEntry(p, room){
+    const ch = cleanKeyLoose(p.channel) || '외부채널';
+    return {
+      range: { start: p.moveIn, end: p.moveOut || '9999-12-31' },
+      meta: externalChannelTimelineMeta(p),
+      name: `[${ch}] ${maskViewerName(residentDisplayName(p)) || '이름 미입력'}`,
+      memo: p.memo || '',
+      room,
+      external: true
+    };
+  }
   function historyTimelineEntry(h, room){
     return {
       range: { start: h.moveIn, end: h.moveOut || h.moveIn },
@@ -3662,6 +3694,7 @@ function renderTimelineSection(branch){
     // 표시하지 않는다.
     const isLeavingEnd = entry.meta.key === '퇴실확정' && outD <= windowEnd;
     if(isLeavingEnd) bar.classList.add('tl-bar-leaving-end');
+    if(entry.external) bar.classList.add('tl-bar-external');
     const memoText = entry.memo ? ` <span class="tl-bar-memo">${esc(entry.memo)}</span>` : '';
     const leavingTag = isLeavingEnd ? ' <span class="tl-bar-leaving-tag">▶퇴실</span>' : '';
     bar.innerHTML = `<span class="tl-bar-name">${esc(entry.name)}</span>${memoText}${leavingTag}`;
@@ -3697,6 +3730,15 @@ function renderTimelineSection(branch){
         && !findSupersedingDateEditContract(x.contract)
         && !findSupersedingPeriodEditContract(x.contract));
 
+    // 외부 채널(엔코스테이·리브애니웨어 등) 예약은 결제 내역이 없어 계약 데이터가 만들어지지
+    // 않는다. 아래 계약 분기는 "계약이 하나라도 있으면 계약만" 그리기 때문에, 과거 독립생활
+    // 계약이 남아있는 호실에 들어온 외부 예약은 타임라인에서 통째로 사라져버렸다. 그래서 이
+    // 예약들은 계약 유무와 무관하게 항상 입실자 카드의 예약 기간 기준으로 따로 그려준다.
+    // (계약으로 만들어진 입실자는 sourceContractId가 있으므로 제외 — 막대가 두 번 그려진다.)
+    const externalEntries = DB.residents
+      .filter(p=> group.roomIds.has(p.roomId) && isExternalChannelResident(p) && !p.sourceContractId && p.moveIn)
+      .map(p=> externalResidentTimelineEntry(p, group.rooms.find(r=>r.id===p.roomId) || primaryRoom));
+
     let entries;
     if(roomContracts.length > 0){
       // 한 계약 기간이 다른 계약 기간에 완전히 포함되면(예: 9/1~9/30 계약이 있는데 9/3 하루짜리
@@ -3722,7 +3764,10 @@ function renderTimelineSection(branch){
           }
         });
       }
-      entries = allContractEntries.filter(e=> new Date(e.range.end) >= windowStart && new Date(e.range.start) <= windowEnd);
+      entries = allContractEntries
+        .filter(e=> new Date(e.range.end) >= windowStart && new Date(e.range.start) <= windowEnd)
+        .concat(externalEntries)
+        .sort((a,b)=> a.range.start.localeCompare(b.range.start));
     } else {
       // 현재 입실자가 퇴실예정으로 확정되면 다음 입실자를 미리 등록해둘 수 있어서(관리자 설정과
       // 무관하게 언제나 가능), 실제로는 동시에 거주하지 않는데도 DB.residents에 그 방 레코드가
@@ -3741,8 +3786,12 @@ function renderTimelineSection(branch){
         const hOut = new Date(h.moveOut || h.moveIn);
         return hOut >= windowStart && hIn <= windowEnd;
       });
+      // 외부 채널 예약은 위 externalEntries에서 이미 만들었고, "재실자가 있으면 입실예정자는
+      // 감춘다"는 규칙과 무관하게 항상 보여야 하므로 여기서는 제외한다.
       entries = [
-        ...residents.map(p=> residentTimelineEntry(p, group.rooms.find(r=>r.id===p.roomId) || primaryRoom)),
+        ...residents.filter(p=> !isExternalChannelResident(p) || p.sourceContractId)
+          .map(p=> residentTimelineEntry(p, group.rooms.find(r=>r.id===p.roomId) || primaryRoom)),
+        ...externalEntries,
         ...history.map(h=> historyTimelineEntry(h, group.rooms.find(r=>r.id===h.roomId) || primaryRoom))
       ].sort((a,b)=> a.range.start.localeCompare(b.range.start));
     }
