@@ -1035,6 +1035,13 @@ function readCachedCollection(key){
     const parsed = JSON.parse(raw);
     if(!parsed || !Array.isArray(parsed.data) || typeof parsed.cachedAt !== 'number') return null;
     if(Date.now() - parsed.cachedAt > COLLECTION_CACHE_TTL_MS) return null;
+    // 빈 배열은 "캐시 없음"으로 본다. 예전 코드는 일시적으로 0건을 받으면 그 빈 값을 그대로
+    // 캐시했는데, 빈 배열도 JS에서는 truthy라 호출부의 if(cached)를 통과해버린다. 그러면
+    // Firestore를 아예 읽지 않은 채 캐시 유효시간(6시간) 동안 계속 비어 보이고, 이 캐시는
+    // 계정이 아니라 브라우저에 붙어 있어서 재로그인·새로고침으로도 풀리지 않았다
+    // (실제로 특정 PC에서만 퇴실 이력이 안 보이던 원인). 이미 저장돼 있는 잘못된 빈 캐시도
+    // 여기서 무시되므로, 다음 접속 때 자동으로 정상 복구된다.
+    if(parsed.data.length === 0) return null;
     return parsed.data;
   }catch(e){ return null; }
 }
