@@ -5884,13 +5884,108 @@ async function restoreLatestBackup(){
   );
 }
 
+/* ---------------- 인수인계 자료 ----------------
+   담당자가 바뀔 때 새로 오는 사람이 알아야 할 것들을 한 파일로 뽑아준다.
+   내용은 두 갈래다.
+   (1) 지금 이 순간의 운영 현황 — 지점/호실/입실자 수, 지점별 정산 설정 등 DB에서 바로 읽는다.
+   (2) 코드만 봐서는 알 수 없는 제약과 "하지 말 것" — 실제로 사고가 났던 건들이라
+       아래 HANDOVER_NOTES에 문장으로 박아둔다. 새로운 사고/결정이 생기면 여기에 한 줄 추가한다.
+*/
+const HANDOVER_NOTES = [
+  { title: '절대 하지 말 것 (실제로 사고가 났던 것들)', items: [
+    'contracts / residentHistory 컬렉션을 통째로 onSnapshot 구독하지 말 것. 접속할 때마다 전체를 다시 읽어 Firestore 무료 요금제의 일일 읽기 한도(5만 건)를 넘긴 적이 있어 롤백했다. 대신 importedAt(계약) / movedAt(퇴실 이력) 커서로 "지금 내가 가진 것보다 나중에 등록된 것만" 구독한다.',
+    '도어락·계약·퇴실 이력 데이터를 monthliv/state 문서 안에 넣지 말 것. 문서 하나당 1MB 한도가 있어 저장이 조용히 실패한다(붙여넣고 저장했는데 다시 접속하면 초기화되어 있는 증상). 도어락은 monthliv/doorlock, 계약·퇴실 이력은 각각 별도 컬렉션이다.',
+    '지점별 예외를 코드에 하드코딩하지 말 것. 담당자가 직접 켜고 끌 수 있도록 지점 정보 패널의 체크박스로 만든다(예: autoCleaningExcluded = 청소/리터치 자동지정 제외).',
+    '컬렉션 로딩 실패를 console.error만 남기고 넘어가지 말 것. "권한 문제로 못 불러온 것"과 "원래 데이터가 없는 것"이 화면상 똑같이 보여서 진단이 불가능해진다. showAlert로 실제 오류를 노출한다.',
+    '빈 배열을 캐시에 저장하지 말 것. 빈 배열도 truthy라 캐시 확인을 통과해버려, 한번 잘못 저장되면 캐시 유효시간(6시간) 동안 계속 비어 보인다. 이 캐시는 브라우저에 붙어 있어 재로그인·새로고침으로도 안 풀린다.'
+  ]},
+  { title: '구조상 알아두어야 할 것', items: [
+    '빌드 과정이 없는 단일 index.html이다. main 브랜치에 푸시하면 GitHub Pages가 자동 배포한다(캐시 10분, 확인은 Ctrl+Shift+R).',
+    'Firestore 보안 규칙은 이 저장소에 없다. Firebase 콘솔에서만 관리되므로, 새 컬렉션/문서를 추가하면 규칙도 콘솔에서 함께 추가해야 한다. 규칙을 빠뜨리면 권한 오류로 조용히 실패한다.',
+    '붙여넣기 파서(계약·도어락·예약)는 열 위치를 세지 않고 앵커 방식이다. 원본 표에서 복사하면 한 건이 여러 줄로 쪼개져 들어오기 때문에, 고정된 패턴(계약일, 시리얼 번호, 숙박 기간 줄)을 기준점으로 잡고 그 앞뒤에서 값을 찾는다.',
+    '관제센터 특성상 탭을 며칠씩 켜둔다. 그래서 실시간 동기화(onSnapshot)와 저장 시 충돌 검사가 들어가 있고, 날짜가 바뀌면 세션을 초기화한다. "고쳤는데 반영이 안 된다"는 제보는 대부분 오래된 탭이 옛 코드를 돌리고 있는 경우다.',
+    '입실자 상태(이용중/입실확정 등)는 계약이 아니라 입실자 레코드에서 계산한다. 반대로 타임라인·계약만료는 계약 기준이라, 계약 데이터가 없는 외부 채널 예약(엔코스테이·리브애니웨어)이 누락되지 않도록 별도 처리가 들어가 있다.'
+  ]},
+  { title: '이관 시 권한 체크리스트', items: [
+    'GitHub 저장소(Monthliv/Dashboard-Branch) 협업자 추가 — 푸시 권한이 곧 배포 권한이다.',
+    '새 담당자 PC에서 GitHub 인증(gh auth login 또는 PAT) 설정.',
+    'Firebase 콘솔 프로젝트 멤버 초대 — 보안 규칙을 고치려면 반드시 필요하다.',
+    '대시보드 로그인 계정 발급 및 승인 — 관리자 설정 > 사용자 관리에서 처리한다.',
+    '계정 비밀번호는 이 문서에 적지 말고 별도 경로로 전달할 것.'
+  ]}
+];
+
+function buildHandoverDoc(){
+  const L = [];
+  const now = new Date();
+  L.push('# MONTHLIV 운영 대시보드 인수인계 자료');
+  L.push('');
+  L.push('- 생성 시각: ' + now.toLocaleString('ko-KR'));
+  L.push('- 실행 중인 코드 버전: ' + APP_BUILD);
+  L.push('- 배포 주소: https://monthliv.github.io/Dashboard-Branch/');
+  L.push('- 저장소: https://github.com/Monthliv/Dashboard-Branch');
+  L.push('');
+  L.push('> 이 문서는 관리자 설정 > 데이터 백업에서 버튼 한 번으로 다시 뽑을 수 있습니다.');
+  L.push('> 아래 "현재 운영 현황"은 뽑은 시점의 실제 데이터이고, 그 뒤 내용은 코드만 봐서는');
+  L.push('> 알 수 없는 제약사항이라 사고나 결정이 생길 때마다 갱신됩니다.');
+  L.push('');
+
+  L.push('## 현재 운영 현황');
+  L.push('');
+  L.push('| 항목 | 수량 |');
+  L.push('| --- | --- |');
+  L.push('| 지점 | ' + (DB.branches||[]).length + '곳 |');
+  L.push('| 호실 | ' + (DB.rooms||[]).length + '실 |');
+  L.push('| 입실자(재실·입실예정) | ' + (DB.residents||[]).length + '명 |');
+  L.push('| 계약 이력 | ' + (DB.contracts||[]).length + '건 |');
+  L.push('| 퇴실 이력 | ' + (DB.residentHistory||[]).length + '건 |');
+  L.push('| 도어락 기기 | ' + (DB.doorlocks||[]).length + '대 |');
+  L.push('');
+
+  L.push('## 지점별 현황 및 정산 설정');
+  L.push('');
+  L.push('| 지점 | 호실 | 이용중 | 수수료율 | 보증금 관리 | 청소 자동지정 |');
+  L.push('| --- | --- | --- | --- | --- | --- |');
+  (DB.branches||[]).forEach(function(b){
+    const rms = (DB.rooms||[]).filter(function(r){ return r.branchId===b.id; });
+    const occupied = rms.filter(function(r){ return roomTabs(r).includes('이용중'); }).length;
+    L.push('| ' + branchLabel(b) + ' | ' + rms.length + ' | ' + occupied + ' | ' +
+      branchCommissionRate(b) + '% | ' + (b.managesDeposit ? '관리함' : '-') + ' | ' +
+      (b.autoCleaningExcluded ? '제외' : '사용') + ' |');
+  });
+  L.push('');
+
+  HANDOVER_NOTES.forEach(function(sec){
+    L.push('## ' + sec.title);
+    L.push('');
+    sec.items.forEach(function(it){ L.push('- ' + it); });
+    L.push('');
+  });
+
+  L.push('---');
+  L.push('');
+  L.push('생성: 관리자 설정 > 데이터 백업 > 인수인계 자료 다운로드');
+  return L.join('\n');
+}
+
+function downloadHandoverDoc(){
+  const blob = new Blob([buildHandoverDoc()], { type:'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `monthliv_인수인계_${todayISO()}.md`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 function renderDataBackupPanel(){
   const box = document.createElement('div');
   box.className = 'stat-section';
   box.innerHTML = `<h3>데이터 백업</h3>
     <div style="font-size:12px;color:var(--ink-soft);margin-bottom:12px;">
       지점·호실·입실자·계약 이력·퇴실 이력 등 전체 데이터를 JSON 파일로 다운로드합니다. 만일의 사고에 대비해 주기적으로 받아두는 것을 권장합니다.<br>
-      "백업 데이터 가져오기"는 매일 자동 저장되는 Firestore 백업(지점·호실·입실자, 최근 3일치) 중 가장 최신 것을 불러와 현재 데이터를 덮어씁니다.
+      "백업 데이터 가져오기"는 매일 자동 저장되는 Firestore 백업(지점·호실·입실자, 최근 3일치) 중 가장 최신 것을 불러와 현재 데이터를 덮어씁니다.<br>
+      "인수인계 자료"는 담당자가 바뀔 때 새로 오는 사람이 알아야 할 내용을 정리한 문서입니다. 현재 운영 현황과 함께, 코드만 봐서는 알 수 없는 제약사항·주의점이 담겨 있습니다.
     </div>`;
   const btnRow = document.createElement('div');
   btnRow.style.cssText = 'display:flex; gap:8px; flex-wrap:wrap;';
@@ -5902,7 +5997,12 @@ function renderDataBackupPanel(){
   restoreBtn.className = 'btn danger';
   restoreBtn.textContent = '⟳ 백업 데이터 가져오기';
   restoreBtn.onclick = restoreLatestBackup;
-  btnRow.appendChild(downloadBtn); btnRow.appendChild(restoreBtn);
+  const handoverBtn = document.createElement('button');
+  handoverBtn.className = 'btn';
+  handoverBtn.textContent = '📋 인수인계 자료 다운로드';
+  handoverBtn.title = '현재 운영 현황과 인수인계 시 알아야 할 제약사항을 마크다운 문서로 내려받습니다';
+  handoverBtn.onclick = downloadHandoverDoc;
+  btnRow.appendChild(downloadBtn); btnRow.appendChild(restoreBtn); btnRow.appendChild(handoverBtn);
   box.appendChild(btnRow);
   return box;
 }
