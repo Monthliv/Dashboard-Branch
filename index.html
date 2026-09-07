@@ -5942,15 +5942,17 @@ function buildHandoverDoc(){
   L.push('| 도어락 기기 | ' + (DB.doorlocks||[]).length + '대 |');
   L.push('');
 
-  L.push('## 지점별 현황 및 정산 설정');
+  // 수수료율·보증금 관리는 이 대시보드에서 관리하는 항목이 아니라 넣지 않는다.
+  // (필드 자체는 남아 있지만 실제 운영은 다른 곳에서 이뤄지므로, 인수인계 문서에
+  //  적어두면 여기서 관리하는 것처럼 오해를 준다.)
+  L.push('## 지점별 현황');
   L.push('');
-  L.push('| 지점 | 호실 | 이용중 | 수수료율 | 보증금 관리 | 청소 자동지정 |');
-  L.push('| --- | --- | --- | --- | --- | --- |');
+  L.push('| 지점 | 호실 | 이용중 | 청소/리터치 자동지정 |');
+  L.push('| --- | --- | --- | --- |');
   (DB.branches||[]).forEach(function(b){
     const rms = (DB.rooms||[]).filter(function(r){ return r.branchId===b.id; });
     const occupied = rms.filter(function(r){ return roomTabs(r).includes('이용중'); }).length;
     L.push('| ' + branchLabel(b) + ' | ' + rms.length + ' | ' + occupied + ' | ' +
-      branchCommissionRate(b) + '% | ' + (b.managesDeposit ? '관리함' : '-') + ' | ' +
       (b.autoCleaningExcluded ? '제외' : '사용') + ' |');
   });
   L.push('');
