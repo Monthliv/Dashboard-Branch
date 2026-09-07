@@ -647,8 +647,6 @@
         <span class="sub" id="loggedInAs"></span>
         <button class="btn small" id="cleaningBtn">청소 관리</button>
         <button class="btn small" id="doorlockBtn">도어락 관리</button>
-        <button class="btn small" id="settlementBtn">정산 계산기</button>
-        <button class="btn small" id="stayCheckBtn">연박 체크</button>
         <button class="btn small" id="shortcutsBtn">바로가기</button>
         <button class="btn small" id="adminBtn" style="display:none;">관리자 설정</button>
         <button class="btn small" id="changePwBtn">비밀번호 변경</button>
@@ -1395,8 +1393,9 @@ function render(){
   if(UI.view === 'admin'){ main.appendChild(renderAdminView()); return; }
   if(UI.view === 'cleaning'){ main.appendChild(renderCleaningView()); return; }
   if(UI.view === 'doorlock'){ main.appendChild(renderDoorlockView()); return; }
-  if(UI.view === 'settlement'){ main.appendChild(renderSettlementView()); return; }
-  if(UI.view === 'staycheck'){ main.appendChild(renderStayCheckView()); return; }
+  // 정산 계산기(settlement)·연박 체크(staycheck)는 상단 메뉴에서 제외했다. 렌더 함수는
+  // 그대로 남겨두었으니, 다시 노출하려면 여기 라우팅과 헤더 버튼만 되살리면 된다.
+  // 연박 체크는 별도 페이지로 옮겼다: https://monthliv.github.io/Calculator/CheckDomitory.html
   if(UI.view === 'shortcuts'){ main.appendChild(renderShortcutsView()); return; }
   main.appendChild(renderBranchView());
 }
@@ -1426,14 +1425,6 @@ function renderTopNav(){
   const shortcutsBtn = document.getElementById('shortcutsBtn');
   shortcutsBtn.className = 'btn small' + (UI.view==='shortcuts' ? ' primary' : '');
   shortcutsBtn.onclick = ()=>{ UI.view = 'shortcuts'; render(); };
-
-  const settlementBtn = document.getElementById('settlementBtn');
-  settlementBtn.className = 'btn small' + (UI.view==='settlement' ? ' primary' : '');
-  settlementBtn.onclick = ()=>{ UI.view = 'settlement'; render(); };
-
-  const stayCheckBtn = document.getElementById('stayCheckBtn');
-  stayCheckBtn.className = 'btn small' + (UI.view==='staycheck' ? ' primary' : '');
-  stayCheckBtn.onclick = ()=>{ UI.view = 'staycheck'; render(); };
 
   const doorlockBtn = document.getElementById('doorlockBtn');
   doorlockBtn.className = 'btn small' + (UI.view==='doorlock' ? ' primary' : '');
