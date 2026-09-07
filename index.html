@@ -836,9 +836,12 @@ const MAINT_KIND_FIELD = { moveout:'needsCleaning', retouch:'needsRetouch', extr
 const MAINT_DONE_LABEL = { moveout:'청소완료', retouch:'리터치완료', extra:'추가청소완료' };
 const CLEANING_HISTORY_MAX = 5;
 function roomMaintKind(room){
-  if(room.needsRetouch) return 'retouch';
-  if(room.needsExtraCleaning) return 'extra';
+  // 퇴실청소를 가장 먼저 본다. 퇴실청소는 리터치를 포함하는 더 포괄적인 작업이라, 한 방에
+  // 둘 다 걸려 있으면 퇴실청소가 지정되어야 한다(예전에는 리터치를 먼저 봐서, 이전 공실 때
+  // 걸어둔 리터치가 남아 있으면 퇴실이 확정돼도 리터치로 표시됐다 — 목동 306호 사례).
   if(room.needsCleaning) return 'moveout';
+  if(room.needsExtraCleaning) return 'extra';
+  if(room.needsRetouch) return 'retouch';
   return null;
 }
 function maintBadgeHtml(kind, suffix){
@@ -7265,12 +7268,23 @@ function autoFlagDueRetouch(){
   let changed = false;
   DB.rooms.forEach(room=>{
     if(isAutoCleaningExcludedBranch(roomBranch(room))) return;
-    if(roomMaintKind(room)) return;
     // 퇴실확정된 입실자가 있어 퇴실청소가 표시/예정된 방(roomUpcomingLeaveDate — 방 카드 배지와
-    // 같은 기준)에는 리터치를 자동으로 걸지 않는다. 둘 다 해당하는 상황이면 퇴실처리가 우선이고,
-    // 그 처리가 끝나야(flagUpcomingCleaning이 needsRetouch도 함께 정리한다) 리터치 자동 판단을
-    // 다시 한다.
-    if(roomUpcomingLeaveDate(room)) return;
+    // 같은 기준)에는 리터치를 자동으로 걸지 않는다. 둘 다 해당하는 상황이면 퇴실청소가 우선이다.
+    // 이 검사는 반드시 아래 roomMaintKind 조기 반환보다 앞에 와야 한다 — 리터치가 이미 켜져
+    // 있으면 roomMaintKind가 truthy라 거기서 걸러져, 정작 정리해야 할 상황에 도달하지 못한다.
+    if(roomUpcomingLeaveDate(room)){
+      // 퇴실이 확정된 방에 이전 공실 때 걸어둔 리터치가 그대로 남아 있으면, 더 포괄적인
+      // 퇴실청소가 그 자리를 대신해야 한다. 표시만 바꾸는 게 아니라 플래그 자체를 정리해야
+      // 청소관리 화면·완료 버튼까지 퇴실청소 기준으로 맞는다.
+      if(room.needsRetouch){
+        room.needsRetouch = false;
+        room.maintenanceDate = '';
+        room.maintenanceMemo = '';
+        changed = true;
+      }
+      return;
+    }
+    if(roomMaintKind(room)) return;
     if(effectiveRoomStatus(room) === '공실') return;
     if(DB.residents.some(p=> p.roomId===room.id && isCurrentlyResiding(p))) return;
     const upcoming = DB.residents.filter(p=> p.roomId===room.id && isUpcoming(p))
