@@ -1218,12 +1218,9 @@ function applyLoadedCore(parsed){
     if(b.autoCleaningExcluded == null){
       b.autoCleaningExcluded = LEGACY_AUTO_CLEANING_EXCLUDED_NAMES.some(name => cleanKeyLoose(b.name).includes(name));
     }
-    // 정산 관련 지점 설정. 값이 없던 기존 지점은 표준 수수료율(7%)/보증금 미관리로 시작하고,
-    // 담당자가 지점 정보에서 바꾸거나 엑셀 일괄 등록으로 채워넣는다.
-    if(b.commissionRate == null) b.commissionRate = SETTLEMENT_DEFAULT_COMMISSION_RATE;
-    if(b.managesDeposit == null) b.managesDeposit = false;
-    if(b.depositAmount == null) b.depositAmount = 0;
-    if(b.refundAccount == null) b.refundAccount = '';
+    // 정산 수수료율·보증금 관련 필드는 이 대시보드에서 관리하지 않기로 해서 기본값을 채우지
+    // 않는다. 이미 저장된 값은 그대로 두고, 읽는 쪽(branchCommissionRate 등)이 각자 기본값을
+    // 처리한다.
   });
   DB.residents.forEach(p => {
     if(p.originalMoveIn == null) p.originalMoveIn = p.moveIn || '';
@@ -2025,24 +2022,6 @@ function renderBranchInfoBar(branch){
       }
     };
   }
-  // 수수료율(%)은 소수점이 들어갈 수 있어(예: 6.5%) feeField(원 단위 정수)와 따로 둔다.
-  function rateField(field, logLabel){
-    return {
-      view: ()=> document.createTextNode(`${branchCommissionRate(branch)}%`),
-      edit: ()=>{
-        const input = document.createElement('input');
-        input.type = 'number'; input.min = '0'; input.max = '100'; input.step = '0.1';
-        input.placeholder = String(SETTLEMENT_DEFAULT_COMMISSION_RATE);
-        input.value = branchCommissionRate(branch);
-        input.addEventListener('input', ()=>{
-          logChange(`"${branch.name}" ${logLabel} 수정`);
-          branch[field] = input.value === '' ? SETTLEMENT_DEFAULT_COMMISSION_RATE : (Number(input.value) || 0);
-          scheduleSave();
-        });
-        return input;
-      }
-    };
-  }
   function boolField(field, trueLabel, falseLabel, logLabel, hint, onChange){
     return {
       view: ()=> document.createTextNode(branch[field] ? trueLabel : falseLabel),
@@ -2081,10 +2060,9 @@ function renderBranchInfoBar(branch){
     { label:'1인 추가금', ...textField('doubleOccupancyFee', '예: 100000원', '1인 추가금') },
     { label:'공용 주방 위치', ...textField('sharedKitchenLocation', '예: 2층 복도 끝', '공용 주방 위치') },
     { label:'종량제 봉투', ...textField('trashBagLocation', '예: 1층 관리실', '종량제 봉투 보관위치') },
-    { label:'정산 수수료율', ...rateField('commissionRate', '정산 수수료율') },
-    { label:'보증금 관리', ...boolField('managesDeposit', '관리함', '관리 안 함', '보증금 관리', '이 지점이 보증금을 관리하는지 여부입니다(참고용 — 원장 반환액 계산에는 반영되지 않습니다).') },
-    { label:'보증금', ...feeField('depositAmount', '예: 100000', '보증금') },
-    { label:'환불계좌', ...textField('refundAccount', '예: 국민 123456-78-901234 (홍길동)', '환불계좌') }
+    // 정산 수수료율·보증금 관리·보증금·환불계좌는 이 대시보드에서 관리하는 항목이 아니라
+    // 화면에서 제외했다(실제 운영은 다른 곳에서 이뤄진다). 저장된 값 자체는 지우지 않았고,
+    // 정산 계산기를 다시 노출하면 그대로 쓸 수 있다.
   ];
 
   if(infoOpen){
@@ -5904,7 +5882,8 @@ const HANDOVER_NOTES = [
     'Firestore 보안 규칙은 이 저장소에 없다. Firebase 콘솔에서만 관리되므로, 새 컬렉션/문서를 추가하면 규칙도 콘솔에서 함께 추가해야 한다. 규칙을 빠뜨리면 권한 오류로 조용히 실패한다.',
     '붙여넣기 파서(계약·도어락·예약)는 열 위치를 세지 않고 앵커 방식이다. 원본 표에서 복사하면 한 건이 여러 줄로 쪼개져 들어오기 때문에, 고정된 패턴(계약일, 시리얼 번호, 숙박 기간 줄)을 기준점으로 잡고 그 앞뒤에서 값을 찾는다.',
     '관제센터 특성상 탭을 며칠씩 켜둔다. 그래서 실시간 동기화(onSnapshot)와 저장 시 충돌 검사가 들어가 있고, 날짜가 바뀌면 세션을 초기화한다. "고쳤는데 반영이 안 된다"는 제보는 대부분 오래된 탭이 옛 코드를 돌리고 있는 경우다.',
-    '입실자 상태(이용중/입실확정 등)는 계약이 아니라 입실자 레코드에서 계산한다. 반대로 타임라인·계약만료는 계약 기준이라, 계약 데이터가 없는 외부 채널 예약(엔코스테이·리브애니웨어)이 누락되지 않도록 별도 처리가 들어가 있다.'
+    '입실자 상태(이용중/입실확정 등)는 계약이 아니라 입실자 레코드에서 계산한다. 반대로 타임라인·계약만료는 계약 기준이라, 계약 데이터가 없는 외부 채널 예약(엔코스테이·리브애니웨어)이 누락되지 않도록 별도 처리가 들어가 있다.',
+    '정산 수수료율·보증금·환불계좌는 이 대시보드에서 관리하지 않는다. 코드에는 정산 계산기와 관련 지점 필드(commissionRate, managesDeposit 등)가 남아 있지만 화면에서 제외된 상태이고, 실제 운영은 다른 곳에서 이뤄진다. 여기서 관리하는 것으로 오해하지 말 것.'
   ]},
   { title: '이관 시 권한 체크리스트', items: [
     'GitHub 저장소(Monthliv/Dashboard-Branch) 협업자 추가 — 푸시 권한이 곧 배포 권한이다.',
