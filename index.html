@@ -5886,6 +5886,7 @@ const HANDOVER_NOTES = [
   { title: '구조상 알아두어야 할 것', items: [
     '빌드 과정이 없는 단일 index.html이다. main 브랜치에 푸시하면 GitHub Pages가 자동 배포한다(캐시 10분, 확인은 Ctrl+Shift+R).',
     'Firestore 보안 규칙은 이 저장소에 없다. Firebase 콘솔에서만 관리되므로, 새 컬렉션/문서를 추가하면 규칙도 콘솔에서 함께 추가해야 한다. 규칙을 빠뜨리면 권한 오류로 조용히 실패한다.',
+    '도어락 붙여넣기 목록은 매번 기기 수가 다르다(실제로 96~179대까지 널뛴다 — 업체 페이지에서 보이는 만큼만 복사되는 것으로 보인다). 그래서 "지난 목록에 없던 기기 = 새로 끊긴 기기"로 판정하면 안 된다. 원래 1년 전부터 끊겨 있던 방이 신규로 잡힌다(잠실 311·313호 제보). 판정은 마지막 연결 시각이 지난 붙여넣기 날짜보다 나중인지로 한다.',
     '붙여넣기 파서(계약·도어락·예약)는 열 위치를 세지 않고 앵커 방식이다. 원본 표에서 복사하면 한 건이 여러 줄로 쪼개져 들어오기 때문에, 고정된 패턴(계약일, 시리얼 번호, 숙박 기간 줄)을 기준점으로 잡고 그 앞뒤에서 값을 찾는다.',
     '관제센터 특성상 탭을 며칠씩 켜둔다. 그래서 실시간 동기화(onSnapshot)와 저장 시 충돌 검사가 들어가 있고, 날짜가 바뀌면 세션을 초기화한다. "고쳤는데 반영이 안 된다"는 제보는 대부분 오래된 탭이 옛 코드를 돌리고 있는 경우다.',
     '입실자 상태(이용중/입실확정 등)는 계약이 아니라 입실자 레코드에서 계산한다. 반대로 타임라인·계약만료는 계약 기준이라, 계약 데이터가 없는 외부 채널 예약(엔코스테이·리브애니웨어)이 누락되지 않도록 별도 처리가 들어가 있다.',
@@ -7980,7 +7981,7 @@ function getDoorlockSnapshotAt(offsetFromLatest){
   // (동기화 호출 전이거나 옛 코드가 실행 중인 탭이면) 캐시가 아직 갱신 전일 수 있다. 지나간
   // 날짜는 그 시점에 얼려둔 값 외엔 알 방법이 없으므로 current.branchNotes를 그대로 쓴다.
   const branchNotes = offsetFromLatest === 0 ? (DB.doorlockBranchNotes || {}) : (current.branchNotes || {});
-  return { date: current.date, records: current.records, prevRecords: prev ? prev.records : null, actionTags, branchNotes };
+  return { date: current.date, records: current.records, prevRecords: prev ? prev.records : null, prevDate: prev ? prev.date : null, actionTags, branchNotes };
 }
 function showDoorlockPasteModal(){
   const overlay = document.createElement('div');
@@ -8157,13 +8158,25 @@ const DOORLOCK_LONG_OVERDUE_DAYS = 30;
 // longOverdue: existing인데 마지막 연결로부터 30일 이상 지난 것(장기 미연결, 회색으로 구분).
 // "정상 연결됨"(그때 미연결이었는데 지금은 연결됨)은 이 목록에 섞지 않고 상단의 별도
 // 카드(renderDoorlockResolvedSection)에서 하루만 보여준 뒤 자연히 빠진다.
-function computeDoorlockChipList(records, prevRecords){
+// 붙여넣는 목록에 매번 같은 기기가 다 들어오지는 않는다(실제로 하루 96~179대까지 널뛴다 —
+// 업체 페이지에서 보이는 만큼만 복사되는 것으로 보인다). 그래서 "이전 목록에 없다"는 사실만으로
+// 신규 미연결이라고 볼 수 없다. 그 기기가 그동안 연결이었는지 미연결이었는지 모를 뿐이다.
+// 마지막 연결 시각이 판정 근거가 된다: 이전 붙여넣기 시점보다 나중에 끊겼으면 그 사이에 새로
+// 끊긴 것이고, 그보다 오래됐으면 이미 그전부터 끊겨 있던 기기다(잠실 311호는 마지막 연결이
+// 1년 전인데 신규로 잡히고 있었다).
+function doorlockNewlyDisconnected(record, prevDate){
+  if(!prevDate) return false;              // 비교 기준이 없으면 신규라고 단정하지 않는다
+  if(!record.lastConnected) return false;  // 한 번도 연결된 적 없음 = 새로 끊긴 게 아니다
+  return record.lastConnected.slice(0, 10) >= prevDate;
+}
+function computeDoorlockChipList(records, prevRecords, prevDate){
   const prevBySerial = new Map((prevRecords || []).map(r=>[r.serial, r]));
   const chips = [];
   records.forEach(r=>{
     if(!r.connected){
       const prev = prevBySerial.get(r.serial);
-      const isExisting = !!(prev && prev.connected===false);
+      // 이전 목록에 있으면 그때 상태로 확실히 판정하고, 없으면 마지막 연결 시각으로 추정한다.
+      const isExisting = prev ? (prev.connected === false) : !doorlockNewlyDisconnected(r, prevDate);
       let status;
       if(isExisting && doorlockDaysSinceLastConnected(r) >= DOORLOCK_LONG_OVERDUE_DAYS) status = 'longOverdue';
       else status = isExisting ? 'existing' : 'new';
@@ -8221,7 +8234,7 @@ function doorlockResolveBranchLink(group, label){
   }
   return autoMatchDoorlockBranch(label);
 }
-function renderDoorlockDisconnectedSection(records, prevRecords, dateForTitle, editable, branchNotes){
+function renderDoorlockDisconnectedSection(records, prevRecords, dateForTitle, editable, branchNotes, prevDate){
   branchNotes = branchNotes || {};
   const box = document.createElement('div');
   box.className = 'stat-section';
@@ -8237,7 +8250,7 @@ function renderDoorlockDisconnectedSection(records, prevRecords, dateForTitle, e
       </div>
     </div>`;
 
-  const chipBySerial = new Map(computeDoorlockChipList(records, prevRecords).map(c=> [c.record.serial, c]));
+  const chipBySerial = new Map(computeDoorlockChipList(records, prevRecords, prevDate).map(c=> [c.record.serial, c]));
 
   // 1차: 기기명 기준 그룹핑 키(branchGroup)별로 묶는다(연결에 문제 없는 지점도 "전체
   // 연결됨"으로 보여주기 위해 전체 레코드를 기준으로 묶는다).
@@ -8489,9 +8502,11 @@ function dedupeDoorlockRecordsByLabel(records){
   });
   return out;
 }
-function renderDoorlockNewIssuesSection(prevRecords, currRecords){
+function renderDoorlockNewIssuesSection(prevRecords, currRecords, prevDate){
   const prevBySerial = new Map((prevRecords||[]).map(r=>[r.serial, r]));
-  const added = dedupeDoorlockRecordsByLabel(currRecords.filter(r=> !prevBySerial.has(r.serial) && !r.connected))
+  // computeDoorlockChipList와 같은 기준을 쓴다 — 이전 목록에 없다는 것만으로는 신규가 아니다.
+  const added = dedupeDoorlockRecordsByLabel(currRecords.filter(r=>
+    !r.connected && !prevBySerial.has(r.serial) && doorlockNewlyDisconnected(r, prevDate)))
     .sort((a,b)=> doorlockBranchLabel(a.branchGroup).localeCompare(doorlockBranchLabel(b.branchGroup),'ko'));
   const box = document.createElement('div');
   box.className = 'stat-section cleaning-card';
@@ -8615,7 +8630,7 @@ function renderDoorlockView(){
   if(UI.doorlockHistoryOffset == null || UI.doorlockHistoryOffset > maxOffset) UI.doorlockHistoryOffset = Math.min(UI.doorlockHistoryOffset || 0, maxOffset);
   const offset = UI.doorlockHistoryOffset;
   const snap = getDoorlockSnapshotAt(offset) ||
-    { date: DB.doorlockImportDate, records, prevRecords: (DB.doorlockPrevSnapshot && DB.doorlockPrevSnapshot.records) || null, actionTags: DB.doorlockActionTags || {}, branchNotes: DB.doorlockBranchNotes || {} };
+    { date: DB.doorlockImportDate, records, prevRecords: (DB.doorlockPrevSnapshot && DB.doorlockPrevSnapshot.records) || null, prevDate: (DB.doorlockPrevSnapshot && DB.doorlockPrevSnapshot.date) || null, actionTags: DB.doorlockActionTags || {}, branchNotes: DB.doorlockBranchNotes || {} };
   const viewRecords = snap.records;
   const viewPrevRecords = snap.prevRecords;
   const isLatest = offset === 0;
@@ -8659,6 +8674,22 @@ function renderDoorlockView(){
       navBar.appendChild(shareBtn);
     }
     wrap.appendChild(navBar);
+    // 붙여넣은 기기 수가 지난번과 크게 다르면 목록이 잘렸을 가능성이 높다(업체 페이지에서
+    // 보이는 만큼만 복사되는 경우). 실제로 하루 만에 100대 -> 179대, 178대 -> 113대처럼
+    // 널뛴 적이 있고, 그 때문에 원래 끊겨 있던 방이 "신규 미연결"로 잡히는 문제가 있었다.
+    // 판정 자체는 마지막 연결 시각으로 보정하지만, 목록이 빠진 사실은 담당자가 알아야 한다.
+    if(viewPrevRecords && viewPrevRecords.length){
+      const curN = viewRecords.length, prevN = viewPrevRecords.length;
+      const gap = Math.abs(curN - prevN) / Math.max(curN, prevN);
+      const countLine = document.createElement('div');
+      const odd = gap >= 0.2;
+      countLine.style.cssText = 'text-align:center; font-size:11.5px; margin:-6px 0 14px;'
+        + (odd ? 'color:var(--st-hold);font-weight:600;' : 'color:var(--ink-soft);');
+      countLine.textContent = odd
+        ? `⚠ 기기 ${curN}대 (지난 기록 ${prevN}대) — 목록이 잘렸을 수 있습니다. 업체 페이지에서 전체 목록이 복사됐는지 확인해주세요.`
+        : `기기 ${curN}대 (지난 기록 ${prevN}대)`;
+      wrap.appendChild(countLine);
+    }
     if(maxOffset > 0 && !isLatest){
       wrap.appendChild(el('div', null, '지난 기록을 보고 있습니다(수정 불가) · "다음 ▶"을 눌러 최신으로 돌아갈 수 있습니다.', 'font-size:11.5px;color:var(--ink-soft);text-align:center;margin-bottom:14px;'));
     }
@@ -8674,11 +8705,11 @@ function renderDoorlockView(){
   if(viewPrevRecords && viewPrevRecords.length){
     const diffGrid = document.createElement('div');
     diffGrid.className = 'cleaning-cards-grid';
-    diffGrid.appendChild(renderDoorlockNewIssuesSection(viewPrevRecords, viewRecords));
+    diffGrid.appendChild(renderDoorlockNewIssuesSection(viewPrevRecords, viewRecords, snap.prevDate));
     diffGrid.appendChild(renderDoorlockResolvedSection(viewPrevRecords, viewRecords));
     wrap.appendChild(diffGrid);
   }
-  wrap.appendChild(renderDoorlockDisconnectedSection(viewRecords, viewPrevRecords, snap.date, isLatest, snap.branchNotes));
+  wrap.appendChild(renderDoorlockDisconnectedSection(viewRecords, viewPrevRecords, snap.date, isLatest, snap.branchNotes, snap.prevDate));
 
   return wrap;
 }
