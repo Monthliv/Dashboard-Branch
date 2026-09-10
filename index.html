@@ -1009,7 +1009,7 @@ let lastKnownUpdatedAt = null;
 // 보인다" 같은 문제는 화면만 봐서는 캐시를 쓴 건지, 서버에서 0건을 받은 건지, 권한 오류로
 // 실패한 건지 구분이 안 돼서 진단이 계속 헛돌았다. 관리자 설정의 "데이터 로딩 상태"에서
 // 그대로 보여준다.
-const APP_BUILD = '2026-09-05-a';
+const APP_BUILD = '2026-09-10-a';
 let LOAD_DIAG = {
   contracts: { count: 0, source: '아직 불러오지 않음', error: '' },
   history:   { count: 0, source: '아직 불러오지 않음', error: '' },
@@ -5928,7 +5928,8 @@ let ROOM_PRICES = { rooms: [], updatedAt: '', updatedBy: '' };
 
 // 엑셀은 호실 1개 = 1행으로 다룬다(실무에서 호실 단위로 관리하기 때문). 저장은 계산기가
 // 쓰는 구조에 맞춰 지점+룸타입으로 묶어 nums 배열로 되돌린다.
-const ROOM_PRICE_HEADERS = ['지점', '호실', '룸타입', '1인 입실료', '2인 입실료', '신규회원 1박', '기존회원 1박(1인)', '기존회원 1박(2인)'];
+// 뒤의 두 칸(성수기)은 시기에 따라 입실료가 바뀌는 지점만 채운다. 나머지는 비워둔다.
+const ROOM_PRICE_HEADERS = ['지점', '호실', '룸타입', '1인 입실료', '2인 입실료', '신규회원 1박', '기존회원 1박(1인)', '기존회원 1박(2인)', '성수기 1인 입실료', '성수기 적용월'];
 
 async function loadRoomPrices(){
   try{
@@ -5959,7 +5960,9 @@ function roomPriceRowsOf(list){
       '2인 입실료': (r.p2 == null ? '' : r.p2),
       '신규회원 1박': r.new || 0,
       '기존회원 1박(1인)': ex1 || 0,
-      '기존회원 1박(2인)': (ex2 === '' || ex2 == null) ? '' : ex2
+      '기존회원 1박(2인)': (ex2 === '' || ex2 == null) ? '' : ex2,
+      '성수기 1인 입실료': r.p1Alt || '',
+      '성수기 적용월': (r.p1Alt && r.altMonths && r.altMonths.length) ? r.altMonths.join(',') : ''
     };
     const nums = (r.nums && r.nums.length) ? r.nums : [''];
     nums.forEach(n=>{
@@ -6027,6 +6030,8 @@ function parseRoomPriceGrid(headerCells, dataRows){
   }
   const cP1 = col(['1인입실료','1인가격','입실료','p1']);
   const cP2 = col(['2인입실료','2인가격','p2']);
+  const cP1Alt = col(['성수기1인입실료','성수기입실료','p1Alt']);
+  const cAltMonths = col(['성수기적용월','성수기월','altMonths']);
   const cNew = col(['신규회원1박','신규1박','new']);
   const cEx1 = col(['기존회원1박(1인)','기존회원1박','기존1박','ex']);
   const cEx2 = col(['기존회원1박(2인)','기존1박2인']);
@@ -6036,39 +6041,85 @@ function parseRoomPriceGrid(headerCells, dataRows){
     return digits ? Number(digits) : null;
   };
 
+  const items = [];
+  const skipped = [];
+
+  dataRows.forEach((cells, i)=>{
+    const get = (c)=> (c != null && cells[c] != null) ? String(cells[c]).trim() : '';
+    const at = `[${i+2}행]`;
+    const b = cleanKeyLoose(get(cB));
+    const r = cleanKeyLoose(get(cR));
+    const numText = cleanKeyLoose(get(cNum));
+    if(!b && !r && !numText) return;                      // 빈 줄
+    if(!b || !r || !numText){ skipped.push(`${at} 지점·호실·룸타입 중 빈 칸이 있음`); return; }
+    const p1 = num(get(cP1));
+    if(p1 == null){ skipped.push(`${at} ${b} ${numText} — 1인 입실료가 비어 있음`); return; }
+
+    const ex1 = num(get(cEx1));
+    const ex2 = num(get(cEx2));
+    items.push({
+      at, b, r, num: numText,
+      p1,
+      p2: num(get(cP2)),
+      new: num(get(cNew)) || 0,
+      ex: (ex2 == null) ? (ex1 || 0) : [ex1 || 0, ex2],
+      p1Alt: num(get(cP1Alt)),
+      altMonths: parseAltMonths(get(cAltMonths))
+    });
+  });
+
+  const grouped = groupRoomPriceItems(items);
+  return { rooms: grouped.rooms, skipped: skipped.concat(grouped.skipped), warnings: grouped.warnings };
+}
+
+// "7,8,9" / "7~9월" 처럼 적힌 성수기 적용월을 숫자 배열로 바꾼다.
+function parseAltMonths(text){
+  const s = String(text == null ? '' : text);
+  const range = s.match(/(\d{1,2})\s*[~\-–]\s*(\d{1,2})/);
+  if(range){
+    const a = Number(range[1]), b = Number(range[2]);
+    if(a >= 1 && b <= 12 && a <= b){
+      const out = [];
+      for(let m = a; m <= b; m++) out.push(m);
+      return out;
+    }
+  }
+  const months = (s.match(/\d{1,2}/g) || []).map(Number).filter(m=> m >= 1 && m <= 12);
+  return [...new Set(months)].sort((a, b)=> a - b);
+}
+
+// 호실 단위 항목들을 저장 구조(지점+룸타입 묶음)로 되돌린다. 엑셀 업로드와 관리표(.xlsm)
+// 가져오기가 같은 규칙(중복 호실 제외, 가격이 갈리는 타입 경고)을 쓰도록 한 곳에 모아둔다.
+// items: { at, b, r, num, p1, p2, new, ex, p1Alt, altMonths }
+function groupRoomPriceItems(items){
   const groups = new Map();   // 지점|타입|가격조합 -> 묶음
   const skipped = [];
   const conflicts = new Map(); // 지점|타입 -> 서로 다른 가격 조합 수(같은 타입인데 가격이 갈리는 경우)
   const seen = new Set();      // 지점|호실 중복 확인
 
-  dataRows.forEach((cells, i)=>{
-    const get = (c)=> (c != null && cells[c] != null) ? String(cells[c]).trim() : '';
-    const b = cleanKeyLoose(get(cB));
-    const r = cleanKeyLoose(get(cR));
-    const numText = cleanKeyLoose(get(cNum));
-    if(!b && !r && !numText) return;                      // 빈 줄
-    if(!b || !r || !numText){ skipped.push(`[${i+2}행] 지점·호실·룸타입 중 빈 칸이 있음`); return; }
-    const p1 = num(get(cP1));
-    if(p1 == null){ skipped.push(`[${i+2}행] ${b} ${numText} — 1인 입실료가 비어 있음`); return; }
-
-    const dupKey = b + '|' + normalizeRoomNo(numText.replace(/호$/,''));
-    if(seen.has(dupKey)){ skipped.push(`[${i+2}행] ${b} ${numText} — 같은 호실이 이미 있어 건너뜀`); return; }
+  (items || []).forEach(it=>{
+    const dupKey = it.b + '|' + normalizeRoomNo(String(it.num).replace(/호$/,''));
+    if(seen.has(dupKey)){ skipped.push(`${it.at} ${it.b} ${it.num} — 같은 호실이 이미 있어 건너뜀`); return; }
     seen.add(dupKey);
 
-    const ex1 = num(get(cEx1));
-    const ex2 = num(get(cEx2));
     const price = {
-      p1,
-      p2: num(get(cP2)),
-      new: num(get(cNew)) || 0,
-      ex: (ex2 == null) ? (ex1 || 0) : [ex1 || 0, ex2]
+      p1: it.p1,
+      p2: (it.p2 == null ? null : it.p2),
+      new: it.new || 0,
+      ex: (it.ex == null ? 0 : it.ex)
     };
-    const priceKey = JSON.stringify([price.p1, price.p2, price.new, price.ex]);
-    const key = b + '|' + r + '|' + priceKey;
-    if(!groups.has(key)) groups.set(key, Object.assign({ b, r, nums: [] }, price));
-    groups.get(key).nums.push(numText);
+    // 시기에 따라 입실료가 바뀌는 지점(예: 방배 3분기)은 두 값을 모두 들고 있다가 조회 시점의
+    // 달로 고른다. 하나만 저장하면 분기가 바뀔 때마다 다시 올려야 하고, 안 올리면 조용히 틀린다.
+    if(it.p1Alt && it.altMonths && it.altMonths.length && it.p1Alt !== it.p1){
+      price.p1Alt = it.p1Alt;
+      price.altMonths = it.altMonths;
+    }
+    const priceKey = JSON.stringify([price.p1, price.p2, price.new, price.ex, price.p1Alt || 0, price.altMonths || []]);
+    const key = it.b + '|' + it.r + '|' + priceKey;
+    if(!groups.has(key)) groups.set(key, Object.assign({ b: it.b, r: it.r, nums: [] }, price));
+    groups.get(key).nums.push(it.num);
 
-    const typeKey = b + '|' + r;
+    const typeKey = it.b + '|' + it.r;
     if(!conflicts.has(typeKey)) conflicts.set(typeKey, new Set());
     conflicts.get(typeKey).add(priceKey);
   });
@@ -6101,9 +6152,13 @@ function applyRoomPriceUpload(parsed){
   const numsCount = parsed.rooms.reduce((a, r)=> a + (r.nums || []).length, 0);
   showConfirm(
     `방 가격을 아래 내용으로 교체할까요?\n\n`
+      + (parsed.source ? `· 읽은 파일: ${parsed.source}\n` : '')
       + `· ${branches.size}개 지점 / ${parsed.rooms.length}개 타입 / 호실 ${numsCount}개\n`
       + `· 기존 ${before}개 타입은 이 내용으로 완전히 대체됩니다.\n`
-      + (parsed.warnings && parsed.warnings.length ? `\n확인 필요:\n${parsed.warnings.slice(0,5).join('\n')}\n` : '')
+      + (parsed.warnings && parsed.warnings.length
+          ? `\n확인 필요 ${parsed.warnings.length}건:\n${parsed.warnings.slice(0,8).join('\n')}\n`
+            + (parsed.warnings.length > 8 ? `… 외 ${parsed.warnings.length - 8}건\n` : '')
+          : '')
       + (parsed.skipped.length ? `\n제외되는 행 ${parsed.skipped.length}건:\n${parsed.skipped.slice(0,10).join('\n')}` : '')
       + `\n\n저장하면 대시보드와 연장 계산기 양쪽에 바로 반영됩니다.`,
     ()=>{
@@ -6118,17 +6173,276 @@ function applyRoomPriceUpload(parsed){
   );
 }
 
+/* ---- 지점정보 관리표(.xlsm) 그대로 올리기 ----
+   실무에서 쓰는 원본 관리 파일을 변환 없이 올릴 수 있게 한다. 이 파일은 시트 하나가 지점
+   하나이고, 시트 안이 다시 두 블록으로 나뉜다.
+     왼쪽  = 호실별 표 ("호수" / "방타입" / 가격 / "2인 추가금" / 1박 비용 ...)
+     오른쪽 = 방타입별 1박 요금 참조표 ("방타입" 열과 "… 1박 비용" 열이 짝을 이룸)
+   오산·강남 일원·구로는 왼쪽 1박 비용이 비어 있고 오른쪽 참조표에만 값이 있어서, 왼쪽이
+   비면 방타입으로 오른쪽에서 찾아온다. 열의 순서·개수가 시트마다 달라(같은 이름이 두 번
+   나오기도 한다) 위치를 세지 않고 이름으로 찾고, 두 번째 "방타입" 열을 좌우 경계로 삼는다. */
+const MGMT_SKIP_SHEETS = ['지점_목록', '호텔스테이_객실별인원', '청량리', '종로종각', '충무로'];
+// 기준으로 삼을 입실료 열이 지점마다 다르다(담당자 확인 사항). 키·값 모두 공백을 뺀 이름이다.
+const MGMT_PRICE_RULES = {
+  '마곡발산역':      { base: '가격' },
+  '잠실석촌고분역':   { base: '가격' },
+  '가산디지털독산역': { base: '가격' },
+  '방배이수역':      { base: '가격', alt: '3분기가격', altMonths: [7, 8, 9] },
+  '고려대안암역':    { base: '성수기가격' },
+  '강남일원':        { base: '변동가격' },
+  '구로':            { base: '초기세팅가격' }
+};
+
+// 관리표의 시트 이름을 대시보드에 등록된 지점명으로 맞춘다. 표기가 서로 달라
+// ("신대방삼거리역A" vs "먼슬리브 신대방삼거리역 A동") 도어락에서 쓰던 정규화를 재사용하되,
+// "성수"와 "성수역"처럼 한쪽이 다른 쪽에 포함되는 이름이 있어 정확히 일치하는 것을 먼저 본다.
+function resolveMgmtBranchName(sheetTitle){
+  const fallback = { name: '먼슬리브 ' + sheetTitle, matched: false };
+  const norm = normalizeForDoorlockBranchMatch(sheetTitle);
+  if(!norm) return fallback;
+  const names = (DB.branches || []).map(b=> b.name).filter(Boolean);
+  let hit = names.filter(n=> normalizeForDoorlockBranchMatch(n) === norm);
+  if(hit.length === 0){
+    hit = names.filter(n=>{
+      const x = normalizeForDoorlockBranchMatch(n);
+      return x && (x.includes(norm) || norm.includes(x));
+    });
+  }
+  return hit.length === 1 ? { name: hit[0], matched: true } : fallback;
+}
+
+function looksLikeManagementWorkbook(wb){
+  const names = wb.SheetNames || [];
+  if(names.indexOf('지점_목록') >= 0) return true;
+  if(names.length === 0) return false;
+  const head = (XLSX.utils.sheet_to_json(wb.Sheets[names[0]], { header:1, defval:'' })[0] || [])
+    .map(v=> String(v == null ? '' : v).replace(/\s+/g,''));
+  return head.indexOf('호수') >= 0 && head.indexOf('방타입') >= 0 && head.indexOf('지점') < 0;
+}
+
+// "4.8만/1박" -> 48000, "3.5만, 3.9만/1박" -> [35000, 39000](1인/2인),
+// "40,000 / 50,000" -> [40000, 50000], "950,000원" -> 950000.
+// "-"·"#REF!"·"약14.2㎡"처럼 금액이 아닌 값은 null. 열이 밀려 엉뚱한 칸을 읽었을 때 면적이
+// 가격으로 들어가는 것을 막기 위해 한글·영문이 섞인 값은 버린다.
+function parseMgmtMoney(v){
+  const s = cleanKeyLoose(v);
+  if(!s) return null;
+  const mans = s.match(/\d+(?:\.\d+)?\s*만/g);
+  if(mans){
+    const vals = mans.map(x=> Math.round(parseFloat(x) * 10000));
+    return vals.length === 1 ? vals[0] : vals;
+  }
+  if(!/\d/.test(s)) return null;
+  if(/[가-힣a-zA-Z]/.test(s.replace(/원/g, ''))) return null;
+  // "40,000 / 50,000"처럼 1인/2인 금액을 슬래시로 나눠 적은 칸. 쉼표는 자릿수 구분이라
+  // 슬래시만 기준으로 자르고, 1,000원 미만으로 읽히는 조각("/1박"의 1 등)은 버린다.
+  const parts = s.split('/').map(x=> Number(x.replace(/[^0-9.]/g, ''))).filter(n=> isFinite(n) && n >= 1000);
+  if(parts.length > 1) return parts.map(n=> Math.round(n));
+  const n = Number(s.replace(/[^0-9.]/g, ''));
+  return (isFinite(n) && n > 0) ? Math.round(n) : null;
+}
+
+// 관리표에 1박 금액이 아예 비어 있는 지점이 있다(오산의 신규 1박). 0원으로 덮어쓰면 연장
+// 계산기가 0원을 계산해버리므로, 그런 칸은 지금 원장에 있는 값을 그대로 유지한다.
+function mgmtNightFallbackMap(){
+  const map = new Map();
+  currentRoomPriceRows().rooms.forEach(r=>{
+    const key = normalizeForDoorlockBranchMatch(r.b) + '|' + mgmtTypeKey(r.r);
+    if(!map.has(key)) map.set(key, r);
+  });
+  return map;
+}
+// 같은 방타입을 관리표 안에서도 다르게 적어둔 곳이 있다("트리니티-파우더룸-더블침대" vs
+// "트리니티 -파우더룸-더블침대", "블레스 플러스" vs "블레스플러스"). 저장은 원래 표기
+// 그대로 하되, 찾을 때만 공백·하이픈을 지우고 맞춰본다.
+function mgmtTypeKey(s){ return cleanKeyLoose(s).replace(/[\s\-–—]/g, ''); }
+function mgmtFirst(v){ return Array.isArray(v) ? v[0] : v; }
+
+function parseManagementWorkbook(wb){
+  const nk = (s)=> String(s == null ? '' : s).replace(/\s+/g, '');
+  const items = [];
+  const skipped = [];
+  const warnings = [];
+  const sheetsUsed = [];
+  const unresolved = [];
+  const fallback = mgmtNightFallbackMap();
+  const kept = new Map();      // 지점 -> 관리표가 비어 기존 값을 유지한 호실 수
+
+  (wb.SheetNames || []).forEach(sheetName=>{
+    const title = String(sheetName).trim();
+    if(MGMT_SKIP_SHEETS.indexOf(title) >= 0) return;
+    let grid;
+    try{ grid = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header:1, defval:'' }); }
+    catch(e){ warnings.push(`${title} 시트를 읽지 못했습니다: ${(e && e.message) || e}`); return; }
+    if(!grid || grid.length < 2) return;
+    const hdr = (grid[0] || []).map(nk);
+    if(hdr.indexOf('호수') < 0 || hdr.indexOf('방타입') < 0) return;   // 지점 시트가 아님
+
+    const rule = MGMT_PRICE_RULES[nk(title)] || { base: '가격' };
+    const typeCols = [];
+    hdr.forEach((h, i)=>{ if(h === '방타입') typeCols.push(i); });
+    const leftEnd = typeCols.length > 1 ? typeCols[1] : hdr.length;
+    const findLeft = (name)=>{
+      const want = nk(name);
+      for(let i = 0; i < leftEnd; i++){ if(hdr[i] === want) return i; }
+      return -1;
+    };
+
+    const iBase = findLeft(rule.base);
+    if(iBase < 0){
+      warnings.push(`${title} 시트 — 기준 가격 열 "${rule.base}"을(를) 찾지 못해 건너뜁니다.`);
+      return;
+    }
+    const iRoom = findLeft('호수');
+    const iType = typeCols[0];
+    const iAlt = rule.alt ? findLeft(rule.alt) : -1;
+    const iAdd = findLeft('2인 추가금');
+    const iApplied = findLeft('2인 적용가');
+    const iNew = findLeft('신규 계약 1박 비용');
+    const iEx = findLeft('기존 계약 1박 비용');
+    const iOne = findLeft('1박 비용');   // 신규/기존 구분 없이 한 칸만 쓰는 지점(구로)
+
+    // 오른쪽 참조표: "방타입" 열 바로 뒤에 붙은 "… 1박 비용" 열이 그 표의 값이다.
+    const lookupNew = new Map(), lookupEx = new Map();
+    typeCols.slice(1).forEach(t=>{
+      let val = -1;
+      for(let j = t + 1; j < Math.min(t + 4, hdr.length); j++){
+        if(hdr[j] === '방타입') break;
+        if(hdr[j] && hdr[j].indexOf('1박') >= 0){ val = j; break; }
+      }
+      if(val < 0) return;
+      const target = (hdr[val].indexOf('기존') >= 0) ? lookupEx : lookupNew;
+      for(let r = 1; r < grid.length; r++){
+        const cells = grid[r] || [];
+        const name = mgmtTypeKey(cells[t]);
+        const price = parseMgmtMoney(cells[val]);
+        if(name && price != null && !target.has(name)) target.set(name, price);
+      }
+    });
+
+    const branch = resolveMgmtBranchName(title);
+    if(!branch.matched) unresolved.push(title);
+
+    let count = 0;
+    for(let r = 1; r < grid.length; r++){
+      const cells = grid[r] || [];
+      const roomRaw = cleanKeyLoose(cells[iRoom]);
+      if(!roomRaw || !/^\d/.test(roomRaw)) continue;      // 빈 줄·합계 줄
+      const roomNo = /^\d+(?:\.0+)?$/.test(roomRaw) ? (String(parseInt(roomRaw, 10)) + '호') : roomRaw;
+      const type = cleanKeyLoose(cells[iType]);
+      if(!type){ skipped.push(`[${title} ${roomNo}] 방타입이 비어 있음`); continue; }
+
+      const p1 = mgmtFirst(parseMgmtMoney(cells[iBase]));
+      if(p1 == null){ skipped.push(`[${title} ${roomNo}] "${rule.base}"이(가) 비어 있음`); continue; }
+
+      let p2 = (iApplied >= 0) ? mgmtFirst(parseMgmtMoney(cells[iApplied])) : null;
+      if(p2 == null && iAdd >= 0){
+        const add = mgmtFirst(parseMgmtMoney(cells[iAdd]));
+        if(add) p2 = p1 + add;
+      }
+
+      let nNew = (iNew >= 0) ? parseMgmtMoney(cells[iNew]) : null;
+      let nEx  = (iEx  >= 0) ? parseMgmtMoney(cells[iEx])  : null;
+      if(iOne >= 0){                                       // 구로: 신규·기존을 같은 값으로 쓴다
+        const one = parseMgmtMoney(cells[iOne]);
+        if(nNew == null) nNew = one;
+        if(nEx == null) nEx = one;
+      }
+      const typeKey = mgmtTypeKey(type);
+      if(nNew == null && lookupNew.has(typeKey)) nNew = lookupNew.get(typeKey);
+      if(nEx == null && lookupEx.has(typeKey)) nEx = lookupEx.get(typeKey);
+      if(nNew == null || nEx == null){
+        const prev = fallback.get(normalizeForDoorlockBranchMatch(branch.name) + '|' + typeKey);
+        if(prev){
+          if(nNew == null && prev.new){ nNew = prev.new; }
+          if(nEx == null && prev.ex){ nEx = prev.ex; }
+          if(nNew != null && nEx != null) kept.set(branch.name, (kept.get(branch.name) || 0) + 1);
+        }
+      }
+
+      const ex1 = mgmtFirst(nEx);
+      const ex2 = Array.isArray(nEx) ? nEx[1] : null;
+      items.push({
+        at: `[${title} ${roomNo}]`,
+        b: branch.name,
+        r: type,
+        num: roomNo,
+        p1,
+        p2,
+        new: mgmtFirst(nNew) || 0,
+        ex: (ex2 == null) ? (ex1 || 0) : [ex1 || 0, ex2],
+        p1Alt: (iAlt >= 0) ? mgmtFirst(parseMgmtMoney(cells[iAlt])) : null,
+        altMonths: rule.altMonths || []
+      });
+      count++;
+    }
+    if(count > 0) sheetsUsed.push(title);
+  });
+
+  if(items.length === 0){
+    return { error: '지점 시트를 찾지 못했습니다.\n"호수"와 "방타입" 열이 있는 시트가 하나 이상 있어야 합니다.' };
+  }
+
+  // 대시보드에 없는 지점명으로 저장되면 그 지점 방 카드에는 가격이 조용히 안 붙는다.
+  unresolved.forEach(t=>{
+    warnings.push(`${t} 시트 — 대시보드에서 같은 지점을 특정하지 못해 "먼슬리브 ${t}"으로 저장합니다.`);
+  });
+
+  kept.forEach((n, b)=>{
+    warnings.push(`${b} — ${n}개 호실은 관리표에 1박 금액이 비어 있어 기존에 등록된 금액을 그대로 유지합니다.`);
+  });
+
+  // 유지할 기존 값조차 없는 경우. 연장 계산기가 0원으로 계산하게 되므로 저장 전에 알려준다.
+  const gaps = new Map();
+  items.forEach(it=>{
+    const ex1 = Array.isArray(it.ex) ? it.ex[0] : it.ex;
+    if(it.new && ex1) return;
+    const d = gaps.get(it.b) || { n: 0, what: new Set() };
+    d.n++;
+    if(!it.new) d.what.add('신규 1박');
+    if(!ex1) d.what.add('기존 1박');
+    gaps.set(it.b, d);
+  });
+  gaps.forEach((d, b)=>{
+    warnings.push(`${b} — ${d.n}개 호실에 ${[...d.what].join('·')} 금액이 없습니다(관리표가 비어 있음). 0원으로 저장됩니다.`);
+  });
+
+  const odd = items.filter(it=>{
+    const vals = [it.new].concat(Array.isArray(it.ex) ? it.ex : [it.ex]);
+    return vals.some(v=> v && v % 100 !== 0);
+  });
+  if(odd.length > 0){
+    warnings.push(`1박 금액이 100원 단위로 떨어지지 않는 호실 ${odd.length}개(예: ${odd[0].b} ${odd[0].num} ${formatWon(odd[0].new)}). 관리표에 계산식 결과가 그대로 들어 있는 경우입니다.`);
+  }
+
+  const grouped = groupRoomPriceItems(items);
+  return {
+    rooms: grouped.rooms,
+    skipped: skipped.concat(grouped.skipped),
+    warnings: warnings.concat(grouped.warnings),
+    source: `지점정보 관리표 · ${sheetsUsed.length}개 지점 시트`
+  };
+}
+
 function handleRoomPriceExcelFile(file){
   if(typeof XLSX === 'undefined'){ showAlert('엑셀 라이브러리를 불러오지 못했습니다. 네트워크 연결을 확인해주세요.'); return; }
   const reader = new FileReader();
   reader.onload = (e)=>{
-    let grid;
+    let wb;
     try{
-      const wb = XLSX.read(new Uint8Array(e.target.result), { type:'array' });
-      grid = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header:1, defval:'' });
+      wb = XLSX.read(new Uint8Array(e.target.result), { type:'array' });
     }catch(err){ showAlert('엑셀 파일을 읽는 중 오류가 발생했습니다: ' + err.message); return; }
-    if(!grid || grid.length < 2){ showAlert('헤더 행과 데이터 행이 포함된 엑셀 파일을 업로드해주세요.'); return; }
-    const parsed = parseRoomPriceGrid(grid[0].map(v=> v==null?'':String(v)), grid.slice(1));
+
+    let parsed;
+    if(looksLikeManagementWorkbook(wb)){
+      // 지점정보 관리표 원본을 그대로 올린 경우
+      try{ parsed = parseManagementWorkbook(wb); }
+      catch(err){ showAlert('관리표를 읽는 중 오류가 발생했습니다: ' + ((err && err.message) || err)); return; }
+    }else{
+      const grid = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header:1, defval:'' });
+      if(!grid || grid.length < 2){ showAlert('헤더 행과 데이터 행이 포함된 엑셀 파일을 업로드해주세요.'); return; }
+      parsed = parseRoomPriceGrid(grid[0].map(v=> v==null?'':String(v)), grid.slice(1));
+    }
     if(parsed.error){ showAlert(parsed.error); return; }
     if(parsed.rooms.length === 0){
       showAlert('가져올 수 있는 행이 없습니다.' + (parsed.skipped.length ? `\n\n${parsed.skipped.slice(0,10).join('\n')}` : ''));
@@ -6161,6 +6475,14 @@ function ledgerRowsForBranch(branch){
   if(hit.length !== 1) return [];
   return rooms.filter(r=> r.b === hit[0]);
 }
+// 시기에 따라 입실료가 바뀌는 지점(방배 3분기 등)은 오늘이 몇 월인지로 값을 고른다.
+// 2인 입실료에는 시기별 값이 없어서 1인 기준만 갈아끼운다.
+function ledgerP1For(row, date){
+  if(!row) return 0;
+  if(!row.p1Alt || !Array.isArray(row.altMonths) || row.altMonths.length === 0) return row.p1 || 0;
+  const m = (date || new Date()).getMonth() + 1;
+  return row.altMonths.includes(m) ? row.p1Alt : (row.p1 || 0);
+}
 // 호실번호로 원장 행을 찾는다("201호"와 "201"을 같게 본다). 2인 거주 중이고 2인 입실료가
 // 있으면 그 값을, 아니면 1인 입실료를 쓴다.
 function roomLedgerPrice(room){
@@ -6171,7 +6493,7 @@ function roomLedgerPrice(room){
   if(!target) return null;
   const row = rows.find(r=> (r.nums || []).some(n=> normalizeRoomNo(String(n).replace(/호$/,'')) === target));
   if(!row) return null;
-  const amount = (roomHasDoubleOccupancy(room) && row.p2) ? row.p2 : row.p1;
+  const amount = (roomHasDoubleOccupancy(room) && row.p2) ? row.p2 : ledgerP1For(row);
   return amount ? amount : null;
 }
 function renderRoomPricePanel(){
@@ -6180,7 +6502,8 @@ function renderRoomPricePanel(){
   box.innerHTML = `<h3>방 가격 관리</h3>
     <div style="font-size:12px;color:var(--ink-soft);margin-bottom:12px;line-height:1.7;">
       이 대시보드와 <b>연장 계산기</b>가 같은 가격표를 사용합니다. 엑셀로 내려받아 수정한 뒤 다시 올리면 양쪽에 바로 반영됩니다.<br>
-      <b>호실 하나가 한 줄</b>입니다. 같은 지점·룸타입이면서 가격이 같은 호실들은 저장할 때 자동으로 묶입니다. 2인 입실료나 기존회원 1박(2인)이 없으면 비워두세요.
+      <b>호실 하나가 한 줄</b>입니다. 같은 지점·룸타입이면서 가격이 같은 호실들은 저장할 때 자동으로 묶입니다. 2인 입실료나 기존회원 1박(2인)이 없으면 비워두세요.<br>
+      <b>지점정보 관리표(.xlsm)</b>를 그대로 올려도 됩니다. 시트마다 기준 가격 열이 달라 지점별 규칙으로 읽습니다 &mdash; 마곡·잠실·가산은 <b>가격</b>, 고려대 안암역은 <b>성수기가격</b>, 강남 일원은 <b>변동가격</b>, 구로는 <b>초기 세팅 가격</b>(1박 비용은 신규·기존 동일), 방배 이수역은 <b>가격</b>과 <b>3분기 가격</b>을 함께 저장해 7~9월에만 3분기 가격을 씁니다. 종로종각·청량리·충무로 시트는 제외합니다.
     </div>`;
 
   const info = document.createElement('div');
@@ -6229,7 +6552,7 @@ function renderRoomPricePanel(){
   upBtn.textContent = '⬆ 가격표 업로드';
   const fileInput = document.createElement('input');
   fileInput.type = 'file';
-  fileInput.accept = '.xlsx,.xls';
+  fileInput.accept = '.xlsx,.xlsm,.xls';
   fileInput.style.display = 'none';
   upBtn.onclick = ()=> fileInput.click();
   fileInput.addEventListener('change', ()=>{
@@ -6251,8 +6574,13 @@ function renderRoomPricePanel(){
     rooms.forEach(r=>{
       const ex = Array.isArray(r.ex) ? `${formatWon(r.ex[0])} / ${formatWon(r.ex[1])}` : formatWon(r.ex || 0);
       const tr = document.createElement('tr');
+      // 시기별 입실료가 있는 방은 지금 적용되는 값을 굵게 보여준다(어느 쪽이 지금 값인지 헷갈리지 않게).
+      const nowP1 = ledgerP1For(r);
+      const p1Cell = r.p1Alt
+        ? `${esc(formatWon(nowP1))} <span style="font-size:11px;color:var(--ink-soft);">(${(r.altMonths||[]).join('·')}월 ${esc(formatWon(r.p1Alt))} / 그 외 ${esc(formatWon(r.p1 || 0))})</span>`
+        : esc(formatWon(r.p1 || 0));
       tr.innerHTML = `<td>${esc(r.b)}</td><td>${esc(r.r)}</td>`
-        + `<td>${esc(formatWon(r.p1 || 0))}</td>`
+        + `<td>${p1Cell}</td>`
         + `<td>${r.p2 ? esc(formatWon(r.p2)) : '<span style="color:var(--ink-soft);">-</span>'}</td>`
         + `<td>${esc(formatWon(r.new || 0))}</td>`
         + `<td>${esc(ex)}</td>`
@@ -6286,6 +6614,10 @@ const HANDOVER_NOTES = [
     'Firestore 보안 규칙은 이 저장소에 없다. Firebase 콘솔에서만 관리되므로, 새 컬렉션/문서를 추가하면 규칙도 콘솔에서 함께 추가해야 한다. 규칙을 빠뜨리면 권한 오류로 조용히 실패한다.',
     '도어락 붙여넣기 목록은 매번 기기 수가 다르다(실제로 96~179대까지 널뛴다 — 업체 페이지에서 보이는 만큼만 복사되는 것으로 보인다). 그래서 "지난 목록에 없던 기기 = 새로 끊긴 기기"로 판정하면 안 된다. 원래 1년 전부터 끊겨 있던 방이 신규로 잡힌다(잠실 311·313호 제보). 판정은 마지막 연결 시각이 지난 붙여넣기 날짜보다 나중인지로 한다.',
     '붙여넣기 파서(계약·도어락·예약)는 열 위치를 세지 않고 앵커 방식이다. 원본 표에서 복사하면 한 건이 여러 줄로 쪼개져 들어오기 때문에, 고정된 패턴(계약일, 시리얼 번호, 숙박 기간 줄)을 기준점으로 잡고 그 앞뒤에서 값을 찾는다.',
+    '방 가격은 monthliv/roomPrices 문서 하나에 모아두고 대시보드와 연장 계산기가 함께 읽는다(계산기는 SDK 없이 Firestore REST로 읽으므로 이 문서만 공개 읽기 권한이 필요하다). 업로드는 두 가지 형식을 받는다 — 대시보드가 내려준 가격표(호실 1개 = 1행), 그리고 실무에서 쓰는 지점정보_관리표.xlsm 원본. 관리표는 시트마다 기준 가격 열 이름이 다르고(가격/성수기가격/변동가격/초기 세팅 가격) 같은 헤더가 한 시트에 두 번 나오므로, 열 위치를 세지 말고 이름으로 찾을 것. 두 번째 "방타입" 열이 호실별 표와 방타입별 1박 요금 참조표의 경계다.',
+    '관리표에 1박 금액이 비어 있는 지점이 있다(오산의 신규 1박). 빈 칸을 0원으로 덮어쓰면 연장 계산기가 0원을 계산하므로, 업로드 시 그런 칸은 원장에 이미 있는 금액을 유지한다. 이 안전장치를 제거하지 말 것.',
+    '같은 지점·룸타입인데 호실마다 가격이 다른 곳이 있다(구로 트리니티B는 3가지, 고려대 206호). 그래서 연장 계산기는 룸타입이 아니라 선택한 호실이 들어있는 행에서 가격을 가져온다. 타입만으로 find 하면 나머지 가격대의 호실이 드롭다운에서 사라진다.',
+    '방배 이수역은 7~9월 입실료가 다르다. 분기마다 다시 올리는 것을 잊기 쉬워서, 원장에 평시가와 성수기가를 함께 저장하고 조회 시점의 달로 고른다(p1Alt / altMonths). 시기별 가격이 있는 지점이 늘면 관리표 규칙표(MGMT_PRICE_RULES)에 alt 열만 추가하면 된다.',
     '관제센터 특성상 탭을 며칠씩 켜둔다. 그래서 실시간 동기화(onSnapshot)와 저장 시 충돌 검사가 들어가 있고, 날짜가 바뀌면 세션을 초기화한다. "고쳤는데 반영이 안 된다"는 제보는 대부분 오래된 탭이 옛 코드를 돌리고 있는 경우다.',
     '입실자 상태(이용중/입실확정 등)는 계약이 아니라 입실자 레코드에서 계산한다. 반대로 타임라인·계약만료는 계약 기준이라, 계약 데이터가 없는 외부 채널 예약(엔코스테이·리브애니웨어)이 누락되지 않도록 별도 처리가 들어가 있다.',
     '방 가격은 Firestore 문서 하나(monthliv/roomPrices)가 원장이고, 운영 대시보드와 연장 계산기(Calculator/Extend.html)가 같은 값을 읽는다. 관리자 설정 > 방 가격 관리에서 엑셀로 올리면 양쪽에 바로 반영된다. 계산기 HTML 안의 ROOMS 배열은 원장을 못 읽었을 때 쓰는 예비값일 뿐이니 거기서 가격을 고치지 말 것 — 고쳐도 대시보드와 어긋나기만 한다. 계산기는 SDK 없이 REST로 문서 1건만 읽는다(읽기 비용 무시할 수준).',
