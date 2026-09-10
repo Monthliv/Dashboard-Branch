@@ -245,6 +245,7 @@
   .rc-title{ display:flex; align-items:baseline; gap:6px; min-width:0; flex:1; }
   .rc-title .roomno{ font-family:'JetBrains Mono',monospace; font-weight:700; font-size:15px; white-space:nowrap; }
   .rc-title .roomtype{ font-size:11.5px; color:var(--ink-soft); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .rc-title .room-price{ font-size:11.5px; color:var(--accent-ink); font-weight:700; white-space:nowrap; }
   .rc-door-lock{
     border:none; background:none; padding:2px; margin:0; flex:none; align-self:center;
     display:inline-flex; color:var(--ink-soft); border-radius:5px; cursor:default;
@@ -2560,8 +2561,12 @@ function renderRoomCard(room, sectionStatus){
   const maintDateForBadge = room.maintenanceDate || roomUpcomingLeaveDate(room);
   const maintDateSuffix = maintDateForBadge ? ` · ${maintDateForBadge.slice(5)}` : '';
   const reserveMeta = statusMeta('예약');
-  // 방 가격은 이 대시보드에서 관리하지 않기로 해서 방 카드에 표시하지 않는다.
-  // (typePrices 값 자체는 지우지 않았고, 엑셀 일괄 업데이트에서는 계속 다룬다)
+  // 가격은 방 가격 원장(monthliv/roomPrices)에서 찾아 보여준다. 원장에 없는 방이거나 지점이
+  // 하나로 특정되지 않으면 아무것도 표시하지 않는다 — 틀린 가격을 보여주지 않기 위해서다.
+  const ledgerPrice = roomLedgerPrice(room);
+  const priceHtml = ledgerPrice
+    ? `<span class="room-price" title="방 가격 원장 기준${roomHasDoubleOccupancy(room) ? ' · 2인 거주' : ''}">${esc(formatWon(ledgerPrice))}</span>`
+    : '';
   const headerRight = `
     <span class="badge" style="background:${meta.bg};color:${meta.fg}">${effStatus}</span>
     ${maintBadgeHtml(roomCardMaintKind(room), maintDateSuffix)}
@@ -2572,7 +2577,7 @@ function renderRoomCard(room, sectionStatus){
   header.className = 'rc-header';
   header.innerHTML = `
     <div class="rc-header-top">
-      <div class="rc-title"><span class="roomno">${esc(room.number)}</span><span class="roomtype">${esc(room.type)}</span></div>
+      <div class="rc-title"><span class="roomno">${esc(room.number)}</span><span class="roomtype">${esc(room.type)}</span>${priceHtml}</div>
     </div>
     <div class="rc-header-badges">${headerRight}</div>
   `;
@@ -6001,6 +6006,41 @@ function handleRoomPriceExcelFile(file){
   reader.readAsArrayBuffer(file);
 }
 
+// 방 카드에 보여줄 가격을 원장에서 찾는다.
+// 지점명 표기가 두 시스템에서 다르다("잠실" vs "먼슬리브 잠실 석촌고분역")이라 도어락에서
+// 쓰던 정규화(공백·"먼슬리브"·"레지던스" 등 제거)를 그대로 재사용한다.
+// 다만 포함 관계만으로 고르면 "성수"와 "성수역"처럼 실제로 다른 지점이 함께 걸린다(가격도
+// 95만/105만으로 다르다). 후보가 하나로 좁혀지지 않으면 틀린 가격을 보여주느니 아무것도
+// 보여주지 않는다.
+function ledgerRowsForBranch(branch){
+  if(!branch) return [];
+  const bn = normalizeForDoorlockBranchMatch(branch.name);
+  if(!bn) return [];
+  const rooms = ROOM_PRICES.rooms || [];
+  const names = [...new Set(rooms.map(r=> r.b))];
+  let hit = names.filter(n=> normalizeForDoorlockBranchMatch(n) === bn);
+  if(hit.length === 0){
+    hit = names.filter(n=>{
+      const x = normalizeForDoorlockBranchMatch(n);
+      return x && (x.includes(bn) || bn.includes(x));
+    });
+  }
+  if(hit.length !== 1) return [];
+  return rooms.filter(r=> r.b === hit[0]);
+}
+// 호실번호로 원장 행을 찾는다("201호"와 "201"을 같게 본다). 2인 거주 중이고 2인 입실료가
+// 있으면 그 값을, 아니면 1인 입실료를 쓴다.
+function roomLedgerPrice(room){
+  const branch = DB.branches.find(b=> b.id === room.branchId);
+  const rows = ledgerRowsForBranch(branch);
+  if(rows.length === 0) return null;
+  const target = normalizeRoomNo(String(room.number || '').replace(/호$/,''));
+  if(!target) return null;
+  const row = rows.find(r=> (r.nums || []).some(n=> normalizeRoomNo(String(n).replace(/호$/,'')) === target));
+  if(!row) return null;
+  const amount = (roomHasDoubleOccupancy(room) && row.p2) ? row.p2 : row.p1;
+  return amount ? amount : null;
+}
 function renderRoomPricePanel(){
   const box = document.createElement('div');
   box.className = 'stat-section';
@@ -6022,6 +6062,25 @@ function renderRoomPricePanel(){
       + (ROOM_PRICES.updatedAt ? ` · 최종 수정 ${new Date(ROOM_PRICES.updatedAt).toLocaleString('ko-KR')}` : '')
       + (ROOM_PRICES.updatedBy ? ` (${ROOM_PRICES.updatedBy})` : '');
   box.appendChild(info);
+
+  // 방 카드에 가격이 뜨려면 원장의 지점·호실이 대시보드와 맞아떨어져야 한다. 안 맞으면
+  // 그 방은 조용히 가격이 비므로, 몇 개가 연결됐는지 여기서 알려준다.
+  if(rooms.length > 0 && (DB.rooms || []).length > 0){
+    const total = DB.rooms.length;
+    const matched = DB.rooms.filter(r=> roomLedgerPrice(r)).length;
+    const unmatchedBranches = allowedBranches()
+      .filter(b=> DB.rooms.some(r=> r.branchId===b.id) && ledgerRowsForBranch(b).length === 0)
+      .map(b=> branchLabel(b));
+    const m = document.createElement('div');
+    const ok = matched === total;
+    m.style.cssText = 'font-size:12.5px;margin-bottom:12px;line-height:1.7;'
+      + (ok ? 'color:var(--ink-soft);' : 'color:var(--st-hold);font-weight:600;');
+    m.textContent = ok
+      ? `방 카드 가격 연결: ${matched}/${total}개 호실`
+      : `방 카드 가격 연결: ${matched}/${total}개 호실 — 나머지는 원장에 없어 가격이 표시되지 않습니다.`
+        + (unmatchedBranches.length ? ` (지점 자체가 안 잡힘: ${unmatchedBranches.join(', ')})` : '');
+    box.appendChild(m);
+  }
 
   const btnRow = document.createElement('div');
   btnRow.style.cssText = 'display:flex; gap:8px; flex-wrap:wrap;';
