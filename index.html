@@ -411,6 +411,30 @@
   .stat-card .lbl{ font-size:12px; color:var(--ink-soft); margin-top:2px; }
   .stat-section{ background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px; margin-bottom:16px; }
   .stat-section h3{ margin:0 0 12px; font-size:13px; }
+  /* 관리자 설정 도움말: 영역별 설명·주의사항을 한 페이지(모달)에 모은다 */
+  .admin-help-bar{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
+  .admin-help-bar .admin-help-lead{ font-size:12.5px; color:var(--ink-soft); }
+  .help-icon{ display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; margin-left:6px; padding:0; border-radius:50%; border:1px solid var(--line); background:var(--panel); color:var(--ink-soft); font-size:11px; font-weight:700; line-height:1; cursor:pointer; vertical-align:1px; }
+  .help-icon:hover{ color:var(--accent-ink); border-color:var(--accent); }
+  .modal-box.help-box{ max-width:760px; max-height:86vh; overflow:auto; padding:0; }
+  .help-head{ position:sticky; top:0; z-index:1; background:var(--panel); display:flex; align-items:center; justify-content:space-between; gap:12px; padding:16px 20px 12px; border-bottom:1px solid var(--line); }
+  .help-head h2{ margin:0; font-size:16px; }
+  .help-body{ padding:4px 20px 20px; }
+  .help-toc{ display:flex; flex-wrap:wrap; gap:6px; padding:12px 0 6px; }
+  .help-toc button{ font:inherit; font-size:12px; padding:4px 10px; border:1px solid var(--line); border-radius:999px; background:var(--panel); color:var(--ink-soft); cursor:pointer; }
+  .help-toc button:hover{ color:var(--accent-ink); border-color:var(--accent); }
+  .help-sec{ padding:16px 0; border-bottom:1px solid var(--line); scroll-margin-top:64px; }
+  .help-sec:last-child{ border-bottom:none; }
+  .help-sec h3{ margin:0 0 6px; font-size:14.5px; }
+  .help-sec p{ margin:0 0 8px; font-size:13px; line-height:1.7; color:var(--ink); }
+  .help-sec h4{ margin:10px 0 4px; font-size:12.5px; color:var(--ink-soft); }
+  .help-list{ margin:0; padding-left:18px; }
+  .help-list li{ font-size:13px; line-height:1.7; margin:2px 0; }
+  .help-list b{ color:var(--accent-ink); }
+  .help-caution{ margin-top:10px; padding:10px 12px; border-radius:8px; background:var(--st-hold-bg); border-left:3px solid var(--st-hold); }
+  .help-caution h4{ margin:0 0 4px; color:var(--st-hold); }
+  .help-sec.flash{ animation:help-flash 1.6s ease; }
+  @keyframes help-flash{ 0%{ background:var(--accent-soft); } 100%{ background:transparent; } }
   .cleaning-cards-grid{ display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
   .upcoming-cards-grid{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; margin-bottom:16px; }
   .upcoming-days-toolbar{ display:flex; align-items:center; gap:8px; margin-bottom:10px; }
@@ -1015,7 +1039,7 @@ let lastKnownUpdatedAt = null;
 // 보인다" 같은 문제는 화면만 봐서는 캐시를 쓴 건지, 서버에서 0건을 받은 건지, 권한 오류로
 // 실패한 건지 구분이 안 돼서 진단이 계속 헛돌았다. 관리자 설정의 "데이터 로딩 상태"에서
 // 그대로 보여준다.
-const APP_BUILD = '2026-09-11-c';
+const APP_BUILD = '2026-09-11-d';
 let LOAD_DIAG = {
   contracts: { count: 0, source: '아직 불러오지 않음', error: '' },
   history:   { count: 0, source: '아직 불러오지 않음', error: '' },
@@ -3969,13 +3993,14 @@ function findSupersedingRefundContract(c){
 // 대상으로 삼는 이유: 결제금액이 다르면 계약일만 고친 게 아니라 실제로 다른 결제 건일 수 있어서
 // (예: 추가 결제) 함부로 취소선 처리하면 안 되기 때문이다. findSupersedingRefundContract와
 // 달리 이건 "환불" 태그와 무관하게, 순수 재등록으로 인한 계약일 차이만 다룬다.
-function findSupersedingDateEditContract(c){
+function findSupersedingDateEditContract(c, pool){
+  // pool: 비교 대상 목록(기본은 전체 계약). 중복 정리에서 이미 지울 계약을 빼고 판정할 때 넘긴다.
   const period = String(c.contractPeriod||'').trim();
   const name = cleanKeyLoose(c.resident || c.contractor);
   if(!period || !name) return null;
   const phone = cleanKeyLoose(c.contractorPhone);
   const amount = String(c.paymentAmount||'').trim();
-  return DB.contracts.find(other=>
+  return (pool || DB.contracts).find(other=>
     other.id !== c.id &&
     other.roomId === c.roomId &&
     String(other.contractPeriod||'').trim() === period &&
@@ -3994,13 +4019,14 @@ function findSupersedingDateEditContract(c){
 // 다루는데, 결제구분과 무관하게 계약기간 정정 전체를 같은 방식으로 처리해야 한다. 계약일이
 // 같으므로 등록 시각(importedAt)으로만 최신 여부를 가른다 — findSupersedingDateEditContract
 // 처럼 결제금액까지 같아야 대상으로 삼는다(결제금액이 다르면 실제로 다른 결제 건일 수 있다).
-function findSupersedingPeriodEditContract(c){
+function findSupersedingPeriodEditContract(c, pool){
+  // pool: 비교 대상 목록(기본은 전체 계약). 중복 정리에서 이미 지울 계약을 빼고 판정할 때 넘긴다.
   const name = cleanKeyLoose(c.resident || c.contractor);
   if(!name || !c.contractDate || !c.importedAt) return null;
   const phone = cleanKeyLoose(c.contractorPhone);
   const amount = String(c.paymentAmount||'').trim();
   const period = String(c.contractPeriod||'').trim();
-  return DB.contracts.find(other=>
+  return (pool || DB.contracts).find(other=>
     other.id !== c.id &&
     other.roomId === c.roomId &&
     (other.contractDate || '') === c.contractDate &&
@@ -4092,48 +4118,6 @@ const BRANCH_NAME_ALIASES = {
 function cleanKeyLoose(s){ return String(s||'').replace(/[\u200B-\u200D\uFEFF]/g,'').trim(); }
 function normalizeRoomNo(s){ const c = cleanKeyLoose(s).toLowerCase(); return /^\d+$/.test(c) ? String(parseInt(c,10)) : c; }
 function roomNumberPrefix(s){ const m = cleanKeyLoose(s).match(/^\d+/); return m ? String(parseInt(m[0],10)) : null; }
-
-function renderBranchRoomBulkUpdatePanel(){
-  const box = document.createElement('div');
-  box.className = 'stat-section';
-  box.innerHTML = `
-    <h3>지점/호실 관리 엑셀 일괄 업데이트</h3>
-    <div style="font-size:12px;color:var(--ink-soft);margin-bottom:12px;">
-      "지점정보" · "타입별가격" · "호실정보" 3개 시트로 구성됩니다. 지점명을 기준으로 지점/호실 정보를 일괄 업데이트하며, 이미 등록된
-      지점·호실이면 입력된 값으로 정보를 덮어쓰고(빈 칸은 기존 값을 그대로 유지), 없으면 새로 만듭니다.<br>
-      지점정보 필수 항목: 지점명 / 지점단축명. 호실정보 필수 항목: 지점명 / 호실번호 / 타입 / 인실구분.
-      방 가격은 호실별이 아니라 타입별가격 시트에서 지점·타입별로 관리합니다(같은 지점·같은 타입 호실은 모두 같은 가격).
-    </div>
-  `;
-  const btnRow = document.createElement('div');
-  btnRow.style.cssText = 'display:flex; gap:10px; align-items:center; flex-wrap:wrap;';
-  const templateBtn = document.createElement('button');
-  templateBtn.className = 'btn';
-  templateBtn.textContent = '⬇ 양식 다운로드';
-  templateBtn.onclick = downloadBranchRoomUpdateTemplate;
-  const downloadCurrentBtn = document.createElement('button');
-  downloadCurrentBtn.className = 'btn';
-  downloadCurrentBtn.textContent = '⬇ 현재 데이터 다운로드';
-  downloadCurrentBtn.title = '현재 등록된 지점/호실 정보를 엑셀로 다운로드 (수정 후 다시 업로드해 일괄 반영할 수 있습니다)';
-  downloadCurrentBtn.onclick = downloadBranchRoomCurrentData;
-  const uploadBtn = document.createElement('button');
-  uploadBtn.className = 'btn primary';
-  uploadBtn.textContent = '⬆ 엑셀 업로드';
-  const fileInput = document.createElement('input');
-  fileInput.type = 'file';
-  fileInput.accept = '.xlsx,.xls';
-  fileInput.style.display = 'none';
-  uploadBtn.onclick = ()=> fileInput.click();
-  fileInput.addEventListener('change', ()=>{
-    if(fileInput.files && fileInput.files[0]){
-      handleBranchRoomBulkUpdateFile(fileInput.files[0]);
-      fileInput.value = '';
-    }
-  });
-  btnRow.appendChild(templateBtn); btnRow.appendChild(downloadCurrentBtn); btnRow.appendChild(uploadBtn); btnRow.appendChild(fileInput);
-  box.appendChild(btnRow);
-  return box;
-}
 
 function downloadBranchRoomUpdateTemplate(){
   if(typeof XLSX === 'undefined'){ showAlert('엑셀 라이브러리를 불러오지 못했습니다. 네트워크 연결을 확인해주세요.'); return; }
@@ -4402,13 +4386,7 @@ const CONTRACT_FIELD_BY_HEADER = {
 function renderContractManagePanel(){
   const box = document.createElement('div');
   box.className = 'stat-section';
-  box.innerHTML = `<h3>계약관리</h3>
-    <div style="font-size:12px;color:var(--ink-soft);margin-bottom:12px;">
-      계약내용 / 계약일 / 계약기간 / 고시원 명 / 방이름 / 계약자 / 계약자 연락처 / 입실자 / 입실료 / 결제금액 / 계약구분 / 결제구분 / 보증금 / 보증금 안내
-      순서의 표를 텍스트로 붙여넣거나, 같은 형식의 엑셀 파일을 업로드하면 고시원 명·방이름으로 지점·호실을 찾아 계약 이력으로 저장합니다.
-      각 호실 카드의 "계약현황" 버튼에서 확인할 수 있습니다.<br>
-      빈 호실이면 계약일이 가장 최신인 건을 기준으로 새 입실자 정보(이름·연락처·입실일·퇴실일)를 자동으로 채워줍니다. 이미 입실자가 있는 호실은 입실자 정보는 그대로 두고 계약 이력만 저장하며, 최신 계약의 종료일과 입실자의 퇴실예정일이 다르면 "계약현황" 버튼에 하이라이트로 표시됩니다.
-    </div>`;
+  box.innerHTML = `<h3>계약관리</h3>`;
   const btnRow = document.createElement('div');
   btnRow.style.cssText = 'display:flex; gap:8px; align-items:center; flex-wrap:wrap;';
 
@@ -4437,96 +4415,72 @@ function renderContractManagePanel(){
     }
   });
 
+  // 중복 정리는 예전에 기준별 버튼 셋이었는데, 담당자 요청으로 하나로 합쳤다(dedupeAllContracts 참고).
   const dedupeBtn = document.createElement('button');
   dedupeBtn.className = 'btn danger';
   dedupeBtn.textContent = '중복 계약 정리';
-  dedupeBtn.title = '지점·호실·계약일·계약자 등 모든 항목이 완전히 동일한 중복 계약 이력을 찾아 하나만 남기고 삭제합니다';
-  dedupeBtn.onclick = dedupeContracts;
+  dedupeBtn.title = '완전히 같은 계약, 계약일만 다르게 다시 등록된 계약, 계약기간만 다르게 다시 등록된 계약을 한 번에 찾아 각각 최신 1건만 남기고 삭제합니다';
+  dedupeBtn.onclick = dedupeAllContracts;
 
-  const dedupeDateEditBtn = document.createElement('button');
-  dedupeDateEditBtn.className = 'btn danger';
-  dedupeDateEditBtn.textContent = '계약일 정정 중복 정리';
-  dedupeDateEditBtn.title = '계약기간·계약자·입실자·연락처·결제금액은 같고 계약일만 다르게 재등록된 계약(계약현황에서 취소선으로 표시되는 것과 같은 기준)을 찾아, 계약일이 가장 늦은 건만 남기고 나머지를 삭제합니다';
-  dedupeDateEditBtn.onclick = dedupeDateEditContracts;
-
-  const dedupePeriodEditBtn = document.createElement('button');
-  dedupePeriodEditBtn.className = 'btn danger';
-  dedupePeriodEditBtn.textContent = '계약기간 정정 중복 정리';
-  dedupePeriodEditBtn.title = '계약일·계약자·입실자·연락처·결제금액은 같고 계약기간만 다르게 재등록된 계약(계약현황에서 취소선으로 표시되는 것과 같은 기준. 어드민에서 입실자 날짜를 바꿔 계약이 수정된 경우 등)을 찾아, 나중에 등록된 건만 남기고 나머지를 삭제합니다';
-  dedupePeriodEditBtn.onclick = dedupePeriodEditContracts;
-
-  btnRow.appendChild(pasteBtn); btnRow.appendChild(templateBtn); btnRow.appendChild(uploadBtn); btnRow.appendChild(fileInput); btnRow.appendChild(dedupeBtn); btnRow.appendChild(dedupeDateEditBtn); btnRow.appendChild(dedupePeriodEditBtn);
+  btnRow.appendChild(pasteBtn); btnRow.appendChild(templateBtn); btnRow.appendChild(uploadBtn); btnRow.appendChild(fileInput); btnRow.appendChild(dedupeBtn);
   box.appendChild(btnRow);
   box.appendChild(el('div', null, `현재 저장된 계약 이력: ${DB.contracts.length}건`, 'font-size:11.5px;color:var(--ink-soft);margin-top:8px;'));
   return box;
 }
 
-function dedupeContracts(){
+// 중복 계약 정리. 예전에는 기준별 버튼이 셋이었다(완전 동일 / 계약일만 정정 / 계약기간만 정정).
+// 담당자 요청으로 하나로 합쳤다. 세 기준은 다음과 같다.
+//  1) 완전 동일: contractSignature가 같은 계약 — 먼저 등록된 1건만 남긴다.
+//  2) 계약일 정정: 계약기간·계약자·입실자·연락처·결제금액은 같고 계약일만 다름 — 계약현황에서
+//     취소선으로 표시하는 것과 같은 기준(findSupersedingDateEditContract). 계약일이 가장 늦은 건을 남긴다.
+//  3) 계약기간 정정: 계약일·계약자·입실자·연락처·결제금액은 같고 계약기간만 다름 — 어드민에서
+//     입실자 날짜를 바꾸면 기존 계약 자체가 수정되는 방식이라 재붙여넣기 때마다 쌓인다
+//     (findSupersedingPeriodEditContract, 가산독산 409호 등). 나중에 등록된 건을 남긴다.
+// 세 기준을 따로 판정해 합치면 서로를 근거로 한 묶음을 통째로 지울 수 있다(예: 완전히 같은
+// A·A′ 사이에 계약기간만 고친 C가 끼어 등록되면 A는 C 때문에, C는 A′ 때문에, A′는 A 때문에 지워진다).
+// 그래서 차례로 적용하되, 앞 단계에서 지울 계약은 빼고(pool) 다음 단계를 판정한다.
+function planContractDedupe(contracts){
+  const removed = new Set();
+  const exact = [];
   const seen = new Set();
-  const deduped = [];
-  const removedContracts = [];
-  DB.contracts.forEach(c=>{
+  contracts.forEach(c=>{
     const sig = contractSignature(c);
-    if(seen.has(sig)){ removedContracts.push(c); return; }
+    if(seen.has(sig)){ exact.push(c); removed.add(c.id); return; }
     seen.add(sig);
-    deduped.push(c);
   });
-  if(removedContracts.length===0){
-    showAlert('중복된 계약 이력이 없습니다.');
-    return;
-  }
-  showConfirm(`완전히 동일한 중복 계약 이력 ${removedContracts.length}건을 찾았습니다. 각 그룹에서 1건만 남기고 삭제할까요?`, ()=>{
-    DB.contracts = deduped;
-    batchDeleteDocs(CONTRACTS_COL, removedContracts.map(c=>c.id)).catch(e=> console.error('중복 계약 삭제 실패:', e));
-    refreshContractsCache();
-    logChange(`중복 계약 이력 정리: ${removedContracts.length}건 삭제`);
-    scheduleSave(); render();
-    showAlert(`중복 계약 이력 ${removedContracts.length}건을 삭제했습니다.`);
-  });
+  const pool1 = contracts.filter(c=> !removed.has(c.id));
+  const dateEdit = pool1.filter(c=> !!findSupersedingDateEditContract(c, pool1));
+  dateEdit.forEach(c=> removed.add(c.id));
+  const pool2 = contracts.filter(c=> !removed.has(c.id));
+  const periodEdit = pool2.filter(c=> !!findSupersedingPeriodEditContract(c, pool2));
+  periodEdit.forEach(c=> removed.add(c.id));
+  return { exact, dateEdit, periodEdit, removedIds: removed };
 }
 
-// dedupeContracts()(contractSignature 기준 — 계약일까지 완전히 같아야 중복)와 달리, 계약일만
-// 정정해서 다시 등록/재업로드한 경우(계약기간·계약자·입실자·연락처·결제금액은 같고 계약일만
-// 다름)를 정리한다. 판단 기준은 계약현황 모달에서 취소선으로 표시하는 것과 완전히 같다
-// (findSupersedingDateEditContract) — 화면에서 취소선으로 걸러지던 이전 계약들을 실제로
-// 삭제해, 계약일이 가장 늦은 한 건만 남긴다. 이미 등록되어 있던 계약도 이 버튼 한 번으로
-// 전체 지점·호실을 대상으로 한꺼번에 정리된다.
-function dedupeDateEditContracts(){
-  const removedContracts = DB.contracts.filter(c=> !!findSupersedingDateEditContract(c));
-  if(removedContracts.length===0){
-    showAlert('계약일만 다르게 재등록된 중복 계약이 없습니다.');
+function dedupeAllContracts(){
+  const plan = planContractDedupe(DB.contracts);
+  const total = plan.removedIds.size;
+  if(total === 0){
+    showAlert('정리할 중복 계약이 없습니다.');
     return;
   }
-  const removedIds = new Set(removedContracts.map(c=>c.id));
-  showConfirm(`계약기간·계약자·입실자·연락처·결제금액은 같고 계약일만 다르게 재등록된 중복 계약 ${removedContracts.length}건을 찾았습니다. 계약일이 가장 늦은 건만 남기고 나머지를 삭제할까요?`, ()=>{
-    DB.contracts = DB.contracts.filter(c=> !removedIds.has(c.id));
-    batchDeleteDocs(CONTRACTS_COL, [...removedIds]).catch(e=> console.error('계약일 정정 중복 계약 삭제 실패:', e));
+  const msg = [
+    `중복 계약 이력 ${total}건을 찾았습니다.`,
+    '',
+    `· 완전히 같은 계약: ${plan.exact.length}건`,
+    `· 계약일만 다르게 다시 등록된 계약: ${plan.dateEdit.length}건 (계약일이 가장 늦은 건만 남김)`,
+    `· 계약기간만 다르게 다시 등록된 계약: ${plan.periodEdit.length}건 (나중에 등록된 건만 남김)`,
+    '',
+    '각각 최신 1건만 남기고 나머지를 삭제할까요? 삭제한 계약 이력은 되돌릴 수 없습니다.'
+  ].join('\n');
+  showConfirm(msg, ()=>{
+    const ids = [...plan.removedIds];
+    DB.contracts = DB.contracts.filter(c=> !plan.removedIds.has(c.id));
+    batchDeleteDocs(CONTRACTS_COL, ids).catch(e=> console.error('중복 계약 삭제 실패:', e));
     refreshContractsCache();
-    logChange(`계약일 정정 중복 계약 정리: ${removedContracts.length}건 삭제`);
+    logChange(`중복 계약 정리: ${total}건 삭제 (완전 동일 ${plan.exact.length} · 계약일 정정 ${plan.dateEdit.length} · 계약기간 정정 ${plan.periodEdit.length})`);
     scheduleSave(); render();
-    showAlert(`계약일 정정으로 대체된 중복 계약 ${removedContracts.length}건을 삭제했습니다.`);
-  });
-}
-
-// dedupeDateEditContracts()와 짝을 이루는 반대 케이스: 계약일·계약자·입실자·연락처·결제금액은
-// 같고 계약기간만 다르게 재등록된 계약을 정리한다(findSupersedingPeriodEditContract). 어드민
-// 에서 입실자가 날짜를 바꾸면 계약일은 그대로 두고 기존 계약 자체를 수정하는 방식으로 운영되기
-// 때문에, 그 수정 내역을 다시 붙여넣거나 업로드할 때마다 계약일은 같고 계약기간만 다른 중복이
-// 쌓인다(가산독산 409호 등에서 보고됨). 나중에 등록된 건만 남긴다.
-function dedupePeriodEditContracts(){
-  const removedContracts = DB.contracts.filter(c=> !!findSupersedingPeriodEditContract(c));
-  if(removedContracts.length===0){
-    showAlert('계약기간만 다르게 재등록된 중복 계약이 없습니다.');
-    return;
-  }
-  const removedIds = new Set(removedContracts.map(c=>c.id));
-  showConfirm(`계약일·계약자·입실자·연락처·결제금액은 같고 계약기간만 다르게 재등록된 중복 계약 ${removedContracts.length}건을 찾았습니다. 나중에 등록된 건만 남기고 나머지를 삭제할까요?`, ()=>{
-    DB.contracts = DB.contracts.filter(c=> !removedIds.has(c.id));
-    batchDeleteDocs(CONTRACTS_COL, [...removedIds]).catch(e=> console.error('계약기간 정정 중복 계약 삭제 실패:', e));
-    refreshContractsCache();
-    logChange(`계약기간 정정 중복 계약 정리: ${removedContracts.length}건 삭제`);
-    scheduleSave(); render();
-    showAlert(`계약기간 정정으로 대체된 중복 계약 ${removedContracts.length}건을 삭제했습니다.`);
+    showAlert(`중복 계약 이력 ${total}건을 삭제했습니다.`);
   });
 }
 
@@ -5365,6 +5319,8 @@ function renderUserManagePanel(){
 
 const CHANGELOG_PAGE_SIZE = 10;
 const CHANGELOG_RECENT_LIMIT = 100;
+// 기간 조회 한 번에 읽는 최대 건수. 무료 요금제 일일 읽기 한도(5만 건)를 지키기 위한 상한이다.
+const CHANGELOG_RANGE_LIMIT = 1000;
 // 변경 로그 timestamp는 writeChangeLog()에서 new Date().toISOString() (=UTC)으로 저장한다.
 // 저장 형식을 UTC로 유지해야 Firestore의 문자열 정렬(orderBy 'timestamp')이 실제 시간 순서와
 // 그대로 일치하므로, 저장은 UTC 그대로 두고 "화면에 보여줄 때"만 한국시간(KST, UTC+9)으로
@@ -5390,21 +5346,31 @@ function renderChangeLogPanel(){
   box.className = 'stat-section';
   box.innerHTML = `<h3>변경 로그 <span class="log-tz-note">한국시간(KST) 기준</span></h3>`;
 
+  // 기간(시작일~종료일, 한국시간)으로 조회한다. 종료일은 오늘로 채워 두고, 비우면 시작일 하루만 본다.
   const toolbar = document.createElement('div');
   toolbar.className = 'log-toolbar';
-  const dateWrap = document.createElement('div');
-  const dateLabel = document.createElement('label');
-  dateLabel.className = 'field-label'; dateLabel.textContent = '날짜 조회 (한국시간 하루 단위)';
-  const dateInput = document.createElement('input');
-  dateInput.type = 'date';
-  dateWrap.appendChild(dateLabel); dateWrap.appendChild(dateInput);
+  const dateField = (labelText)=>{
+    const wrap = document.createElement('div');
+    const label = document.createElement('label');
+    label.className = 'field-label'; label.textContent = labelText;
+    const input = document.createElement('input');
+    input.type = 'date';
+    wrap.appendChild(label); wrap.appendChild(input);
+    toolbar.appendChild(wrap);
+    return input;
+  };
+  const startInput = dateField('시작일');
+  const endInput = dateField('종료일');
+  endInput.value = todayISO();
   const searchBtn = document.createElement('button');
-  searchBtn.className = 'btn small primary'; searchBtn.textContent = '조회';
+  searchBtn.className = 'btn small primary'; searchBtn.textContent = '기간 조회';
   const resetBtn = document.createElement('button');
   resetBtn.className = 'btn small'; resetBtn.textContent = `최근 ${CHANGELOG_RECENT_LIMIT}건 보기`;
-  toolbar.appendChild(dateWrap); toolbar.appendChild(searchBtn); toolbar.appendChild(resetBtn);
+  toolbar.appendChild(searchBtn); toolbar.appendChild(resetBtn);
   box.appendChild(toolbar);
 
+  const note = el('div', 'log-note', '', 'font-size:11.5px;color:var(--ink-soft);margin-bottom:6px;');
+  box.appendChild(note);
   const body = document.createElement('div');
   body.style.cssText = 'font-size:12px;color:var(--ink-soft);';
   box.appendChild(body);
@@ -5433,44 +5399,54 @@ function renderChangeLogPanel(){
       `;
       body.appendChild(row);
     });
-    if(currentLogs.length > CHANGELOG_PAGE_SIZE){
-      for(let p=1; p<=totalPages; p++){
-        const pBtn = document.createElement('button');
-        pBtn.className = 'btn small' + (p===currentPage ? ' primary' : '');
-        pBtn.textContent = String(p);
-        pBtn.onclick = ()=>{ currentPage = p; renderPage(); };
-        pager.appendChild(pBtn);
-      }
+    if(totalPages > 1){
+      // 기간 조회로 수백 건이 잡히면 페이지 버튼이 수십 개가 되므로, 현재 페이지 주변 10개만 보여준다.
+      const pageBtn = (label, p, active)=>{
+        const b = document.createElement('button');
+        b.className = 'btn small' + (active ? ' primary' : '');
+        b.textContent = label;
+        b.onclick = ()=>{ currentPage = p; renderPage(); };
+        pager.appendChild(b);
+      };
+      const from = Math.max(1, Math.min(currentPage - 4, totalPages - 9));
+      const to = Math.min(totalPages, from + 9);
+      if(from > 1) pageBtn('« 처음', 1, false);
+      for(let p=from; p<=to; p++) pageBtn(String(p), p, p===currentPage);
+      if(to < totalPages) pageBtn(`끝(${totalPages}) »`, totalPages, false);
     }
   }
 
-  function loadDefault(){
+  function load(query, describe){
     body.textContent = '불러오는 중…';
     pager.innerHTML = '';
-    CHANGELOG_COL.orderBy('timestamp','desc').limit(CHANGELOG_RECENT_LIMIT).get().then(snap=>{
+    note.textContent = '';
+    query.get().then(snap=>{
       currentLogs = []; snap.forEach(doc=> currentLogs.push(doc.data()));
       currentPage = 1;
+      note.textContent = describe(currentLogs.length);
       renderPage();
     }).catch(e=>{ body.textContent = '로그를 불러오지 못했습니다: ' + e.message; });
   }
-
-  function loadByDate(dateStr){
-    body.textContent = '불러오는 중…';
-    pager.innerHTML = '';
-    const { start: dayStart, end: dayEnd } = kstDayRangeUtc(dateStr);
-    CHANGELOG_COL.where('timestamp','>=',dayStart).where('timestamp','<=',dayEnd)
-      .orderBy('timestamp','desc').limit(500).get().then(snap=>{
-        currentLogs = []; snap.forEach(doc=> currentLogs.push(doc.data()));
-        currentPage = 1;
-        renderPage();
-      }).catch(e=>{ body.textContent = '로그를 불러오지 못했습니다: ' + e.message; });
+  function loadDefault(){
+    load(CHANGELOG_COL.orderBy('timestamp','desc').limit(CHANGELOG_RECENT_LIMIT), n=> `최근 ${n}건`);
+  }
+  function loadByRange(startDate, endDate){
+    const from = kstDayRangeUtc(startDate).start;
+    const to = kstDayRangeUtc(endDate).end;
+    load(CHANGELOG_COL.where('timestamp','>=',from).where('timestamp','<=',to)
+        .orderBy('timestamp','desc').limit(CHANGELOG_RANGE_LIMIT),
+      n=> `${startDate === endDate ? startDate : startDate + ' ~ ' + endDate} · ${n}건`
+        + (n >= CHANGELOG_RANGE_LIMIT ? ` (가장 최근 ${CHANGELOG_RANGE_LIMIT.toLocaleString('ko-KR')}건까지만 표시 — 기간을 좁혀 주세요)` : ''));
   }
 
   searchBtn.onclick = ()=>{
-    if(!dateInput.value){ showAlert('조회할 날짜를 선택해주세요.'); return; }
-    loadByDate(dateInput.value);
+    const startDate = startInput.value;
+    const endDate = endInput.value || startDate;
+    if(!startDate){ showAlert('조회할 시작일을 선택해주세요.'); return; }
+    if(endDate < startDate){ showAlert('종료일이 시작일보다 앞설 수 없습니다.'); return; }
+    loadByRange(startDate, endDate);
   };
-  resetBtn.onclick = ()=>{ dateInput.value = ''; loadDefault(); };
+  resetBtn.onclick = ()=>{ startInput.value = ''; endInput.value = todayISO(); loadDefault(); };
 
   loadDefault();
   return box;
@@ -5716,9 +5692,6 @@ function renderLoadDiagnosticsPanel(){
   const box = document.createElement('div');
   box.className = 'stat-section';
   box.appendChild(el('h3', null, '데이터 로딩 상태'));
-  box.appendChild(el('div', null,
-    '문제가 있을 때 이 내용을 그대로 알려주시면 원인을 바로 찾을 수 있습니다. 아래 "다시 불러오기"는 로컬 캐시를 지우고 서버에서 새로 읽어옵니다.',
-    'font-size:11.5px;color:var(--ink-soft);margin-bottom:10px;line-height:1.6;'));
 
   const rows = [
     ['실행 중인 코드 버전', APP_BUILD],
@@ -5756,6 +5729,229 @@ function renderLoadDiagnosticsPanel(){
   box.appendChild(btn);
   return box;
 }
+/* ---------------- 관리자 설정 도움말 ----------------
+   각 영역의 버튼 설명·주의사항을 화면 곳곳의 안내 문구 대신 여기 한곳에 모았다(화면에서는 중복을
+   없애려고 설명 문구를 뺐다). 관리자 설정에 버튼이나 동작을 추가·변경하면 여기도 함께 고칠 것 —
+   화면에 설명이 없으니 도움말이 틀리면 사용자가 알아챌 방법이 없다.
+   id는 renderAdminView에서 각 영역 제목 옆 ? 버튼과 연결된다. */
+function adminHelpSections(){
+  return [
+    { id:'common', title:'먼저 알아두기',
+      summary:'관리자 설정은 슈퍼어드민 계정만 볼 수 있습니다. 여기서 바꾸는 내용은 이 대시보드를 쓰는 모든 사람의 화면에 바로 반영됩니다.',
+      items:[
+        ['빨간 버튼', '삭제하거나 덮어쓰는 작업입니다. 누르면 대상과 건수를 확인 창으로 먼저 보여주니, 숫자를 확인한 뒤 진행하세요.'],
+        ['제목 옆 ?', '누르면 이 도움말에서 그 영역 설명으로 바로 이동합니다.'],
+        ['화면이 이상할 때', '"데이터 로딩 상태"의 실행 중인 코드 버전을 확인하세요. 탭을 오래 켜두면 예전 코드가 돌고 있을 수 있으니 Ctrl+Shift+R로 새로고침합니다.']
+      ],
+      cautions:['대부분의 작업에는 되돌리기 버튼이 없습니다. 크게 바꾸기 전에는 "데이터 백업"에서 전체 데이터를 먼저 내려받아 두세요.'] },
+
+    { id:'diag', title:'데이터 로딩 상태',
+      summary:'지금 이 화면이 어떤 코드 버전과 계정으로 실행 중인지, 계약·퇴실 이력을 몇 건 불러왔는지 보여줍니다. 문제가 생기면 이 표를 캡처해서 알려주시면 원인을 바로 찾을 수 있습니다.',
+      items:[
+        ['실행 중인 코드 버전', '배포된 최신 버전과 다르면 오래된 탭입니다. Ctrl+Shift+R로 새로고침하세요.'],
+        ['권한 · 지점 접근 범위', '로그인한 계정의 권한과 볼 수 있는 지점 범위입니다.'],
+        ['계약 이력 · 퇴실 이력', '불러온 건수와 출처입니다. 0건이거나 빨간색으로 보이면 불러오기에 문제가 있는 것입니다.'],
+        ['캐시 비우고 다시 불러오기', '이 브라우저에 저장해 둔 계약·퇴실 이력 캐시를 지우고 서버에서 새로 읽어옵니다. 다른 PC에서는 보이는 이력이 여기서만 안 보일 때 씁니다.']
+      ],
+      cautions:['이 브라우저의 캐시만 지웁니다. 서버에 저장된 데이터는 지워지지 않습니다.'] },
+
+    { id:'price', title:'방 가격 관리',
+      summary:'방 카드에 보이는 가격과 연장 계산기·환불 계산기의 금액이 모두 여기 올린 가격표 하나를 기준으로 합니다. 올리면 켜둔 모든 화면과 두 계산기에 바로 반영됩니다.',
+      items:[
+        ['⬇ 가격표 다운로드', '지금 등록된 가격을 엑셀로 내려받습니다(호실 하나가 한 줄). 대시보드에는 있는데 가격표에 없는 호실은 "미등록 호실" 시트로 함께 나옵니다.'],
+        ['⬆ 가격표 업로드', '내려받은 엑셀을 고쳐서 올리거나, 지점정보 관리표(.xlsm)를 그대로 올립니다. 저장하기 전에 몇 개 지점·타입·호실이 바뀌는지와 확인이 필요한 항목을 먼저 보여줍니다.'],
+        ['등록된 가격표 보기', '지점·룸타입별 가격을 펼쳐 봅니다. 기본은 접혀 있습니다.'],
+        ['방 카드 가격 연결', '대시보드 호실 중 가격표와 연결된 호실 수입니다. 연결되지 않은 호실은 방 카드에 가격이 표시되지 않습니다.']
+      ],
+      notes:[
+        '엑셀 작성: 호실 하나가 한 줄입니다. 같은 지점·룸타입이면서 가격이 같은 호실은 저장할 때 자동으로 묶입니다. 2인 입실료, 기존회원 1박(2인)이 없으면 비워 두세요. "성수기 1인 입실료"와 "성수기 적용월"은 시기에 따라 가격이 바뀌는 방만 채웁니다.',
+        '관리표(.xlsm)는 지점마다 기준 가격 열이 다릅니다. 마곡·잠실·가산은 "가격", 고려대 안암역은 "성수기가격", 강남 일원은 "변동가격", 구로는 "초기 세팅 가격"(1박 비용은 신규·기존 같은 값), 방배 이수역은 "가격"과 "3분기 가격"을 함께 저장해 7~9월에만 3분기 가격을 씁니다. 나머지 지점은 "가격"을 씁니다. 종로종각·청량리·충무로 시트는 읽지 않습니다.'
+      ],
+      cautions:[
+        '업로드하면 기존 가격표 전체가 새 내용으로 바뀝니다. 일부만 고칠 때도 전체가 담긴 파일을 올리세요.',
+        '환불 계산기는 다른 페이지에 삽입되어 쓰이므로, 올린 가격이 환불 예상 금액에도 바로 쓰입니다. 확인 창의 요약을 꼭 보고 저장하세요.',
+        '관리표에 1박 금액이 비어 있는 호실은 기존에 등록된 금액을 그대로 유지합니다(0원으로 덮어쓰지 않습니다).',
+        '같은 룸타입인데 호실마다 가격이 다르면 확인 창에 경고가 뜹니다. 의도한 가격이면 그대로 저장해도 됩니다.'
+      ] },
+
+    { id:'backup', title:'데이터 백업',
+      summary:'데이터를 파일로 받아 두거나, 매일 자동 저장되는 백업으로 되돌리거나, 인수인계 문서를 만듭니다.',
+      items:[
+        ['⬇ 전체 데이터 백업 다운로드', '지점·호실·입실자·계약 이력·퇴실 이력 전체를 JSON 파일로 내려받습니다. 사고에 대비해 주기적으로 받아 두세요.'],
+        ['⟳ 백업 데이터 가져오기', '매일 자동 저장되는 백업(지점·호실·입실자, 최근 3일치) 중 가장 최근 것으로 현재 데이터를 바꿉니다.'],
+        ['📋 인수인계 자료 다운로드', '담당자가 바뀔 때 알아야 할 내용을 문서로 내려받습니다. 현재 운영 현황과, 코드만 봐서는 알 수 없는 제약·주의점이 담겨 있습니다.']
+      ],
+      cautions:[
+        '"백업 데이터 가져오기"는 지점·호실·입실자 정보(유입채널 목록 등 포함)를 백업 시점으로 통째로 바꾸며 되돌릴 수 없습니다. 마지막 자동 백업 이후에 입력한 내용은 사라지니, 누르기 전에 "전체 데이터 백업 다운로드"로 지금 상태를 먼저 받아 두세요.',
+        '자동 백업에는 계약·퇴실 이력이 들어 있지 않고, 가져오기를 해도 이력은 바뀌지 않습니다.'
+      ] },
+
+    { id:'branchroom', title:'지점 · 호실 관리',
+      summary:'지점과 호실을 추가·수정·삭제합니다. 여러 개를 한꺼번에 바꿀 때는 "⬆ 엑셀 업로드"를 씁니다.',
+      items:[
+        ['+ 지점 추가', '지점명(필수)을 입력해 새 지점을 만듭니다.'],
+        ['+ 호실 추가', '지점·호실 번호·타입·인실 구분을 입력해 호실을 만듭니다. 한 지점에 같은 호실 번호는 하나만 등록할 수 있습니다.'],
+        ['타입 관리', '지점별 룸타입 목록을 추가·삭제합니다. 가격은 여기서 정하지 않고 "방 가격 관리"에서 올린 가격표를 씁니다.'],
+        ['호실-타입 매칭', '지점을 고르고 호실마다 타입을 선택합니다. 고르는 즉시 저장됩니다. 목록에 없는 타입은 먼저 "타입 관리"에서 추가하세요.'],
+        ['⬆ 엑셀 업로드', '"지점정보"·"호실정보" 시트가 담긴 엑셀로 여러 지점·호실을 한꺼번에 추가·수정합니다. 지점명을 기준으로, 이미 있는 지점·호실은 입력한 값으로 고치고 없는 것은 새로 만듭니다. 반영 전에 새로 생기거나 바뀌는 건수를 먼저 보여줍니다.'],
+        ['호실 삭제', '지점과 호실을 골라 삭제합니다.'],
+        ['지점 순서·정보 수정', '펼쳐서 드래그로 지점 순서를 바꾸면 지점 선택 목록, 지점별 현황 표 등 모든 화면에 반영됩니다. "수정"으로 지점 정보를 고치고, 지점 이름을 누르면 그 지점 화면으로 이동합니다.']
+      ],
+      notes:[
+        '엑셀 업로드 필수 항목 — 지점정보 시트: 지점명·지점단축명 / 호실정보 시트: 지점명·호실번호·타입·인실구분. 필수 항목이 빠진 행과 지점을 찾지 못한 행은 제외됩니다.',
+        '엑셀의 빈 칸은 기존 값을 그대로 둡니다. 값을 지우려고 비워 두면 반영되지 않습니다.',
+        '지점 삭제는 여기가 아니라 각 지점 화면 위쪽의 지점 정보에서 할 수 있습니다.'
+      ],
+      cautions:[
+        '호실을 삭제하면 그 호실의 입실자 정보도 함께 삭제됩니다. 지점을 삭제하면 소속 호실과 입실자 정보가 모두 삭제됩니다.',
+        '엑셀 업로드는 추가·수정만 합니다. 엑셀에 없는 지점·호실은 삭제되지 않습니다.',
+        '엑셀의 "타입별가격" 시트는 예전 구조가 남아 있는 것으로, 그 가격은 방 카드와 연장·환불 계산기에 쓰이지 않습니다. 실제 가격은 "방 가격 관리"에서 올리세요.',
+        '타입을 목록에서 삭제해도 이미 그 타입으로 등록된 호실의 값은 그대로 남습니다(목록에서만 사라집니다).'
+      ] },
+
+    { id:'contract', title:'계약관리',
+      summary:'계약 데이터를 붙여넣거나 엑셀로 올려 계약 이력으로 저장합니다. 저장된 계약은 각 호실 카드의 "계약현황" 버튼에서 확인합니다.',
+      items:[
+        ['계약 데이터 붙여넣기', '계약 관리 페이지의 표를 복사해 그대로 붙여넣습니다. 고시원 명·방이름으로 지점·호실을 찾아 저장합니다.'],
+        ['⬇ 양식 다운로드 · ⬆ 엑셀 업로드', '붙여넣기 대신 같은 형식의 엑셀 파일로 올립니다.'],
+        ['중복 계약 정리', '세 가지 중복을 한 번에 찾아 각각 최신 1건만 남기고 삭제합니다. ① 모든 항목이 완전히 같은 계약 ② 계약일만 다르게 다시 등록된 계약(계약현황에서 취소선으로 보이는 것 — 계약일이 가장 늦은 건을 남김) ③ 계약기간만 다르게 다시 등록된 계약(어드민에서 입실자 날짜를 바꾼 경우 등 — 나중에 등록된 건을 남김). 확인 창에 기준별 건수가 나옵니다.']
+      ],
+      notes:[
+        '표의 열 순서: 계약내용 / 계약일 / 계약기간 / 고시원 명 / 방이름 / 계약자 / 계약자 연락처 / 입실자 / 입실료 / 결제금액 / 계약구분 / 결제구분 / 보증금 / 보증금 안내',
+        '빈 호실이면 계약일이 가장 최근인 건으로 새 입실자(이름·연락처·입실일·퇴실일)를 자동으로 등록합니다. 이미 입실자가 있는 호실은 입실자 정보는 그대로 두고 계약 이력만 저장하며, 최신 계약의 종료일과 입실자의 퇴실예정일이 다르면 "계약현황" 버튼이 강조 표시됩니다.',
+        '엔코스테이·리브애니웨어처럼 "독립생활"이 아닌 유입채널의 예약은 결제·계약 데이터가 없어 계약 이력이 생기지 않습니다. 이런 입실자는 입실자에 적힌 예약 기간으로 표시됩니다.'
+      ],
+      cautions:[
+        '고시원 명·방이름으로 호실을 찾지 못한 건은 저장되지 않습니다. 붙여넣은 뒤 나오는 "호실을 찾지 못한 항목" 목록을 확인하세요.',
+        '중복 계약 정리는 계약 이력을 실제로 삭제하며 되돌릴 수 없습니다. 확인 창의 기준별 건수를 보고 진행하세요.'
+      ] },
+
+    { id:'channel', title:'유입채널 관리',
+      summary:'입실자를 등록할 때 고르는 유입채널 목록을 관리합니다.',
+      items:[
+        ['+ 채널 추가', '새 채널 이름을 입력하고 누르거나 Enter를 칩니다.'],
+        ['채널 옆 삭제 버튼', '그 채널을 목록에서 삭제합니다.']
+      ],
+      notes:['"독립생활"은 계약 데이터로 관리되는 자체 채널입니다. 그 밖의 채널로 등록된 입실자는 외부 예약으로 보고, 계약 대신 입실자에 적힌 예약 기간으로 타임라인에 표시합니다.'],
+      cautions:[
+        '채널을 삭제해도 이미 그 채널로 등록된 입실자의 값은 그대로 남고, 새로 고르는 목록에서만 사라집니다.',
+        '"독립생활"은 목록에서 지우지 마세요. 자체 계약 입실자를 이 이름으로 구분합니다.'
+      ] },
+
+    { id:'users', title:'사용자 관리',
+      summary:'로그인 계정의 가입 승인, 권한, 볼 수 있는 지점 범위를 관리합니다.',
+      items:[
+        ['권한', '조회 전용(보기만) / 수정 가능(입력·수정 가능, 로그인하면 지점 화면으로 바로 이동) / 슈퍼어드민(관리자 설정까지 전체).'],
+        ['지점 범위', '전체 지점, 또는 지점 선택입니다. 지점 선택이면 1곳 이상 골라야 합니다.'],
+        ['승인 · 역할 변경', '승인 대기 계정은 "승인", 이미 쓰는 계정은 "역할 변경"으로 권한과 지점 범위를 저장합니다.'],
+        ['거절 · 차단 버튼', '승인 대기 요청은 거절하고, 쓰고 있는 계정은 접근을 차단합니다(승인 대기 상태로 돌아갑니다).']
+      ],
+      notes:['새 가입 요청이 있으면 슈퍼어드민이 로그인할 때 알림이 뜹니다. 요청에는 이름·연락처·희망 권한이 함께 보입니다.'],
+      cautions:['차단은 계정을 지우지 않고 승인 대기로 돌리는 것입니다. 다시 승인하면 그대로 복구됩니다.'] },
+
+    { id:'log', title:'변경 로그',
+      summary:'누가 언제 무엇을 바꿨는지 기록을 봅니다. 시간은 한국시간 기준입니다.',
+      items:[
+        ['기간 조회', '시작일과 종료일을 고르고 "기간 조회"를 누르면 그 기간(한국시간)의 기록을 봅니다. 종료일은 오늘로 채워져 있고, 비우면 시작일 하루만 봅니다.'],
+        [`최근 ${CHANGELOG_RECENT_LIMIT}건 보기`, `기간과 상관없이 가장 최근 기록 ${CHANGELOG_RECENT_LIMIT}건을 봅니다.`]
+      ],
+      notes:[`기간 조회는 한 번에 최대 ${CHANGELOG_RANGE_LIMIT.toLocaleString('ko-KR')}건까지 보여줍니다. 더 많으면 기간을 좁혀 주세요.`],
+      cautions:['로그는 수정하거나 지울 수 없습니다.'] }
+  ];
+}
+
+// 도움말 창. focusId를 주면 그 영역 설명으로 바로 스크롤한다(제목 옆 ? 버튼).
+function openAdminHelp(focusId){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  const box = document.createElement('div');
+  box.className = 'modal-box help-box';
+  box.setAttribute('role', 'dialog');
+  box.setAttribute('aria-label', '관리자 설정 도움말');
+
+  const head = el('div', 'help-head');
+  head.appendChild(el('h2', null, '관리자 설정 도움말'));
+  const closeBtn = el('button', 'btn small', '닫기');
+  head.appendChild(closeBtn);
+  box.appendChild(head);
+
+  const body = el('div', 'help-body');
+  const toc = el('div', 'help-toc');
+  body.appendChild(toc);
+  const secEls = {};
+  const addList = (parent, rows)=>{
+    const ul = el('ul', 'help-list');
+    rows.forEach(row=>{
+      const li = document.createElement('li');
+      if(Array.isArray(row)){
+        li.appendChild(el('b', null, row[0]));
+        li.appendChild(document.createTextNode(' — ' + row[1]));
+      }else{
+        li.textContent = row;
+      }
+      ul.appendChild(li);
+    });
+    parent.appendChild(ul);
+  };
+  adminHelpSections().forEach(sec=>{
+    const node = el('section', 'help-sec');
+    node.appendChild(el('h3', null, sec.title));
+    if(sec.summary) node.appendChild(el('p', null, sec.summary));
+    if(sec.items && sec.items.length){ node.appendChild(el('h4', null, '버튼 · 항목')); addList(node, sec.items); }
+    if(sec.notes && sec.notes.length){ node.appendChild(el('h4', null, '알아두기')); addList(node, sec.notes); }
+    if(sec.cautions && sec.cautions.length){
+      const c = el('div', 'help-caution');
+      c.appendChild(el('h4', null, '주의'));
+      addList(c, sec.cautions);
+      node.appendChild(c);
+    }
+    secEls[sec.id] = node;
+    body.appendChild(node);
+    const link = el('button', null, sec.title);
+    link.type = 'button';
+    link.onclick = ()=> jump(sec.id);
+    toc.appendChild(link);
+  });
+  box.appendChild(body);
+  overlay.appendChild(box);
+
+  function jump(id){
+    const node = secEls[id];
+    if(!node) return;
+    node.scrollIntoView({ block:'start' });
+    node.classList.remove('flash');
+    void node.offsetWidth;   // 같은 영역을 다시 눌러도 강조 애니메이션이 다시 돌도록
+    node.classList.add('flash');
+  }
+  const onKey = (e)=>{ if(e.key === 'Escape') close(); };
+  function close(){ overlay.remove(); document.removeEventListener('keydown', onKey); }
+  closeBtn.onclick = close;
+  overlay.addEventListener('click', (e)=>{ if(e.target === overlay) close(); });
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(overlay);
+  if(focusId) jump(focusId);
+  setTimeout(()=> closeBtn.focus(), 0);
+}
+
+function renderAdminHelpBar(){
+  const bar = el('div', 'admin-help-bar');
+  bar.appendChild(el('div', 'admin-help-lead', '버튼 설명과 주의사항은 도움말에 모아 두었습니다. 각 영역 제목 옆 ?를 누르면 해당 설명으로 바로 이동합니다.'));
+  const btn = el('button', 'btn small', '📖 도움말');
+  btn.onclick = ()=> openAdminHelp();
+  bar.appendChild(btn);
+  return bar;
+}
+
+function attachAdminHelpIcon(box, helpId){
+  const h3 = box.querySelector('h3');
+  if(!h3) return;
+  const b = el('button', 'help-icon', '?');
+  b.type = 'button';
+  b.title = '이 영역 도움말';
+  b.onclick = (e)=>{ e.stopPropagation(); openAdminHelp(helpId); };
+  h3.appendChild(b);
+}
+
 function renderAdminView(){
   const wrap = document.createElement('div');
   wrap.style.paddingTop = '18px';
@@ -5765,15 +5961,22 @@ function renderAdminView(){
     return wrap;
   }
 
-  wrap.appendChild(renderLoadDiagnosticsPanel());
-  wrap.appendChild(renderRoomPricePanel());
-  wrap.appendChild(renderDataBackupPanel());
-  wrap.appendChild(renderBranchRoomManagePanel());
-  wrap.appendChild(renderBranchRoomBulkUpdatePanel());
-  wrap.appendChild(renderContractManagePanel());
-  wrap.appendChild(renderChannelManagePanel());
-  wrap.appendChild(renderUserManagePanel());
-  wrap.appendChild(renderChangeLogPanel());
+  wrap.appendChild(renderAdminHelpBar());
+  // 설명 문구는 화면에서 빼고 도움말(adminHelpSections)에 모았다. 각 영역 제목 옆 ?는 그 설명으로 연결된다.
+  [
+    ['diag', renderLoadDiagnosticsPanel],
+    ['price', renderRoomPricePanel],
+    ['backup', renderDataBackupPanel],
+    ['branchroom', renderBranchRoomManagePanel],
+    ['contract', renderContractManagePanel],
+    ['channel', renderChannelManagePanel],
+    ['users', renderUserManagePanel],
+    ['log', renderChangeLogPanel]
+  ].forEach(([helpId, renderPanel])=>{
+    const box = renderPanel();
+    attachAdminHelpIcon(box, helpId);
+    wrap.appendChild(box);
+  });
 
   return wrap;
 }
@@ -6522,12 +6725,7 @@ function roomLedgerPrice(room){
 function renderRoomPricePanel(){
   const box = document.createElement('div');
   box.className = 'stat-section';
-  box.innerHTML = `<h3>방 가격 관리</h3>
-    <div style="font-size:12px;color:var(--ink-soft);margin-bottom:12px;line-height:1.7;">
-      이 대시보드와 <b>연장 계산기</b>가 같은 가격표를 사용합니다. 엑셀로 내려받아 수정한 뒤 다시 올리면 양쪽에 바로 반영됩니다.<br>
-      <b>호실 하나가 한 줄</b>입니다. 같은 지점·룸타입이면서 가격이 같은 호실들은 저장할 때 자동으로 묶입니다. 2인 입실료나 기존회원 1박(2인)이 없으면 비워두세요.<br>
-      <b>지점정보 관리표(.xlsm)</b>를 그대로 올려도 됩니다. 시트마다 기준 가격 열이 달라 지점별 규칙으로 읽습니다 &mdash; 마곡·잠실·가산은 <b>가격</b>, 고려대 안암역은 <b>성수기가격</b>, 강남 일원은 <b>변동가격</b>, 구로는 <b>초기 세팅 가격</b>(1박 비용은 신규·기존 동일), 방배 이수역은 <b>가격</b>과 <b>3분기 가격</b>을 함께 저장해 7~9월에만 3분기 가격을 씁니다. 종로종각·청량리·충무로 시트는 제외합니다.
-    </div>`;
+  box.innerHTML = `<h3>방 가격 관리</h3>`;
 
   const info = document.createElement('div');
   const rooms = ROOM_PRICES.rooms || [];
@@ -6652,6 +6850,8 @@ const HANDOVER_NOTES = [
     '관리표에 1박 금액이 비어 있는 지점이 있다(오산의 신규 1박). 빈 칸을 0원으로 덮어쓰면 연장 계산기가 0원을 계산하므로, 업로드 시 그런 칸은 원장에 이미 있는 금액을 유지한다. 이 안전장치를 제거하지 말 것.',
     '같은 지점·룸타입인데 호실마다 가격이 다른 곳이 있다(구로 트리니티B는 3가지, 고려대 206호). 그래서 연장·환불 계산기에는 룸타입 선택이 없고(담당자 요청으로 삭제), 지점에서 호실을 바로 골라 그 호실이 들어있는 행에서 가격을 가져온다. 룸타입으로 찾으면 나머지 가격대의 호실이 사라지거나 금액이 틀린다.',
     '방배 이수역은 7~9월 입실료가 다르다. 분기마다 다시 올리는 것을 잊기 쉬워서, 원장에 평시가와 성수기가를 함께 저장하고 조회 시점의 달로 고른다(p1Alt / altMonths). 시기별 가격이 있는 지점이 늘면 관리표 규칙표(MGMT_PRICE_RULES)에 alt 열만 추가하면 된다.',
+    '관리자 설정의 사용법·주의사항은 화면 문구가 아니라 도움말(adminHelpSections — 관리자 설정 상단 "도움말"과 각 영역 제목 옆 ?)에 모아 두었다. 화면에서 설명 문구를 뺐기 때문에, 관리자 설정에 버튼이나 동작을 추가·변경하면 도움말도 반드시 함께 고칠 것 — 도움말이 틀리면 사용자가 알아챌 방법이 없다.',
+    '중복 계약 정리는 버튼 하나로 세 기준(완전 동일 → 계약일만 정정 → 계약기간만 정정)을 차례로 적용한다. 기준별로 따로 판정해 합치면 서로를 근거로 한 묶음을 통째로 지울 수 있어서(완전히 같은 A·A′ 사이에 계약기간만 고친 C가 끼어 등록된 경우), 앞 단계에서 지울 계약은 빼고 다음 단계를 판정한다(planContractDedupe). 판정 함수에 pool을 넘기는 이유가 이것이니 없애지 말 것.',
     '관제센터 특성상 탭을 며칠씩 켜둔다. 그래서 실시간 동기화(onSnapshot)와 저장 시 충돌 검사가 들어가 있고, 날짜가 바뀌면 세션을 초기화한다. "고쳤는데 반영이 안 된다"는 제보는 대부분 오래된 탭이 옛 코드를 돌리고 있는 경우다.',
     '입실자 상태(이용중/입실확정 등)는 계약이 아니라 입실자 레코드에서 계산한다. 반대로 타임라인·계약만료는 계약 기준이라, 계약 데이터가 없는 외부 채널 예약(엔코스테이·리브애니웨어)이 누락되지 않도록 별도 처리가 들어가 있다.',
     '계산기 예비 가격(Calculator/room-prices.js의 ROOMS 배열)은 원장을 못 읽었을 때만 쓰는 값이니 거기서 가격을 고치지 말 것 — 고쳐도 대시보드와 어긋나기만 한다. 가격은 관리자 설정 > 방 가격 관리에서 올린다.',
@@ -6735,12 +6935,7 @@ function downloadHandoverDoc(){
 function renderDataBackupPanel(){
   const box = document.createElement('div');
   box.className = 'stat-section';
-  box.innerHTML = `<h3>데이터 백업</h3>
-    <div style="font-size:12px;color:var(--ink-soft);margin-bottom:12px;">
-      지점·호실·입실자·계약 이력·퇴실 이력 등 전체 데이터를 JSON 파일로 다운로드합니다. 만일의 사고에 대비해 주기적으로 받아두는 것을 권장합니다.<br>
-      "백업 데이터 가져오기"는 매일 자동 저장되는 Firestore 백업(지점·호실·입실자, 최근 3일치) 중 가장 최신 것을 불러와 현재 데이터를 덮어씁니다.<br>
-      "인수인계 자료"는 담당자가 바뀔 때 새로 오는 사람이 알아야 할 내용을 정리한 문서입니다. 현재 운영 현황과 함께, 코드만 봐서는 알 수 없는 제약사항·주의점이 담겨 있습니다.
-    </div>`;
+  box.innerHTML = `<h3>데이터 백업</h3>`;
   const btnRow = document.createElement('div');
   btnRow.style.cssText = 'display:flex; gap:8px; flex-wrap:wrap;';
   const downloadBtn = document.createElement('button');
@@ -6787,6 +6982,22 @@ function renderBranchRoomManagePanel(){
   btnRow.appendChild(toggleBtn('addingRoom', '+ 호실 추가', '호실 추가 취소', 'primary'));
   btnRow.appendChild(toggleBtn('managingTypePrice', '타입 관리', '타입 관리 취소', 'primary'));
   btnRow.appendChild(toggleBtn('matchingRoomType', '호실-타입 매칭', '호실-타입 매칭 취소', 'primary'));
+  // 예전 "지점/호실 관리 엑셀 일괄 업데이트" 영역은 없애고 업로드 버튼만 여기로 옮겼다(담당자 요청).
+  // 엑셀 형식(필수 시트·열)은 도움말에 있다.
+  const bulkBtn = el('button', 'btn small', '⬆ 엑셀 업로드');
+  bulkBtn.title = '지점정보·호실정보 시트가 담긴 엑셀로 여러 지점·호실을 한꺼번에 추가·수정합니다(형식은 도움말 참고)';
+  const bulkInput = document.createElement('input');
+  bulkInput.type = 'file';
+  bulkInput.accept = '.xlsx,.xls';
+  bulkInput.style.display = 'none';
+  bulkBtn.onclick = ()=> bulkInput.click();
+  bulkInput.addEventListener('change', ()=>{
+    if(bulkInput.files && bulkInput.files[0]){
+      handleBranchRoomBulkUpdateFile(bulkInput.files[0]);
+      bulkInput.value = '';
+    }
+  });
+  btnRow.appendChild(bulkBtn); btnRow.appendChild(bulkInput);
   btnRow.appendChild(toggleBtn('managingRoom', '호실 삭제', '호실 삭제 취소', 'danger'));
   box.appendChild(btnRow);
 
@@ -6814,9 +7025,6 @@ function renderBranchRoomManagePanel(){
 
 function renderBranchOrderBody(){
   const box = document.createElement('div');
-  box.innerHTML = `<div style="font-size:12px;color:var(--ink-soft);margin-bottom:12px;">
-      드래그해서 순서를 바꾸면 지점 선택 목록, 지점별 현황 표 등 모든 화면에 반영됩니다.
-    </div>`;
 
   const list = document.createElement('div');
   list.className = 'branch-order-list';
@@ -6924,7 +7132,6 @@ function renderRoomTypeMatchForm(){
     <div class="fld" style="grid-column:1/-1;"><label class="field-label">지점 *</label>
       <select id="rtBranch">${DB.branches.map(b=>`<option value="${b.id}">${esc(b.name)}</option>`).join('')}</select></div>
     <div id="rtRoomList" style="grid-column:1/-1;"></div>
-    <div style="grid-column:1/-1;font-size:11.5px;color:var(--ink-soft);">호실마다 타입을 선택하면 바로 저장됩니다. 타입 목록 자체를 추가/삭제하려면 "타입 관리"를 이용하세요.</div>
     <div class="btn-row">
       <button class="btn" id="rtCancel">닫기</button>
     </div>
@@ -6993,7 +7200,6 @@ function renderTypePriceManageForm(){
     <div class="fld" style="grid-column:1/-1;"><label class="field-label">지점 *</label>
       <select id="tpBranch">${DB.branches.map(b=>`<option value="${b.id}">${esc(b.name)}</option>`).join('')}</select></div>
     <div id="tpPriceFields" style="grid-column:1/-1;"></div>
-    <div style="grid-column:1/-1;font-size:11.5px;color:var(--ink-soft);">타입은 지점마다 자유롭게 추가/삭제할 수 있습니다. 방 가격은 이 대시보드에서 관리하지 않습니다.</div>
     <div class="btn-row">
       <button class="btn" id="tpCancel">닫기</button>
     </div>
