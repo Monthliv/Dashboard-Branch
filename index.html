@@ -417,13 +417,14 @@
   .help-icon{ display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; margin-left:6px; padding:0; border-radius:50%; border:1px solid var(--line); background:var(--panel); color:var(--ink-soft); font-size:11px; font-weight:700; line-height:1; cursor:pointer; vertical-align:1px; }
   .help-icon:hover{ color:var(--accent-ink); border-color:var(--accent); }
   .modal-box.help-box{ max-width:760px; max-height:86vh; overflow:auto; padding:0; }
-  .help-head{ position:sticky; top:0; z-index:1; background:var(--panel); display:flex; align-items:center; justify-content:space-between; gap:12px; padding:16px 20px 12px; border-bottom:1px solid var(--line); }
+  .help-top{ position:sticky; top:0; z-index:1; background:var(--panel); border-bottom:1px solid var(--line); }
+  .help-head{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:16px 20px 8px; }
   .help-head h2{ margin:0; font-size:16px; }
   .help-body{ padding:4px 20px 20px; }
-  .help-toc{ display:flex; flex-wrap:wrap; gap:6px; padding:12px 0 6px; }
+  .help-toc{ display:flex; flex-wrap:wrap; gap:6px; padding:2px 20px 12px; }
   .help-toc button{ font:inherit; font-size:12px; padding:4px 10px; border:1px solid var(--line); border-radius:999px; background:var(--panel); color:var(--ink-soft); cursor:pointer; }
   .help-toc button:hover{ color:var(--accent-ink); border-color:var(--accent); }
-  .help-sec{ padding:16px 0; border-bottom:1px solid var(--line); scroll-margin-top:64px; }
+  .help-sec{ padding:16px 0; border-bottom:1px solid var(--line); scroll-margin-top:var(--help-top-h, 120px); }
   .help-sec:last-child{ border-bottom:none; }
   .help-sec h3{ margin:0 0 6px; font-size:14.5px; }
   .help-sec p{ margin:0 0 8px; font-size:13px; line-height:1.7; color:var(--ink); }
@@ -1047,7 +1048,7 @@ let lastKnownUpdatedAt = null;
 // 보인다" 같은 문제는 화면만 봐서는 캐시를 쓴 건지, 서버에서 0건을 받은 건지, 권한 오류로
 // 실패한 건지 구분이 안 돼서 진단이 계속 헛돌았다. 관리자 설정의 "데이터 로딩 상태"에서
 // 그대로 보여준다.
-const APP_BUILD = '2026-09-11-e';
+const APP_BUILD = '2026-09-11-f';
 let LOAD_DIAG = {
   contracts: { count: 0, source: '아직 불러오지 않음', error: '' },
   history:   { count: 0, source: '아직 불러오지 않음', error: '' },
@@ -5909,15 +5910,18 @@ function openAdminHelp(){
   box.setAttribute('role', 'dialog');
   box.setAttribute('aria-label', '관리자 설정 도움말');
 
+  // 제목 줄과 목차 탭을 한 덩어리로 위에 고정한다 — 목차를 눌러 아래로 이동해도 탭이 사라지지 않게(담당자 요청).
+  const stickyTop = el('div', 'help-top');
   const head = el('div', 'help-head');
   head.appendChild(el('h2', null, '관리자 설정 도움말'));
   const closeBtn = el('button', 'btn small', '닫기');
   head.appendChild(closeBtn);
-  box.appendChild(head);
+  stickyTop.appendChild(head);
+  const toc = el('div', 'help-toc');
+  stickyTop.appendChild(toc);
+  box.appendChild(stickyTop);
 
   const body = el('div', 'help-body');
-  const toc = el('div', 'help-toc');
-  body.appendChild(toc);
   const secEls = {};
   adminHelpSections().forEach(sec=>{
     const node = renderAdminHelpSection(sec);
@@ -5945,6 +5949,8 @@ function openAdminHelp(){
   overlay.addEventListener('click', (e)=>{ if(e.target === overlay) close(); });
   document.addEventListener('keydown', onKey);
   document.body.appendChild(overlay);
+  // 영역으로 이동했을 때 제목이 고정 영역에 가려지지 않도록 그 높이만큼 여백을 둔다(탭이 몇 줄로 접히느냐에 따라 다르다).
+  box.style.setProperty('--help-top-h', (stickyTop.offsetHeight + 8) + 'px');
   setTimeout(()=> closeBtn.focus(), 0);
 }
 
