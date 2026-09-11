@@ -1048,7 +1048,7 @@ let lastKnownUpdatedAt = null;
 // 보인다" 같은 문제는 화면만 봐서는 캐시를 쓴 건지, 서버에서 0건을 받은 건지, 권한 오류로
 // 실패한 건지 구분이 안 돼서 진단이 계속 헛돌았다. 관리자 설정의 "데이터 로딩 상태"에서
 // 그대로 보여준다.
-const APP_BUILD = '2026-09-11-f';
+const APP_BUILD = '2026-09-11-g';
 let LOAD_DIAG = {
   contracts: { count: 0, source: '아직 불러오지 않음', error: '' },
   history:   { count: 0, source: '아직 불러오지 않음', error: '' },
@@ -5765,14 +5765,16 @@ function adminHelpSections(){
       cautions:['이 브라우저의 캐시만 지웁니다. 서버에 저장된 데이터는 지워지지 않습니다.'] },
 
     { id:'price', title:'방 가격 관리',
-      summary:'방 카드에 보이는 가격과 연장 계산기·환불 계산기의 금액이 모두 여기 올린 가격표 하나를 기준으로 합니다. 올리면 켜둔 모든 화면과 두 계산기에 바로 반영됩니다.',
+      summary:'방 카드에 보이는 가격·방 타입과 연장 계산기·환불 계산기의 금액이 모두 여기 올린 가격표 하나를 기준으로 합니다. 올리면 켜둔 모든 화면과 두 계산기에 바로 반영됩니다.',
       items:[
         ['⬇ 가격표 다운로드', '지금 등록된 가격을 엑셀로 내려받습니다(호실 하나가 한 줄). 대시보드에는 있는데 가격표에 없는 호실은 "미등록 호실" 시트로 함께 나옵니다.'],
         ['⬆ 가격표 업로드', '내려받은 엑셀을 고쳐서 올리거나, 지점정보 관리표(.xlsm)를 그대로 올립니다. 저장하기 전에 몇 개 지점·타입·호실이 바뀌는지와 확인이 필요한 항목을 먼저 보여줍니다.'],
         ['등록된 가격표 보기', '지점·룸타입별 가격을 펼쳐 봅니다. 기본은 접혀 있습니다.'],
-        ['방 카드 가격 연결', '대시보드 호실 중 가격표와 연결된 호실 수입니다. 연결되지 않은 호실은 방 카드에 가격이 표시되지 않습니다.']
+        ['방 카드 가격 연결', '대시보드 호실 중 가격표와 연결된 호실 수입니다. 연결되지 않은 호실은 방 카드에 가격이 표시되지 않습니다.'],
+        ['가격표 기준으로 맞추기', '방 타입이 가격표와 다른 호실이 있을 때만 나타납니다. 누르면 그 호실들의 방 타입을 가격표 기준으로 바꿉니다(바뀌는 호실을 먼저 보여줍니다).']
       ],
       notes:[
+        '가격표를 올리면 방 타입도 가격표 기준으로 바뀝니다. 바뀌는 호실은 저장 전 확인 창에 먼저 나오고, 가격표에 없는 호실의 타입은 그대로 둡니다.',
         '엑셀 작성: 호실 하나가 한 줄입니다. 같은 지점·룸타입이면서 가격이 같은 호실은 저장할 때 자동으로 묶입니다. 2인 입실료, 기존회원 1박(2인)이 없으면 비워 두세요. "성수기 1인 입실료"와 "성수기 적용월"은 시기에 따라 가격이 바뀌는 방만 채웁니다.',
         '관리표(.xlsm)는 지점마다 기준 가격 열이 다릅니다. 마곡·잠실·가산은 "가격", 고려대 안암역은 "성수기가격", 강남 일원은 "변동가격", 구로는 "초기 세팅 가격"(1박 비용은 신규·기존 같은 값), 방배 이수역은 "가격"과 "3분기 가격"을 함께 저장해 7~9월에만 3분기 가격을 씁니다. 나머지 지점은 "가격"을 씁니다. 종로종각·청량리·충무로 시트는 읽지 않습니다.'
       ],
@@ -5801,7 +5803,7 @@ function adminHelpSections(){
         ['+ 지점 추가', '지점명(필수)을 입력해 새 지점을 만듭니다.'],
         ['+ 호실 추가', '지점·호실 번호·타입·인실 구분을 입력해 호실을 만듭니다. 한 지점에 같은 호실 번호는 하나만 등록할 수 있습니다.'],
         ['타입 관리', '지점별 룸타입 목록을 추가·삭제합니다. 가격은 여기서 정하지 않고 "방 가격 관리"에서 올린 가격표를 씁니다.'],
-        ['호실-타입 매칭', '지점을 고르고 호실마다 타입을 선택합니다. 고르는 즉시 저장됩니다. 목록에 없는 타입은 먼저 "타입 관리"에서 추가하세요.'],
+        ['호실-타입 매칭', '지점을 고르고 호실마다 타입을 선택합니다. 고르는 즉시 저장됩니다. 목록에 없는 타입은 먼저 "타입 관리"에서 추가하세요. 다만 방 타입은 가격표가 기준이라, 가격표에 있는 호실은 다음에 가격표를 올릴 때 가격표의 타입으로 돌아갑니다.'],
         ['⬆ 엑셀 업로드', '"지점정보"·"호실정보" 시트가 담긴 엑셀로 여러 지점·호실을 한꺼번에 추가·수정합니다. 지점명을 기준으로, 이미 있는 지점·호실은 입력한 값으로 고치고 없는 것은 새로 만듭니다. 반영 전에 새로 생기거나 바뀌는 건수를 먼저 보여줍니다.'],
         ['호실 삭제', '지점과 호실을 골라 삭제합니다.'],
         ['지점 순서·정보 수정', '펼쳐서 드래그로 지점 순서를 바꾸면 지점 선택 목록, 지점별 현황 표 등 모든 화면에 반영됩니다. "수정"으로 지점 정보를 고치고, 지점 이름을 누르면 그 지점 화면으로 이동합니다.']
@@ -6453,6 +6455,8 @@ function applyRoomPriceUpload(parsed){
   const before = (ROOM_PRICES.rooms || []).length;
   const branches = new Set(parsed.rooms.map(r=> r.b));
   const numsCount = parsed.rooms.reduce((a, r)=> a + (r.nums || []).length, 0);
+  // 이 가격표로 바꾸면 방 타입이 달라지는 호실(방 카드의 방 타입도 가격표 기준으로 맞춘다).
+  const typeChanges = roomTypeSyncPlan(parsed.rooms);
   showConfirm(
     `방 가격을 아래 내용으로 교체할까요?\n\n`
       + (parsed.source ? `· 읽은 파일: ${parsed.source}\n` : '')
@@ -6463,12 +6467,18 @@ function applyRoomPriceUpload(parsed){
             + (parsed.warnings.length > 8 ? `… 외 ${parsed.warnings.length - 8}건\n` : '')
           : '')
       + (parsed.skipped.length ? `\n제외되는 행 ${parsed.skipped.length}건:\n${parsed.skipped.slice(0,10).join('\n')}` : '')
-      + `\n\n저장하면 대시보드와 연장 계산기 양쪽에 바로 반영됩니다.`,
+      + (typeChanges.length ? `\n\n방 타입이 가격표와 달라 함께 바뀌는 호실 ${typeChanges.length}개:\n${roomTypeSyncSummary(typeChanges, 8)}` : '')
+      + `\n\n저장하면 대시보드와 연장·환불 계산기에 바로 반영됩니다.`,
     ()=>{
       saveRoomPrices(parsed.rooms).then(()=>{
-        logChange(`방 가격 업데이트: ${parsed.rooms.length}개 타입`);
+        // 방 타입도 방금 저장한 가격표 기준으로 맞춘다(확인 창 이후 실시간 동기화로 호실이 바뀌었을 수 있어 다시 계산).
+        const typed = applyRoomTypeSync(roomTypeSyncPlan());
+        logChange(`방 가격 업데이트: ${parsed.rooms.length}개 타입` + (typed ? ` · 방 타입 ${typed}개 호실 변경` : ''));
+        if(typed) scheduleSave();
         render();
-        showAlert(`방 가격을 저장했습니다. (${parsed.rooms.length}개 타입)\n연장 계산기에도 바로 반영됩니다.`);
+        showAlert(`방 가격을 저장했습니다. (${parsed.rooms.length}개 타입)`
+          + (typed ? `\n방 타입 ${typed}개 호실도 가격표 기준으로 바꿨습니다.` : '')
+          + `\n연장·환불 계산기에도 바로 반영됩니다.`);
       }).catch(e=>{
         showAlert(`방 가격 저장에 실패했습니다.\n\n오류 내용: ${(e && e.message) || e}`);
       });
@@ -6762,11 +6772,11 @@ function handleRoomPriceExcelFile(file){
 // 다만 포함 관계만으로 고르면 "성수"와 "성수역"처럼 실제로 다른 지점이 함께 걸린다(가격도
 // 95만/105만으로 다르다). 후보가 하나로 좁혀지지 않으면 틀린 가격을 보여주느니 아무것도
 // 보여주지 않는다.
-function ledgerRowsForBranch(branch){
+function ledgerRowsForBranch(branch, list){
   if(!branch) return [];
   const bn = normalizeForDoorlockBranchMatch(branch.name);
   if(!bn) return [];
-  const rooms = ROOM_PRICES.rooms || [];
+  const rooms = list || ROOM_PRICES.rooms || [];   // list: 업로드 직전의 새 가격표로 미리 계산할 때
   const names = [...new Set(rooms.map(r=> r.b))];
   let hit = names.filter(n=> normalizeForDoorlockBranchMatch(n) === bn);
   if(hit.length === 0){
@@ -6786,18 +6796,64 @@ function ledgerP1For(row, date){
   const m = (date || new Date()).getMonth() + 1;
   return row.altMonths.includes(m) ? row.p1Alt : (row.p1 || 0);
 }
-// 호실번호로 원장 행을 찾는다("201호"와 "201"을 같게 본다). 2인 거주 중이고 2인 입실료가
-// 있으면 그 값을, 아니면 1인 입실료를 쓴다.
-function roomLedgerPrice(room){
+// 호실번호로 원장 행을 찾는다("201호"와 "201"을 같게 본다). 지점이 하나로 특정되지 않거나 원장에
+// 없는 호실이면 null. list를 주면(업로드 직전의 새 가격표) 그 기준으로 찾는다.
+function roomLedgerRow(room, list){
   const branch = DB.branches.find(b=> b.id === room.branchId);
-  const rows = ledgerRowsForBranch(branch);
+  const rows = ledgerRowsForBranch(branch, list);
   if(rows.length === 0) return null;
   const target = normalizeRoomNo(String(room.number || '').replace(/호$/,''));
   if(!target) return null;
-  const row = rows.find(r=> (r.nums || []).some(n=> normalizeRoomNo(String(n).replace(/호$/,'')) === target));
+  return rows.find(r=> (r.nums || []).some(n=> normalizeRoomNo(String(n).replace(/호$/,'')) === target)) || null;
+}
+// 방 카드 가격: 2인 거주 중이고 2인 입실료가 있으면 그 값을, 아니면 1인 입실료를 쓴다.
+function roomLedgerPrice(room){
+  const row = roomLedgerRow(room);
   if(!row) return null;
   const amount = (roomHasDoubleOccupancy(room) && row.p2) ? row.p2 : ledgerP1For(row);
   return amount ? amount : null;
+}
+
+// 방 카드의 방 타입도 가격표(원장)가 기준이다(담당자 요청). 원장에서 찾은 호실의 타입이 대시보드와
+// 다르면 원장 쪽으로 바꾼다. 원장에 없는 호실은 건드리지 않는다. list를 주면 그 가격표 기준으로 계산한다.
+function roomTypeSyncPlan(list){
+  const changes = [];
+  (DB.rooms || []).forEach(room=>{
+    const row = roomLedgerRow(room, list);
+    const to = row ? cleanKeyLoose(row.r) : '';
+    if(!to || to === cleanKeyLoose(room.type)) return;
+    changes.push({ room, from: room.type || '', to });
+  });
+  return changes;
+}
+// 계획대로 호실 타입을 바꾸고 지점의 타입 목록에도 등록한다. 저장·로그는 부르는 쪽에서 한다(가격표
+// 업로드와 한 줄로 기록하려고). 실시간 동기화로 호실 객체가 바뀌었을 수 있으니 적용 직전에 계획을
+// 다시 만들어 넘길 것.
+function applyRoomTypeSync(changes){
+  changes.forEach(({ room, to })=>{
+    room.type = to;
+    const branch = DB.branches.find(b=> b.id === room.branchId);
+    if(branch) registerRoomType(branch, to);
+  });
+  return changes.length;
+}
+function roomTypeSyncSummary(changes, limit){
+  const out = changes.slice(0, limit).map(({ room, from, to })=>{
+    const branch = DB.branches.find(b=> b.id === room.branchId);
+    return `${branch ? branchLabel(branch) + ' ' : ''}${room.number}호: ${from || '(없음)'} → ${to}`;
+  });
+  if(changes.length > limit) out.push(`… 외 ${changes.length - limit}개`);
+  return out.join('\n');
+}
+function confirmRoomTypeSync(){
+  const changes = roomTypeSyncPlan();
+  if(!changes.length){ showAlert('방 타입이 모두 가격표와 같습니다.'); return; }
+  showConfirm(`방 카드의 방 타입을 가격표 기준으로 바꿀까요?\n\n바뀌는 호실 ${changes.length}개:\n${roomTypeSyncSummary(changes, 12)}\n\n가격표에 없는 호실은 그대로 둡니다.`, ()=>{
+    const n = applyRoomTypeSync(roomTypeSyncPlan());
+    logChange(`방 타입을 가격표 기준으로 변경: ${n}개 호실`);
+    scheduleSave(); render();
+    showAlert(`${n}개 호실의 방 타입을 가격표 기준으로 바꿨습니다.`);
+  });
 }
 function renderRoomPricePanel(){
   const box = document.createElement('div');
@@ -6834,6 +6890,20 @@ function renderRoomPricePanel(){
       : `방 카드 가격 연결: ${matched}/${total}개 호실 — 나머지는 원장에 없어 가격이 표시되지 않습니다.`
         + (unmatchedBranches.length ? ` (지점 자체가 안 잡힘: ${unmatchedBranches.join(', ')})` : '');
     box.appendChild(m);
+
+    // 방 타입이 가격표와 다른 호실(이 기능 이전에 올린 가격표, 또는 호실-타입 매칭에서 따로 바꾼 경우).
+    const typeChanges = roomTypeSyncPlan();
+    if(typeChanges.length){
+      const t = document.createElement('div');
+      t.className = 'room-type-sync';
+      t.style.cssText = 'display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12.5px; margin:-4px 0 12px; color:var(--st-hold); font-weight:600;';
+      t.appendChild(el('span', null, `방 타입이 가격표와 다른 호실: ${typeChanges.length}개`));
+      const syncBtn = el('button', 'btn small primary', '가격표 기준으로 맞추기');
+      syncBtn.title = '가격표에서 찾은 호실의 방 타입을 가격표 기준으로 바꿉니다(바뀌는 호실을 먼저 보여줍니다)';
+      syncBtn.onclick = confirmRoomTypeSync;
+      t.appendChild(syncBtn);
+      box.appendChild(t);
+    }
   }
 
   const btnRow = document.createElement('div');
@@ -6929,6 +6999,7 @@ const HANDOVER_NOTES = [
     '방배 이수역은 7~9월 입실료가 다르다. 분기마다 다시 올리는 것을 잊기 쉬워서, 원장에 평시가와 성수기가를 함께 저장하고 조회 시점의 달로 고른다(p1Alt / altMonths). 시기별 가격이 있는 지점이 늘면 관리표 규칙표(MGMT_PRICE_RULES)에 alt 열만 추가하면 된다.',
     '관리자 설정의 사용법·주의사항은 화면 문구가 아니라 도움말(adminHelpSections — 관리자 설정 상단 "도움말"과 각 영역 제목 옆 ?)에 모아 두었다. 화면에서 설명 문구를 뺐기 때문에, 관리자 설정에 버튼이나 동작을 추가·변경하면 도움말도 반드시 함께 고칠 것 — 도움말이 틀리면 사용자가 알아챌 방법이 없다.',
     '중복 계약 정리는 버튼 하나로 세 기준(완전 동일 → 계약일만 정정 → 계약기간만 정정)을 차례로 적용한다. 기준별로 따로 판정해 합치면 서로를 근거로 한 묶음을 통째로 지울 수 있어서(완전히 같은 A·A′ 사이에 계약기간만 고친 C가 끼어 등록된 경우), 앞 단계에서 지울 계약은 빼고 다음 단계를 판정한다(planContractDedupe). 판정 함수에 pool을 넘기는 이유가 이것이니 없애지 말 것.',
+    '방 카드의 방 타입도 방 가격 원장(가격표)이 기준이다. 가격표를 올리면 원장에서 찾은 호실의 room.type을 원장 타입으로 바꾸고(저장 전 확인 창에 미리 보여줌), 이미 올린 가격표와 다른 호실은 방 가격 관리의 "가격표 기준으로 맞추기"로 맞춘다. 원장에 없는 호실은 건드리지 않는다. 호실 찾기는 방 카드 가격과 같은 roomLedgerRow를 쓴다 — 둘이 다른 규칙으로 호실을 찾으면 가격과 타입이 서로 다른 행에서 나올 수 있다.',
     '관제센터 특성상 탭을 며칠씩 켜둔다. 그래서 실시간 동기화(onSnapshot)와 저장 시 충돌 검사가 들어가 있고, 날짜가 바뀌면 세션을 초기화한다. "고쳤는데 반영이 안 된다"는 제보는 대부분 오래된 탭이 옛 코드를 돌리고 있는 경우다.',
     '입실자 상태(이용중/입실확정 등)는 계약이 아니라 입실자 레코드에서 계산한다. 반대로 타임라인·계약만료는 계약 기준이라, 계약 데이터가 없는 외부 채널 예약(엔코스테이·리브애니웨어)이 누락되지 않도록 별도 처리가 들어가 있다.',
     '계산기 예비 가격(Calculator/room-prices.js의 ROOMS 배열)은 원장을 못 읽었을 때만 쓰는 값이니 거기서 가격을 고치지 말 것 — 고쳐도 대시보드와 어긋나기만 한다. 가격은 관리자 설정 > 방 가격 관리에서 올린다.',
