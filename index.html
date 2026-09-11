@@ -435,6 +435,14 @@
   .help-caution h4{ margin:0 0 4px; color:var(--st-hold); }
   .help-sec.flash{ animation:help-flash 1.6s ease; }
   @keyframes help-flash{ 0%{ background:var(--accent-soft); } 100%{ background:transparent; } }
+  /* 영역 제목 옆 ?: 그 영역 도움말만 보여주는 작은 창 */
+  .help-icon.active{ color:var(--accent-ink); border-color:var(--accent); background:var(--accent-soft); }
+  .help-popover{ position:absolute; z-index:2050; width:min(440px, calc(100vw - 24px)); background:var(--panel); border:1px solid var(--line); border-radius:12px; box-shadow:0 12px 32px rgba(0,0,0,.18); }
+  .help-popover-body{ max-height:min(60vh, 520px); overflow:auto; padding:2px 16px 12px; }
+  .help-popover .help-sec{ border-bottom:none; padding:12px 0 4px; }
+  .help-popover .help-sec h3{ padding-right:28px; }
+  .help-popover-close{ position:absolute; top:8px; right:8px; width:26px; height:26px; padding:0; border:none; border-radius:6px; background:transparent; color:var(--ink-soft); font-size:14px; line-height:1; cursor:pointer; }
+  .help-popover-close:hover{ background:var(--accent-soft); color:var(--ink); }
   .cleaning-cards-grid{ display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
   .upcoming-cards-grid{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; margin-bottom:16px; }
   .upcoming-days-toolbar{ display:flex; align-items:center; gap:8px; margin-bottom:10px; }
@@ -1039,7 +1047,7 @@ let lastKnownUpdatedAt = null;
 // 보인다" 같은 문제는 화면만 봐서는 캐시를 쓴 건지, 서버에서 0건을 받은 건지, 권한 오류로
 // 실패한 건지 구분이 안 돼서 진단이 계속 헛돌았다. 관리자 설정의 "데이터 로딩 상태"에서
 // 그대로 보여준다.
-const APP_BUILD = '2026-09-11-d';
+const APP_BUILD = '2026-09-11-e';
 let LOAD_DIAG = {
   contracts: { count: 0, source: '아직 불러오지 않음', error: '' },
   history:   { count: 0, source: '아직 불러오지 않음', error: '' },
@@ -5740,7 +5748,7 @@ function adminHelpSections(){
       summary:'관리자 설정은 슈퍼어드민 계정만 볼 수 있습니다. 여기서 바꾸는 내용은 이 대시보드를 쓰는 모든 사람의 화면에 바로 반영됩니다.',
       items:[
         ['빨간 버튼', '삭제하거나 덮어쓰는 작업입니다. 누르면 대상과 건수를 확인 창으로 먼저 보여주니, 숫자를 확인한 뒤 진행하세요.'],
-        ['제목 옆 ?', '누르면 이 도움말에서 그 영역 설명으로 바로 이동합니다.'],
+        ['제목 옆 ?', '누르면 그 영역의 도움말만 작은 창으로 보여줍니다. 전체 도움말은 상단 "📖 도움말"에서 봅니다.'],
         ['화면이 이상할 때', '"데이터 로딩 상태"의 실행 중인 코드 버전을 확인하세요. 탭을 오래 켜두면 예전 코드가 돌고 있을 수 있으니 Ctrl+Shift+R로 새로고침합니다.']
       ],
       cautions:['대부분의 작업에는 되돌리기 버튼이 없습니다. 크게 바꾸기 전에는 "데이터 백업"에서 전체 데이터를 먼저 내려받아 두세요.'] },
@@ -5860,8 +5868,40 @@ function adminHelpSections(){
   ];
 }
 
-// 도움말 창. focusId를 주면 그 영역 설명으로 바로 스크롤한다(제목 옆 ? 버튼).
-function openAdminHelp(focusId){
+// 목록 한 묶음(버튼·항목 / 알아두기 / 주의)을 그린다. [이름, 설명] 쌍이면 이름을 굵게 표시한다.
+function appendHelpList(parent, rows){
+  const ul = el('ul', 'help-list');
+  rows.forEach(row=>{
+    const li = document.createElement('li');
+    if(Array.isArray(row)){
+      li.appendChild(el('b', null, row[0]));
+      li.appendChild(document.createTextNode(' — ' + row[1]));
+    }else{
+      li.textContent = row;
+    }
+    ul.appendChild(li);
+  });
+  parent.appendChild(ul);
+}
+// 영역 하나의 도움말. 전체 도움말 창과 영역별 ? 창이 같은 모양을 쓴다.
+function renderAdminHelpSection(sec){
+  const node = el('section', 'help-sec');
+  node.appendChild(el('h3', null, sec.title));
+  if(sec.summary) node.appendChild(el('p', null, sec.summary));
+  if(sec.items && sec.items.length){ node.appendChild(el('h4', null, '버튼 · 항목')); appendHelpList(node, sec.items); }
+  if(sec.notes && sec.notes.length){ node.appendChild(el('h4', null, '알아두기')); appendHelpList(node, sec.notes); }
+  if(sec.cautions && sec.cautions.length){
+    const c = el('div', 'help-caution');
+    c.appendChild(el('h4', null, '주의'));
+    appendHelpList(c, sec.cautions);
+    node.appendChild(c);
+  }
+  return node;
+}
+
+// 전체 도움말 창(상단 "📖 도움말"). 목차를 누르면 그 영역으로 스크롤한다.
+function openAdminHelp(){
+  closeAdminHelpPopover();
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   const box = document.createElement('div');
@@ -5879,32 +5919,8 @@ function openAdminHelp(focusId){
   const toc = el('div', 'help-toc');
   body.appendChild(toc);
   const secEls = {};
-  const addList = (parent, rows)=>{
-    const ul = el('ul', 'help-list');
-    rows.forEach(row=>{
-      const li = document.createElement('li');
-      if(Array.isArray(row)){
-        li.appendChild(el('b', null, row[0]));
-        li.appendChild(document.createTextNode(' — ' + row[1]));
-      }else{
-        li.textContent = row;
-      }
-      ul.appendChild(li);
-    });
-    parent.appendChild(ul);
-  };
   adminHelpSections().forEach(sec=>{
-    const node = el('section', 'help-sec');
-    node.appendChild(el('h3', null, sec.title));
-    if(sec.summary) node.appendChild(el('p', null, sec.summary));
-    if(sec.items && sec.items.length){ node.appendChild(el('h4', null, '버튼 · 항목')); addList(node, sec.items); }
-    if(sec.notes && sec.notes.length){ node.appendChild(el('h4', null, '알아두기')); addList(node, sec.notes); }
-    if(sec.cautions && sec.cautions.length){
-      const c = el('div', 'help-caution');
-      c.appendChild(el('h4', null, '주의'));
-      addList(c, sec.cautions);
-      node.appendChild(c);
-    }
+    const node = renderAdminHelpSection(sec);
     secEls[sec.id] = node;
     body.appendChild(node);
     const link = el('button', null, sec.title);
@@ -5929,13 +5945,68 @@ function openAdminHelp(focusId){
   overlay.addEventListener('click', (e)=>{ if(e.target === overlay) close(); });
   document.addEventListener('keydown', onKey);
   document.body.appendChild(overlay);
-  if(focusId) jump(focusId);
   setTimeout(()=> closeBtn.focus(), 0);
+}
+
+// 영역 제목 옆 ?: 그 영역 도움말만 ? 바로 아래 작은 창으로 띄운다(전체는 상단 "📖 도움말", 담당자 요청).
+// 같은 ?를 다시 누르거나, 바깥을 누르거나, Esc를 누르면 닫힌다. 한 번에 하나만 열린다.
+let adminHelpPopover = null;   // { anchor, close }
+function closeAdminHelpPopover(){
+  if(!adminHelpPopover) return;
+  const p = adminHelpPopover;
+  adminHelpPopover = null;
+  p.close();
+}
+function toggleAdminHelpPopover(anchor, helpId){
+  const sameOpen = !!adminHelpPopover && adminHelpPopover.anchor === anchor;
+  closeAdminHelpPopover();
+  if(sameOpen) return;
+  const sec = adminHelpSections().find(x=> x.id === helpId);
+  if(!sec) return;
+
+  const pop = el('div', 'help-popover');
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-label', sec.title + ' 도움말');
+  const closeBtn = el('button', 'help-popover-close', '✕');
+  closeBtn.type = 'button';
+  closeBtn.title = '닫기';
+  closeBtn.onclick = closeAdminHelpPopover;
+  const body = el('div', 'help-popover-body');
+  body.appendChild(renderAdminHelpSection(sec));
+  pop.appendChild(closeBtn);
+  pop.appendChild(body);
+  document.body.appendChild(pop);
+
+  // ? 바로 아래에 붙이되, 오른쪽으로 넘치면 안쪽으로 당기고, 아래 공간이 모자라면 위로 올린다.
+  const r = anchor.getBoundingClientRect();
+  const w = pop.offsetWidth, h = pop.offsetHeight;
+  const left = Math.max(8, Math.min(r.left - 12, document.documentElement.clientWidth - w - 8));
+  const top = (r.bottom + 6 + h > window.innerHeight && r.top - 6 - h >= 0) ? r.top - 6 - h : r.bottom + 6;
+  pop.style.left = (left + window.scrollX) + 'px';
+  pop.style.top = (top + window.scrollY) + 'px';
+  anchor.classList.add('active');
+
+  const onDown = (e)=>{ if(!pop.contains(e.target) && !anchor.contains(e.target)) closeAdminHelpPopover(); };
+  const onKey = (e)=>{ if(e.key === 'Escape') closeAdminHelpPopover(); };
+  // 창 너비가 바뀌면 ? 위치가 달라지므로 닫는다. 휴대폰에서 스크롤할 때 주소창이 접히며 생기는
+  // 높이 변화에는 닫지 않는다(긴 도움말을 스크롤하다 창이 사라지지 않게).
+  const openWidth = window.innerWidth;
+  const onResize = ()=>{ if(window.innerWidth !== openWidth) closeAdminHelpPopover(); };
+  document.addEventListener('mousedown', onDown);
+  document.addEventListener('keydown', onKey);
+  window.addEventListener('resize', onResize);
+  adminHelpPopover = { anchor, close: ()=>{
+    pop.remove();
+    anchor.classList.remove('active');
+    document.removeEventListener('mousedown', onDown);
+    document.removeEventListener('keydown', onKey);
+    window.removeEventListener('resize', onResize);
+  }};
 }
 
 function renderAdminHelpBar(){
   const bar = el('div', 'admin-help-bar');
-  bar.appendChild(el('div', 'admin-help-lead', '버튼 설명과 주의사항은 도움말에 모아 두었습니다. 각 영역 제목 옆 ?를 누르면 해당 설명으로 바로 이동합니다.'));
+  bar.appendChild(el('div', 'admin-help-lead', '버튼 설명과 주의사항은 도움말에 모아 두었습니다. 각 영역 제목 옆 ?를 누르면 그 영역 도움말만 볼 수 있습니다.'));
   const btn = el('button', 'btn small', '📖 도움말');
   btn.onclick = ()=> openAdminHelp();
   bar.appendChild(btn);
@@ -5948,7 +6019,7 @@ function attachAdminHelpIcon(box, helpId){
   const b = el('button', 'help-icon', '?');
   b.type = 'button';
   b.title = '이 영역 도움말';
-  b.onclick = (e)=>{ e.stopPropagation(); openAdminHelp(helpId); };
+  b.onclick = (e)=>{ e.stopPropagation(); toggleAdminHelpPopover(b, helpId); };
   h3.appendChild(b);
 }
 
