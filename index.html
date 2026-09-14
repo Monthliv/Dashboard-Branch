@@ -374,6 +374,12 @@
   .tl-daycell{ border-right:1px solid #EFEBE0; }
   .tl-headrow .tl-daycell{ display:flex; align-items:center; justify-content:center; font-size:10px; color:var(--ink-soft); font-family:'JetBrains Mono',monospace; }
   .tl-daycell.weekend{ background:#FBF8F1; }
+  /* 오늘(한국시간) 날짜: 날짜 줄은 칸을 채워 강조하고, 방 행에서는 막대에 가려지지 않도록 그 날짜 칸 양쪽에
+     세로선을 긋는다. 세로선에는 z-index를 주지 않는다 — 왼쪽에 고정된 호실 칸(.tl-label, z-index:1)보다
+     아래에 깔려야 가로 스크롤할 때 호실 번호를 가리지 않는다(막대보다는 뒤에 추가해서 위에 그려진다). */
+  .tl-daycell.today{ background:var(--accent-soft); }
+  .tl-headrow .tl-daycell.today{ background:var(--accent); color:#fff; font-weight:700; }
+  .tl-today-col{ position:absolute; top:0; bottom:0; border-left:2px solid var(--accent); border-right:2px solid var(--accent); box-sizing:border-box; pointer-events:none; opacity:.55; }
   /* 3개월이 이어져 있을 때 달이 바뀌는 첫날의 경계를 아주 옅게만 표시한다 — 어느 달인지는
      위쪽 월 띠(.tl-monthband)가 이미 보여주므로, 날짜 줄에서는 숫자만 깔끔하게 두고 살짝
      구분만 되면 충분하다. */
@@ -1048,7 +1054,7 @@ let lastKnownUpdatedAt = null;
 // 보인다" 같은 문제는 화면만 봐서는 캐시를 쓴 건지, 서버에서 0건을 받은 건지, 권한 오류로
 // 실패한 건지 구분이 안 돼서 진단이 계속 헛돌았다. 관리자 설정의 "데이터 로딩 상태"에서
 // 그대로 보여준다.
-const APP_BUILD = '2026-09-11-g';
+const APP_BUILD = '2026-09-14-a';
 let LOAD_DIAG = {
   contracts: { count: 0, source: '아직 불러오지 않음', error: '' },
   history:   { count: 0, source: '아직 불러오지 않음', error: '' },
@@ -3527,6 +3533,10 @@ function renderTimelineSection(branch){
     const utcMs = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
     return Math.round((utcMs - windowStartUTC) / DAY_MS);
   }
+  // 오늘(한국시간) 날짜 칸의 위치. 3개월 창 밖(다른 달로 이동해서 볼 때)이면 표시하지 않는다.
+  const [todayY, todayM, todayD] = todayISO().split('-').map(Number);
+  const todayIdx = dayIndexOf(new Date(todayY, todayM - 1, todayD));
+  const todayInWindow = todayIdx >= 0 && todayIdx < totalDays;
 
   // 요일 칸 영역이 화면 스크롤이 아니라 이 화면 안에서만 좌우로 스크롤되므로, 가로 스크롤바가
   // 방이 많을 때 맨 아래(전체 행을 다 지나야 나오는 위치)에 생겨 손이 잘 안 닿았다. 날짜
@@ -3583,8 +3593,9 @@ function renderTimelineSection(branch){
     const d = new Date(windowStart.getTime() + i*DAY_MS);
     const dow = d.getDay();
     const cell = document.createElement('div');
-    cell.className = 'tl-daycell' + ((dow===0||dow===6) ? ' weekend' : '') + (d.getDate()===1 ? ' month-start' : '');
+    cell.className = 'tl-daycell' + ((dow===0||dow===6) ? ' weekend' : '') + (d.getDate()===1 ? ' month-start' : '') + (i===todayIdx ? ' today' : '');
     cell.textContent = String(d.getDate());
+    if(i===todayIdx) cell.title = '오늘';
     headDays.appendChild(cell);
   }
   headRow.appendChild(headDays);
@@ -3616,7 +3627,7 @@ function renderTimelineSection(branch){
       const d = new Date(windowStart.getTime() + i*DAY_MS);
       const dow = d.getDay();
       const cell = document.createElement('div');
-      cell.className = 'tl-daycell' + ((dow===0||dow===6) ? ' weekend' : '') + (d.getDate()===1 ? ' month-start' : '');
+      cell.className = 'tl-daycell' + ((dow===0||dow===6) ? ' weekend' : '') + (d.getDate()===1 ? ' month-start' : '') + (i===todayIdx ? ' today' : '');
       days.appendChild(cell);
     }
     return days;
@@ -3634,6 +3645,12 @@ function renderTimelineSection(branch){
     row.appendChild(lbl);
     const days = buildDayCells();
     bars.forEach(bar=>{ if(bar) days.appendChild(bar); });
+    if(todayInWindow){
+      const todayCol = el('div', 'tl-today-col');
+      todayCol.style.left = (todayIdx * DAY_CELL_PX) + 'px';
+      todayCol.style.width = DAY_CELL_PX + 'px';
+      days.appendChild(todayCol);
+    }
     row.appendChild(days);
     gridWrap.appendChild(row);
   }
@@ -3654,49 +3671,53 @@ function renderTimelineSection(branch){
        <span class="nm" style="color:${meta.fg};font-weight:700;"><span class="tl-status-dot" style="background:${meta.fg}"></span>${esc(label)}</span>`,
       [], null);
   }
+  // 계약의 주인을 지금 입실자(DB.residents)와 퇴실 이력(DB.residentHistory)을 함께 후보로 놓고 찾는다.
+  //  1) sourceContractId로 직접 연결된 입실자, 그다음 이력이 있으면 그것.
+  //  2) 없으면(기존 입실자에게 계약만 추가로 등록된 경우가 훨씬 흔함) 같은 방에서 계약 기간과 거주 기간이
+  //     겹치는 입실자·이력 중 계약서의 입실자/계약자명과 이름이 같은 쪽을 우선한다 — 2인실처럼 같은 기간에
+  //     둘 이상 겹치면 날짜만으로는 누구 계약인지 알 수 없다.
+  //  3) 그 안에서는 입실일이 계약 시작일에 가장 가까운 쪽을 고른다(같으면 지금 입실자).
+  // 예전에는 겹치는 "지금 입실자"가 한 명이라도 있으면 이력은 아예 보지 않아서, 중도퇴실한 사람의 계약이
+  // 그 뒤에 들어온 다음 입실자 이름으로 계약 종료일까지 이용중처럼 그려졌다(강남일원 409호 류의 제보).
+  function findContractOwner(c, range, group){
+    const linkedResident = DB.residents.find(p=> p.sourceContractId===c.id);
+    if(linkedResident) return { resident: linkedResident };
+    const linkedHistory = DB.residentHistory.find(h=> h.sourceContractId===c.id);
+    if(linkedHistory) return { history: linkedHistory };
+    const declaredName = String(c.resident || c.contractor || '').trim();
+    const nameHit = x=> !!declaredName && (x.name===declaredName || x.actualResidentName===declaredName);
+    const candidates = [];
+    DB.residents.forEach(p=>{
+      if(!group.roomIds.has(p.roomId) || !p.moveIn) return;
+      if(p.moveIn <= range.end && (p.moveOut || '9999-12-31') >= range.start) candidates.push({ resident: p, rec: p, order: 0 });
+    });
+    DB.residentHistory.forEach(h=>{
+      if(!group.roomIds.has(h.roomId) || !h.moveIn) return;
+      if(h.moveIn <= range.end && (h.moveOut || h.moveIn) >= range.start) candidates.push({ history: h, rec: h, order: 1 });
+    });
+    if(candidates.length === 0) return {};
+    const pool = candidates.some(x=> nameHit(x.rec)) ? candidates.filter(x=> nameHit(x.rec)) : candidates;
+    const startMs = Date.parse(range.start);
+    const gap = x=> Math.abs(Date.parse(x.rec.moveIn) - startMs) || 0;
+    pool.sort((a,b)=> (gap(a) - gap(b)) || (a.order - b.order));
+    return pool[0];
+  }
   // 계약/입실자/과거 퇴실자 세 가지 출처를 전부 {range, meta, name, memo, room}로 통일해서 다루고,
   // 같은 호실번호의 항목들은 (아래에서) 한 행 안에 막대 여러 개로 이어 붙인다.
   function contractTimelineEntry(x, group){
     const c = x.contract, range = x.range;
     const room = group.rooms.find(r=> r.id===c.roomId) || group.rooms[0];
-    // 이 계약으로 생성/연결된 입실자 레코드가 있으면(sourceContractId) 우선 쓰고, 없어도(기존
-    // 입실자에게 계약만 추가로 등록된 경우가 훨씬 흔함) 같은 방에서 이 계약 기간과 거주 기간이
-    // 겹치는 입실자를 찾아 그 카드의 실거주자명·메모·퇴실예정 여부를 그대로 따른다. 아무도
-    // 못 찾으면 계약 데이터의 입실자/계약자명만으로 표시한다.
-    let matched = DB.residents.find(p=>p.sourceContractId===c.id) || null;
-    if(!matched){
-      const candidates = DB.residents.filter(p=>{
-        if(!group.roomIds.has(p.roomId) || !p.moveIn) return false;
-        const pOut = p.moveOut || '9999-12-31';
-        return p.moveIn <= range.end && pOut >= range.start;
-      });
-      // 2인실처럼 같은 기간에 겹치는 입실자가 둘 이상이면, 날짜만으로는 이 계약이 누구 것인지
-      // 알 수 없다 — 계약서에 적힌 이름과 일치하는 실입실자를 우선 찾아 정확히 짚어낸다.
-      const declaredName = String(c.resident || c.contractor || '').trim();
-      matched = (declaredName && candidates.find(p=> p.name===declaredName || p.actualResidentName===declaredName))
-        || candidates[0] || null;
-    }
-    // 위에서 못 찾았다면(=이 계약의 입실자가 이미 퇴실 처리되어 DB.residents에서 히스토리로
-    // 옮겨짐) 계약 기간(contractPeriod)만으로 판단하면 안 된다 — 중도퇴실 등으로 실제 퇴실일이
-    // 계약서상 종료일보다 이르면, 계약은 아직 "이용중" 기간처럼 보여서 이미 나간 사람이 타임
-    // 라인에는 계속 거주 중인 것으로 표시된다(강남일원 409호 등에서 보고됨). matched가 없을
-    // 때만 이력에서 같은 방식으로 찾아, 있으면 실제 퇴실일을 기준으로 표시한다.
-    let matchedHistory = null;
-    if(!matched){
-      matchedHistory = DB.residentHistory.find(h=>h.sourceContractId===c.id) || null;
-      if(!matchedHistory){
-        const declaredName = String(c.resident || c.contractor || '').trim();
-        const histCandidates = DB.residentHistory.filter(h=>{
-          if(!group.roomIds.has(h.roomId) || !h.moveIn) return false;
-          const hOut = h.moveOut || h.moveIn;
-          return h.moveIn <= range.end && hOut >= range.start;
-        });
-        matchedHistory = (declaredName && histCandidates.find(h=> h.name===declaredName)) || histCandidates[0] || null;
-      }
-    }
-    // 이력이 매칭됐으면 표시 기간도 계약서상 종료일이 아니라 실제 퇴실일로 잘라낸다 — 안 그러면
-    // 상태 라벨만 "퇴실"로 바뀌고 막대는 여전히 미래(계약 종료일)까지 길게 이어져 보인다.
-    const effectiveRange = matchedHistory ? { start: range.start, end: matchedHistory.moveOut || matchedHistory.moveIn } : range;
+    // 주인이 지금 입실자면 그 카드의 실거주자명·메모·퇴실예정 여부를 따르고, 퇴실 이력이면 퇴실자로 그린다.
+    // 아무도 못 찾으면 계약 데이터의 입실자/계약자명만으로 표시한다.
+    const owner = findContractOwner(c, range, group);
+    const matched = owner.resident || null;
+    const matchedHistory = owner.history || null;
+    // 퇴실 처리된 입실자는 계약현황에 계약 날짜가 남아 있어도 실제 거주 기간(이력의 입실일~퇴실일)으로
+    // 그린다(담당자 요청). 계약 날짜를 쓰면 중도퇴실한 사람이 계약 종료일까지 거주한 것처럼 보인다.
+    // 같은 이력에 연결된 계약이 여러 건(갱신 계약 등)이면 아래에서 막대 하나로 합친다.
+    const effectiveRange = matchedHistory
+      ? { start: matchedHistory.moveIn || range.start, end: matchedHistory.moveOut || matchedHistory.moveIn || range.end }
+      : range;
     const today = todayISO();
     let meta;
     if(matchedHistory) meta = timelineStatusMeta('퇴실');
@@ -3711,8 +3732,8 @@ function renderTimelineSection(branch){
     // matched(입실자 레코드) 기준으로는 서로 다른 사람처럼 보일 수 있어서, 입실자가 아니라
     // 계약서에 적힌 입실자/계약자명 자체를 기준으로 같은 사람 여부를 비교한다.
     const contractOccupantName = String(c.resident || c.contractor || '').trim();
-    const matchKey = contractOccupantName ? ('n:'+contractOccupantName) : (matched ? ('id:'+matched.id) : null);
-    return { range: effectiveRange, meta, name: maskViewerName(rawName) || '이름 미입력', memo: matched ? (matched.memo||'') : '', room, matchKey };
+    const matchKey = matchedHistory ? null : (contractOccupantName ? ('n:'+contractOccupantName) : (matched ? ('id:'+matched.id) : null));
+    return { range: effectiveRange, meta, name: maskViewerName(rawName) || '이름 미입력', memo: matched ? (matched.memo||'') : '', room, matchKey, historyId: matchedHistory ? matchedHistory.id : null };
   }
   function residentTimelineEntry(p, room){
     return {
@@ -3825,8 +3846,16 @@ function renderTimelineSection(branch){
       // 같은 사람이 계속 거주하는 것인데, 그 연장 계약만 보이는 미래 달을 보고 있으면 "오늘"
       // 걸쳐 있는 원래 계약은 이번 달 표시 대상(monthContracts)에서 이미 빠져 있어 비교 대상이
       // 없어진다. 그래서 이번 달로 자르기 전, 호실의 계약 전체를 기준으로 먼저 판별한다.
+      // 같은 퇴실 이력에 연결된 계약이 여러 건(갱신 계약 등)이어도 실제 거주는 한 번이므로 막대 하나로 합친다.
+      const seenHistoryIds = new Set();
       const allContractEntries = visible
         .map(x=> contractTimelineEntry(x, group))
+        .filter(e=>{
+          if(!e.historyId) return true;
+          if(seenHistoryIds.has(e.historyId)) return false;
+          seenHistoryIds.add(e.historyId);
+          return true;
+        })
         .sort((a,b)=> a.range.start.localeCompare(b.range.start));
       const today0 = todayISO();
       const activeToday = allContractEntries.find(e=> e.matchKey && e.range.start<=today0 && e.range.end>=today0);
@@ -3837,9 +3866,17 @@ function renderTimelineSection(branch){
           }
         });
       }
+      // 어느 계약에도 연결되지 않은 퇴실 이력(계약 데이터가 없던 시기의 거주, 외부 채널로 들어왔다 나간
+      // 입실자 등)도 계약이 없는 호실과 똑같이 실제 거주 기간으로 보여준다 — 계약이 있는 호실이라는
+      // 이유만으로 퇴실자가 타임라인에서 사라지지 않게.
+      const unlinkedHistory = DB.residentHistory
+        .filter(h=> group.roomIds.has(h.roomId) && h.moveIn && !seenHistoryIds.has(h.id)
+          && new Date(h.moveOut || h.moveIn) >= windowStart && new Date(h.moveIn) <= windowEnd)
+        .map(h=> historyTimelineEntry(h, group.rooms.find(r=>r.id===h.roomId) || primaryRoom));
       entries = allContractEntries
         .filter(e=> new Date(e.range.end) >= windowStart && new Date(e.range.start) <= windowEnd)
         .concat(externalEntries)
+        .concat(unlinkedHistory)
         .sort((a,b)=> a.range.start.localeCompare(b.range.start));
     } else {
       // 현재 입실자가 퇴실예정으로 확정되면 다음 입실자를 미리 등록해둘 수 있어서(관리자 설정과
@@ -7000,6 +7037,7 @@ const HANDOVER_NOTES = [
     '관리자 설정의 사용법·주의사항은 화면 문구가 아니라 도움말(adminHelpSections — 관리자 설정 상단 "도움말"과 각 영역 제목 옆 ?)에 모아 두었다. 화면에서 설명 문구를 뺐기 때문에, 관리자 설정에 버튼이나 동작을 추가·변경하면 도움말도 반드시 함께 고칠 것 — 도움말이 틀리면 사용자가 알아챌 방법이 없다.',
     '중복 계약 정리는 버튼 하나로 세 기준(완전 동일 → 계약일만 정정 → 계약기간만 정정)을 차례로 적용한다. 기준별로 따로 판정해 합치면 서로를 근거로 한 묶음을 통째로 지울 수 있어서(완전히 같은 A·A′ 사이에 계약기간만 고친 C가 끼어 등록된 경우), 앞 단계에서 지울 계약은 빼고 다음 단계를 판정한다(planContractDedupe). 판정 함수에 pool을 넘기는 이유가 이것이니 없애지 말 것.',
     '방 카드의 방 타입도 방 가격 원장(가격표)이 기준이다. 가격표를 올리면 원장에서 찾은 호실의 room.type을 원장 타입으로 바꾸고(저장 전 확인 창에 미리 보여줌), 이미 올린 가격표와 다른 호실은 방 가격 관리의 "가격표 기준으로 맞추기"로 맞춘다. 원장에 없는 호실은 건드리지 않는다. 호실 찾기는 방 카드 가격과 같은 roomLedgerRow를 쓴다 — 둘이 다른 규칙으로 호실을 찾으면 가격과 타입이 서로 다른 행에서 나올 수 있다.',
+    '타임라인에서 퇴실 처리된 입실자는 계약현황의 계약 날짜가 아니라 퇴실 이력의 입실일~퇴실일로 그린다. 계약의 주인은 지금 입실자와 퇴실 이력을 함께 후보로 놓고 찾는다(sourceContractId → 계약서 이름 일치 → 입실일이 계약 시작일에 가장 가까운 순, findContractOwner). 예전처럼 겹치는 지금 입실자가 있다고 이력을 보지 않으면, 중도퇴실한 사람의 계약이 다음 입실자 이름으로 계약 종료일까지 이용중처럼 그려진다. 같은 이력에 연결된 여러 계약은 막대 하나로 합치고, 어느 계약에도 연결되지 않은 이력은 따로 회색 막대로 보여준다.',
     '관제센터 특성상 탭을 며칠씩 켜둔다. 그래서 실시간 동기화(onSnapshot)와 저장 시 충돌 검사가 들어가 있고, 날짜가 바뀌면 세션을 초기화한다. "고쳤는데 반영이 안 된다"는 제보는 대부분 오래된 탭이 옛 코드를 돌리고 있는 경우다.',
     '입실자 상태(이용중/입실확정 등)는 계약이 아니라 입실자 레코드에서 계산한다. 반대로 타임라인·계약만료는 계약 기준이라, 계약 데이터가 없는 외부 채널 예약(엔코스테이·리브애니웨어)이 누락되지 않도록 별도 처리가 들어가 있다.',
     '계산기 예비 가격(Calculator/room-prices.js의 ROOMS 배열)은 원장을 못 읽었을 때만 쓰는 값이니 거기서 가격을 고치지 말 것 — 고쳐도 대시보드와 어긋나기만 한다. 가격은 관리자 설정 > 방 가격 관리에서 올린다.',
