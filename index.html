@@ -1054,7 +1054,7 @@ let lastKnownUpdatedAt = null;
 // 보인다" 같은 문제는 화면만 봐서는 캐시를 쓴 건지, 서버에서 0건을 받은 건지, 권한 오류로
 // 실패한 건지 구분이 안 돼서 진단이 계속 헛돌았다. 관리자 설정의 "데이터 로딩 상태"에서
 // 그대로 보여준다.
-const APP_BUILD = '2026-09-14-a';
+const APP_BUILD = '2026-09-14-b';
 let LOAD_DIAG = {
   contracts: { count: 0, source: '아직 불러오지 않음', error: '' },
   history:   { count: 0, source: '아직 불러오지 않음', error: '' },
@@ -2352,16 +2352,15 @@ function isUpcoming(p){
 function occupiesRoom(p){
   return isCurrentlyResiding(p) || isUpcoming(p);
 }
-// 특정 날짜에 이 입실자가 실제로 거주하고 있는지: 그 날짜에 이미 입실했고(입실일<=그 날짜)
-// 아직 퇴실 전(퇴실일이 없거나 그 날짜보다 이후)이어야 한다. 입실일이 그 날짜보다 미래이거나
-// 퇴실일이 그 날짜와 같거나 이전이면 해당 없음. occupiesRoom()은 "오늘" 기준으로 미래의 아무
-// 때나 입실 예정이기만 하면 무조건 true라서, 몇 달 뒤에나 입실할 예약자 때문에 "지금 나가는
-// 사람이 있는데도 방이 안 빈다"고 잘못 판단하는 문제가 있다(roomWouldBeVacantExcept 참고).
-function residesOnDate(p, dateStr){
-  if(!p.moveIn || !dateStr) return false;
-  if(p.moveIn > dateStr) return false;
-  if(p.moveOut && p.moveOut <= dateStr) return false;
-  return true;
+// 퇴실일에 방이 비는지 판단할 때 "계속 사는 사람"으로 셀 입실자인지: 퇴실일 이전부터 살고 있었고(입실일<퇴실일)
+// 퇴실일 이후에도 계속 사는(퇴실일이 없거나 그 뒤) 사람만 해당한다(2인실 룸메이트 등). 퇴실청소 판단에 쓴다.
+//  - 퇴실일 당일에 들어오는 새 입실자는 세지 않는다 — 당일 청소하고 당일 입실시키는 경우가 있어서, 그 입실자
+//    때문에 퇴실청소가 안 걸리면 안 된다(담당자 요청, 예전 residesOnDate는 당일 입실자도 "그날 거주"로 셌다).
+//  - occupiesRoom()은 "오늘" 기준으로 미래의 아무 때나 입실 예정이기만 하면 true라서, 몇 달 뒤에나 입실할
+//    예약자 때문에 "지금 나가는 사람이 있는데도 방이 안 빈다"고 잘못 판단한다(마곡발산 902호, 성수 301호).
+function keepsLivingThrough(p, leaveDate){
+  if(!p.moveIn || !leaveDate) return false;
+  return p.moveIn < leaveDate && (!p.moveOut || p.moveOut > leaveDate);
 }
 function roomHasOverdueResident(room){
   return DB.residents.some(p => p.roomId===room.id && isOverdue(p));
@@ -2395,7 +2394,7 @@ function flagUpcomingCleaning(room, cleaningBaseDate, sourceResidentId){
 function roomWouldBeVacantExcept(room, excludeId){
   const leaver = DB.residents.find(x=> x.id===excludeId);
   const asOfDate = (leaver && leaver.moveOut) || todayISO();
-  return !DB.residents.some(x=> x.roomId===room.id && x.id!==excludeId && residesOnDate(x, asOfDate));
+  return !DB.residents.some(x=> x.roomId===room.id && x.id!==excludeId && keepsLivingThrough(x, asOfDate));
 }
 // 퇴실 예약 때문에 미리 걸어둔 퇴실청소 플래그를, 정작 그 입실자가 연장해서 계속 거주하기로
 // 하면 취소한다. cleaningFlagSourceId로 "이 사람 때문에" 걸린 플래그인지 확인하므로, 다른
@@ -2442,7 +2441,15 @@ function moveResidentToHistory(p, moveOutOverride){
     if(!STATUS_LIST_MANUAL.includes(room.saleStatus)){
       room.saleStatus = '공실';
     }
-    flagUpcomingCleaning(room, todayISO());
+  }
+  // 퇴실청소는 "이 사람이 나간 날 방이 비는지"로 판단한다 — 퇴실확정 때(roomWouldBeVacantExcept)와 같은 기준
+  // (keepsLivingThrough). 예전에는 roomHasActiveResident(먼 미래의 입실예정자도 재실로 셈)를 써서, 다음
+  // 입실자가 미리 등록돼 있기만 하면 당일퇴실·중도퇴실·환불 퇴실·자동 퇴실 처리 때 청소가 아예 걸리지 않았다
+  // (성수 301호). 퇴실확정 때 이미 걸어둔 퇴실청소는 청소일이 바뀌지 않도록 그대로 둔다.
+  if(room && !room.needsCleaning){
+    const leftOn = historyEntry.moveOut;
+    const vacantOnLeave = !DB.residents.some(x=> x.roomId===room.id && keepsLivingThrough(x, leftOn));
+    if(vacantOnLeave) flagUpcomingCleaning(room, todayISO());
   }
 }
 function restoreFromHistory(h){
@@ -7038,6 +7045,7 @@ const HANDOVER_NOTES = [
     '중복 계약 정리는 버튼 하나로 세 기준(완전 동일 → 계약일만 정정 → 계약기간만 정정)을 차례로 적용한다. 기준별로 따로 판정해 합치면 서로를 근거로 한 묶음을 통째로 지울 수 있어서(완전히 같은 A·A′ 사이에 계약기간만 고친 C가 끼어 등록된 경우), 앞 단계에서 지울 계약은 빼고 다음 단계를 판정한다(planContractDedupe). 판정 함수에 pool을 넘기는 이유가 이것이니 없애지 말 것.',
     '방 카드의 방 타입도 방 가격 원장(가격표)이 기준이다. 가격표를 올리면 원장에서 찾은 호실의 room.type을 원장 타입으로 바꾸고(저장 전 확인 창에 미리 보여줌), 이미 올린 가격표와 다른 호실은 방 가격 관리의 "가격표 기준으로 맞추기"로 맞춘다. 원장에 없는 호실은 건드리지 않는다. 호실 찾기는 방 카드 가격과 같은 roomLedgerRow를 쓴다 — 둘이 다른 규칙으로 호실을 찾으면 가격과 타입이 서로 다른 행에서 나올 수 있다.',
     '타임라인에서 퇴실 처리된 입실자는 계약현황의 계약 날짜가 아니라 퇴실 이력의 입실일~퇴실일로 그린다. 계약의 주인은 지금 입실자와 퇴실 이력을 함께 후보로 놓고 찾는다(sourceContractId → 계약서 이름 일치 → 입실일이 계약 시작일에 가장 가까운 순, findContractOwner). 예전처럼 겹치는 지금 입실자가 있다고 이력을 보지 않으면, 중도퇴실한 사람의 계약이 다음 입실자 이름으로 계약 종료일까지 이용중처럼 그려진다. 같은 이력에 연결된 여러 계약은 막대 하나로 합치고, 어느 계약에도 연결되지 않은 이력은 따로 회색 막대로 보여준다.',
+    '퇴실청소는 "그 사람이 나간 날 방이 비는지"로 건다 — 퇴실확정(roomWouldBeVacantExcept)과 실제 퇴실 처리(moveResidentToHistory) 모두 keepsLivingThrough(퇴실일 이전부터 살고 그 뒤에도 사는 사람만 셈)로 판단한다. occupiesRoom처럼 먼 미래 입실예정자를, 또는 당일 입실자를 "재실"로 세면 퇴실청소가 안 걸린다(마곡발산 902호, 성수 301호 — 당일 청소 후 당일 입실하는 경우가 있다). 새 입실자가 살기 시작해도 퇴실청소는 지우지 않고(청소완료 버튼으로만 지움) 리터치만 지운다(clearCleaningFlagsOnMoveIn, 2026-09 담당자 정책).',
     '관제센터 특성상 탭을 며칠씩 켜둔다. 그래서 실시간 동기화(onSnapshot)와 저장 시 충돌 검사가 들어가 있고, 날짜가 바뀌면 세션을 초기화한다. "고쳤는데 반영이 안 된다"는 제보는 대부분 오래된 탭이 옛 코드를 돌리고 있는 경우다.',
     '입실자 상태(이용중/입실확정 등)는 계약이 아니라 입실자 레코드에서 계산한다. 반대로 타임라인·계약만료는 계약 기준이라, 계약 데이터가 없는 외부 채널 예약(엔코스테이·리브애니웨어)이 누락되지 않도록 별도 처리가 들어가 있다.',
     '계산기 예비 가격(Calculator/room-prices.js의 ROOMS 배열)은 원장을 못 읽었을 때만 쓰는 값이니 거기서 가격을 고치지 말 것 — 고쳐도 대시보드와 어긋나기만 한다. 가격은 관리자 설정 > 방 가격 관리에서 올린다.',
@@ -8520,26 +8528,21 @@ function autoFlagDueRetouch(){
   });
   if(changed) scheduleSave();
 }
-// 청소/리터치가 예정된 방에 "새로운" 입실자가 들어와 살기 시작하면 그 예정은 더 이상 의미가
-// 없다고 보고 자동으로 초기화한다 — 입실 전에 이미 청소가 끝났다고 보는 게 자연스럽고, 직원이
-// "청소완료"/"리터치완료" 버튼 누르는 걸 잊었을 때를 위한 안전장치이기도 하다. 추가청소
-// (needsExtraCleaning)는 별개로 수동 관리되는 항목이라 건드리지 않는다.
-// 주의: 재실 중인 입실자가 있다고 해서 무조건 초기화하면 안 된다 — 퇴실확정(scheduledToLeave)
-// 상태로 청소 예정을 미리 걸어둔 그 사람 본인은, 실제 퇴실 처리(모두 퇴실 처리 버튼을 누르기
-// 전)가 될 때까지 여전히 "재실 중"으로 간주된다(moveIn<=오늘). 이 경우까지 "새 입실자가
-// 들어왔다"고 오인해 청소 예정을 지워버리면, 정작 퇴실일 당일에 청소완료 버튼이 사라져버리는
-// 문제가 생긴다(신삼B동 402호 등에서 보고됨). room.cleaningFlagSourceId(청소 예정을 만든
-// 원인 입실자 id, flagUpcomingCleaning 참고)가 지금 재실 중인 바로 그 사람과 같으면 "그 사람
-// 본인이 아직 안 나간 것"이므로 건드리지 않고, 다르면(또는 원래 없었으면, 즉 실제 퇴실 처리
-// 시점에 걸린 경우) 진짜 새 입실자로 보고 초기화한다.
+// 리터치가 예정된 방에 "새로운" 입실자가 들어와 살기 시작하면 그 리터치는 더 이상 의미가 없다고 보고 자동으로
+// 지운다(직원이 "리터치완료"를 잊었을 때의 안전장치이기도 하다).
+// 퇴실청소는 지우지 않는다 — 당일 청소하고 당일 입실시키는 경우가 있어서, 새 입실자가 이미 살고 있다는 이유로
+// 지우면 그날 해야 할 청소 지시가 사라진다(성수 301호, 담당자 정책). 퇴실청소는 청소완료 버튼으로만 지운다.
+// 2026-09 이전에는 퇴실청소도 함께 지웠다. 추가청소(needsExtraCleaning)는 별개로 수동 관리되는 항목이라 건드리지 않는다.
+// 주의: 재실 중인 입실자가 있다고 무조건 지우면 안 된다 — 예정을 만든 원인 입실자(room.cleaningFlagSourceId)가
+// 아직 살고 있으면 "그 사람 본인이 아직 안 나간 것"이므로 건드리지 않는다(신삼B동 402호).
 function clearCleaningFlagsOnMoveIn(){
   let changed = false;
   DB.rooms.forEach(room=>{
-    if(!(room.needsCleaning || room.needsRetouch)) return;
-    const currentResident = DB.residents.find(p=> p.roomId===room.id && isCurrentlyResiding(p));
-    if(!currentResident) return;
-    if(room.cleaningFlagSourceId && room.cleaningFlagSourceId === currentResident.id) return;
-    room.needsCleaning = false;
+    // 퇴실청소가 함께 걸려 있으면 청소일(maintenanceDate)은 퇴실청소 것이므로 건드리지 않는다.
+    if(!room.needsRetouch || room.needsCleaning) return;
+    const current = DB.residents.filter(p=> p.roomId===room.id && isCurrentlyResiding(p));
+    if(current.length === 0) return;
+    if(room.cleaningFlagSourceId && current.some(p=> p.id === room.cleaningFlagSourceId)) return;
     room.needsRetouch = false;
     room.maintenanceDate = '';
     room.maintenanceMemo = '';
