@@ -629,6 +629,33 @@
   }
   .modal-msg{ font-size:13.5px; color:var(--ink); white-space:pre-wrap; line-height:1.6; margin-bottom:16px; }
   .modal-btn-row{ display:flex; justify-content:flex-end; gap:8px; }
+  /* 방 카드 "이력" 창: 입퇴실·수정이력·청소이력 탭. 제목과 탭은 위에 고정해 목록을 스크롤해도 탭이 보이게 한다. */
+  .modal-box.room-hist-box{ max-width:680px; max-height:82vh; overflow:auto; padding:0; }
+  .room-hist-top{ position:sticky; top:0; z-index:1; background:var(--panel); border-bottom:1px solid var(--line); padding:14px 18px 0; }
+  .room-hist-head{ display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+  .room-hist-title{ flex:1; font-weight:700; font-size:14px; }
+  .room-hist-tabs{ display:flex; gap:4px; }
+  .room-hist-tab{ font:inherit; font-size:12.5px; font-weight:600; padding:7px 12px; border:none; border-bottom:2px solid transparent; background:transparent; color:var(--ink-soft); cursor:pointer; }
+  .room-hist-tab:hover{ color:var(--ink); }
+  .room-hist-tab.active{ color:var(--accent-ink); border-bottom-color:var(--accent); }
+  .room-hist-body{ padding:10px 18px 16px; }
+  .room-hist-body .history-entry{ padding:8px 0; }
+  .clean-hist-row{ display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 4px; border-bottom:1px solid var(--line); font-size:12.5px; }
+  .edit-hist-toolbar{ display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+  .edit-hist-filter{ font:inherit; font-size:12px; padding:4px 6px; border:1px solid var(--line); border-radius:6px; background:var(--panel); max-width:200px; }
+  .edit-hist-note{ font-size:11.5px; color:var(--ink-soft); }
+  .edit-hist-row{ padding:8px 2px; border-bottom:1px solid var(--line); font-size:12.5px; }
+  .edit-hist-row:last-child{ border-bottom:none; }
+  .edit-hist-meta{ display:flex; gap:8px; align-items:center; margin-bottom:2px; }
+  .edit-hist-time{ font-family:'JetBrains Mono',monospace; color:var(--ink-soft); font-size:11.5px; }
+  .edit-hist-by{ color:var(--accent-ink); font-weight:600; font-size:11.5px; }
+  .edit-hist-by.auto{ color:var(--ink-soft); background:var(--st-vacant-bg); padding:0 6px; border-radius:999px; font-weight:700; }
+  .edit-hist-target{ font-weight:700; color:var(--ink); }
+  .edit-hist-change{ display:flex; flex-wrap:wrap; gap:6px; align-items:baseline; margin-top:2px; white-space:pre-wrap; word-break:break-all; }
+  .edit-hist-before{ color:var(--ink-soft); text-decoration:line-through; }
+  .edit-hist-arrow{ color:var(--ink-soft); }
+  .edit-hist-after{ color:var(--ink); font-weight:600; }
+  .edit-hist-empty{ font-size:12.5px; color:var(--ink-soft); padding:12px 0; white-space:pre-wrap; }
 
   @media (max-width: 640px){
     .cleaning-cards-grid{ grid-template-columns:1fr; }
@@ -708,7 +735,7 @@ let DB = null;
 let UI = {
   view:'stats', branchId:null, branchTab:'rooms',
   roomEditMode:{}, residentEditMode:{}, roomSnapshots:{}, residentSnapshots:{}, draftResident:{}, parkingListOpen:{}, residentFieldEdit:{},
-  branchEditMode:{}, branchSnapshots:{}, branchInfoOpen:{}, historyOpen:{}, addingBranch:false, addingRoom:false, managingRoom:false, managingTypePrice:false, editingBranchId:null, branchOrderOpen:false,
+  branchEditMode:{}, branchSnapshots:{}, branchInfoOpen:{}, addingBranch:false, addingRoom:false, managingRoom:false, managingTypePrice:false, editingBranchId:null, branchOrderOpen:false,
   tlYear:null, tlMonth:null, tlScrollLeft:null, roomStatusFilter:'전체', cleanWeekStart:null, overdueTabKey:null,
   cleanTodayPage:1, cleanFuturePage:1, shortcutSelectedId:null, upcomingSoonDays:7, doorlockHistoryOffset:0, roomPriceTableOpen:false
 };
@@ -1050,11 +1077,157 @@ async function writeChangeLog(summary){
 // 서버의 현재 updatedAt과 이 값을 비교해서, 이 탭을 열어둔 사이 다른 곳(다른 담당자/다른 탭)이
 // 먼저 저장한 게 있는지 감지하는 데 쓴다.
 let lastKnownUpdatedAt = null;
+
+/* ---------------- 방·입실자 수정 이력 ----------------
+   구글 시트의 "수정 기록"처럼 방·입실자 카드의 어떤 항목을 누가 언제 어떻게 바꿨는지 남긴다(담당자 요청).
+   수정 화면마다 기록 코드를 붙이지 않고, 저장할 때 "마지막으로 불러오거나 기록한 상태(editBaseline) ↔ 지금
+   상태"를 항목 단위로 비교해 바뀐 칸을 모두 기록한다 — 새 항목·새 수정 화면이 생겨도 따로 챙길 필요가 없다.
+    - 사용자 수정: saveState 시작 때 captureEdits(로그인 이메일) → 저장이 성공하면 flushEditHistory로 기록한다.
+      다른 탭과 충돌해 저장을 건너뛰면 대기열을 비워, 저장되지 않은 변경은 남기지 않는다.
+    - 자동 처리(로그인 직후·매시간: 자동 퇴실, 방이동, 청소/리터치 지정·해제, 상태 정리): 앞뒤로 captureEdits를
+      불러 "자동"으로 남긴다.
+    - 다른 탭의 변경 반영(applyLoadedCore)·백업 가져오기 때는 기준 상태만 다시 잡는다 — 안 그러면 남의 변경이
+      내 이름으로 기록된다.
+   기록은 editHistory 컬렉션(칸 하나 = 문서 하나, 수정·삭제 불가 규칙)에 쌓고, roomKey(호실id|시각|순번) 한 필드로
+   범위 조회해 복합 색인 없이 호실별 최신순으로 읽는다. 계산값·내부값은 EDIT_HISTORY_IGNORE에 넣어 기록하지 않는다.
+   화면은 방 카드 "이력" 창의 수정이력 탭(showRoomHistoryModal)이다. */
+const EDIT_HISTORY_COL = firestoreDB.collection('editHistory');
+const EDIT_BY_AUTO = '자동';
+const EDIT_HISTORY_READ_LIMIT = 300;
+const EDIT_HISTORY_IGNORE = {
+  room: new Set(['id', 'cleaningFlagSourceId', 'cleaningHistory', 'cleaningDismissedMoveOut']),
+  resident: new Set(['id', 'resStatus', 'firstSaveDone', 'slotIndex', 'originalMoveIn', 'justImported', 'sourceContractId', 'refundPendingContractId'])
+};
+const EDIT_HISTORY_LABELS = {
+  room: {
+    number:'호실 번호', type:'방 타입', occupancy:'인실 구분', saleStatus:'판매 상태', note:'호실 메모', branchId:'지점',
+    needsCleaning:'퇴실청소', needsRetouch:'리터치', needsExtraCleaning:'추가청소', maintenanceDate:'청소 예정일', maintenanceMemo:'청소 메모',
+    preSelling:'선판매', reserved:'예약', reservationName:'예약자명', reservationPhone:'예약자 연락처',
+    reservationMoveIn:'예약 입실일', reservationMoveOut:'예약 퇴실일', reservationMemo:'예약 메모', doorLinked:'도어락 연결', price:'가격(예전 값)'
+  },
+  resident: {
+    name:'이름', phone:'연락처', channel:'유입채널', contractType:'계약구분', moveIn:'입실일', moveOut:'퇴실예정일',
+    scheduledToLeave:'퇴실확정', memo:'메모', memoColor:'메모 색', memoBold:'메모 굵게', carNumber:'차량번호',
+    paymentProxy:'대리결제', actualResidentName:'실거주자 이름', actualResidentPhone:'실거주자 연락처', doubleOccupancy:'2인 거주',
+    roomId:'호실(방이동)', refundPending:'환불 처리 필요', refundPendingDate:'환불 계약일', pendingRoomMove:'방이동 예정'
+  }
+};
+let editBaseline = null;
+let pendingEditEntries = [];
+let editHistoryWarned = false;
+
+function editHistoryUserLabel(){ return (CURRENT_USER && CURRENT_USER.email) || '알 수 없음'; }
+function editHistorySnapshot(){
+  return {
+    room: new Map((DB.rooms || []).map(r=> [r.id, JSON.stringify(r)])),
+    resident: new Map((DB.residents || []).map(p=> [p.id, JSON.stringify(p)]))
+  };
+}
+function resetEditBaseline(){ editBaseline = editHistorySnapshot(); }
+// "비어 있음"끼리의 차이(값 없음 ↔ 빈 문자열 ↔ false)는 기본값 채우기라 기록하지 않는다.
+function isBlankEditValue(v){ return v === undefined || v === null || v === '' || v === false; }
+function editHistorySummary(kind, o){
+  return kind === 'room' ? `${o.number}호 · ${o.type || '타입 없음'}` : `${o.name || '이름 미입력'} · ${o.moveIn || '?'} ~ ${o.moveOut || '?'}`;
+}
+function formatEditValue(key, v){
+  if(v === undefined || v === null || v === '') return '(비어 있음)';
+  if(v === true) return '예';
+  if(v === false) return '아니오';
+  if(key === 'roomId'){ const r = (DB.rooms || []).find(x=> x.id === v); return r ? `${r.number}호` : String(v); }
+  if(key === 'branchId'){ const b = (DB.branches || []).find(x=> x.id === v); return b ? branchLabel(b) : String(v); }
+  const text = typeof v === 'object' ? JSON.stringify(v) : String(v);
+  return text.length > 300 ? text.slice(0, 300) + '…' : text;
+}
+function diffForEditHistory(prev, next, by){
+  const at = new Date().toISOString();
+  const out = [];
+  ['room', 'resident'].forEach(kind=>{
+    const ignore = EDIT_HISTORY_IGNORE[kind];
+    const labels = EDIT_HISTORY_LABELS[kind];
+    const roomIdOf = o=> kind === 'room' ? o.id : o.roomId;
+    const push = (o, roomId, field, before, after, action)=>{
+      const room = (DB.rooms || []).find(r=> r.id === roomId);
+      out.push({
+        at, by, roomId: roomId || '', branchId: (kind === 'room' ? o.branchId : (room && room.branchId)) || '',
+        entity: kind, entityId: o.id, target: kind === 'room' ? `${o.number}호` : (o.name || '이름 미입력'),
+        field, fieldLabel: field ? (labels[field] || field) : '', before, after, action
+      });
+    };
+    next[kind].forEach((json, id)=>{
+      const was = prev[kind].get(id);
+      if(was === json) return;
+      const now = JSON.parse(json);
+      if(was === undefined){ push(now, roomIdOf(now), '', '', editHistorySummary(kind, now), 'add'); return; }
+      const old = JSON.parse(was);
+      new Set([...Object.keys(old), ...Object.keys(now)]).forEach(k=>{
+        if(ignore.has(k)) return;
+        if(JSON.stringify(old[k]) === JSON.stringify(now[k])) return;
+        if(isBlankEditValue(old[k]) && isBlankEditValue(now[k])) return;
+        const before = formatEditValue(k, old[k]), after = formatEditValue(k, now[k]);
+        push(now, roomIdOf(now), k, before, after, 'change');
+        // 방이동은 옮기기 전 호실의 이력에도 남긴다.
+        if(k === 'roomId' && old.roomId) push(now, old.roomId, k, before, after, 'change');
+      });
+    });
+    prev[kind].forEach((json, id)=>{
+      if(next[kind].has(id)) return;
+      const old = JSON.parse(json);
+      const movedOut = kind === 'resident' && (DB.residentHistory || []).some(h=>
+        h.roomId === old.roomId && h.name === (old.name || '(이름 미입력)') && (h.moveIn || '') === (old.moveIn || ''));
+      push(old, roomIdOf(old), '', editHistorySummary(kind, old), '', movedOut ? 'moveout' : 'remove');
+    });
+  });
+  return out;
+}
+// 기준 상태 이후 바뀐 칸을 by(이메일 또는 "자동") 이름으로 떼어 대기열에 담고, 기준 상태를 지금으로 옮긴다.
+function captureEdits(by){
+  if(!editBaseline){ resetEditBaseline(); return 0; }
+  const next = editHistorySnapshot();
+  const entries = diffForEditHistory(editBaseline, next, by);
+  editBaseline = next;
+  if(entries.length) pendingEditEntries.push(...entries);
+  return entries.length;
+}
+function flushEditHistory(){
+  if(!pendingEditEntries.length) return;
+  const entries = pendingEditEntries.splice(0);
+  for(let i = 0; i < entries.length; i += 400){
+    const batch = firestoreDB.batch();
+    entries.slice(i, i + 400).forEach((e, j)=>{
+      batch.set(EDIT_HISTORY_COL.doc(), Object.assign({}, e, { roomKey: `${e.roomId}|${e.at}|${String(i + j).padStart(4, '0')}` }));
+    });
+    batch.commit().catch(err=>{
+      console.error('수정 이력 저장 실패:', err);
+      if(editHistoryWarned) return;
+      editHistoryWarned = true;
+      showAlert(`수정 이력을 기록하지 못했습니다. 방·입실자 데이터 저장은 정상입니다.\n\nFirebase 보안 규칙에 editHistory가 없으면 이 경고가 뜹니다. 관리자에게 규칙 추가를 요청해 주세요.\n\n오류 내용: ${(err && err.message) || err}`);
+    });
+  }
+}
+// 화면 표시용: 같은 사람이 같은 칸을 5분 안에 여러 번 저장한 것(입력하다 멈칫할 때마다 저장됨)은 한 줄로 합친다.
+function coalesceEditRows(rowsDesc){
+  const merged = [];
+  const lastByKey = new Map();
+  rowsDesc.slice().reverse().forEach(r=>{
+    const key = r.entityId + '|' + r.field + '|' + r.roomId;
+    const last = r.action === 'change' ? lastByKey.get(key) : null;
+    if(last && last.by === r.by && Date.parse(r.at) - Date.parse(last.at) <= 5 * 60 * 1000){
+      last.after = r.after; last.at = r.at; last.target = r.target; last.count = (last.count || 1) + 1;
+      return;
+    }
+    const copy = Object.assign({}, r);
+    merged.push(copy);
+    if(r.action === 'change') lastByKey.set(key, copy);
+  });
+  // 썼다가 원래대로 되돌린 경우(합친 결과 이전 = 변경)는 보여주지 않는다.
+  return merged.filter(r=> !(r.action === 'change' && r.before === r.after)).reverse();
+}
+/* ---- 방·입실자 수정 이력 끝 ---- */
 // 별도 컬렉션(계약/퇴실 이력) 로딩이 어떻게 됐는지 남겨둔다. "특정 PC·계정에서만 이력이 안
 // 보인다" 같은 문제는 화면만 봐서는 캐시를 쓴 건지, 서버에서 0건을 받은 건지, 권한 오류로
 // 실패한 건지 구분이 안 돼서 진단이 계속 헛돌았다. 관리자 설정의 "데이터 로딩 상태"에서
 // 그대로 보여준다.
-const APP_BUILD = '2026-09-14-b';
+const APP_BUILD = '2026-09-15-a';
 let LOAD_DIAG = {
   contracts: { count: 0, source: '아직 불러오지 않음', error: '' },
   history:   { count: 0, source: '아직 불러오지 않음', error: '' },
@@ -1176,6 +1349,8 @@ async function saveState(){
   if(note) note.textContent = '저장 중…';
   saveInFlight = true;
   try{
+    // 이번 저장에 담기는 사용자 수정을 항목 단위로 떼어 둔다 — 저장이 성공해야 수정 이력으로 기록한다.
+    captureEdits(editHistoryUserLabel());
     const core = { branches: DB.branches, rooms: DB.rooms, residents: DB.residents, channelList: DB.channelList, shortcuts: DB.shortcuts };
     const nowIso = new Date().toISOString();
     // 이 상태 문서는 통째로 덮어써서 저장하는 구조라, 이 탭이 불러온 뒤로 다른 곳에서 이미 저장이
@@ -1194,6 +1369,7 @@ async function saveState(){
       tx.set(FIRESTORE_DOC, { json: JSON.stringify(core), updatedAt: nowIso });
     });
     if(conflict){
+      pendingEditEntries = [];   // 저장되지 않은 변경은 수정 이력으로 남기지 않는다
       if(note) note.textContent = '⚠ 저장 건너뜀 · 다른 곳에서 방금 저장된 내용이 있어요 · 새로고침 필요';
       showAlert('다른 담당자(또는 다른 탭/기기)가 방금 이 대시보드를 먼저 저장했습니다.\n이 상태로 저장하면 그 변경사항이 사라질 수 있어 이번 저장은 건너뛰었습니다.\n\n페이지를 새로고침한 뒤, 방금 하신 수정을 다시 적용해주세요.');
       return;
@@ -1203,6 +1379,7 @@ async function saveState(){
     const summary = pendingChangeSummary || '정보 수정';
     pendingChangeSummary = '';
     writeChangeLog(summary);
+    flushEditHistory();
   }catch(e){
     // 예전에는 오류를 콘솔에만 남기고 화면엔 뭉뚱그린 문구만 보여줬는데, 그러면 실제로 저장이
     // 실패해도 담당자가 알아채기 어렵고(방금 한 수정이 조용히 사라진 것처럼 보임), 진짜 원인(용량
@@ -1256,6 +1433,8 @@ function applyLoadedCore(parsed){
     if(p.scheduledToLeave == null) p.scheduledToLeave = false;
     p.resStatus = computeResStatus(p);
   });
+  // 불러온(또는 다른 탭에서 받은) 상태를 수정 이력 비교의 기준으로 삼는다 — 남의 변경이 내 이름으로 기록되지 않게.
+  resetEditBaseline();
 }
 // 도어락 데이터는 DOORLOCK_DOC(별도 문서)에서 따로 불러와 적용한다 — applyLoadedCore와 분리해둔
 // 이유는, 지점/호실/입실자 실시간 동기화(onSnapshot on FIRESTORE_DOC)가 갱신될 때마다
@@ -1646,8 +1825,9 @@ function renderGlobalSearchResults(query){
       row.addEventListener('click', ()=>{
         UI.view = 'branch';
         UI.branchId = branch.id;
-        if(isHistory) UI.historyOpen[room.id] = true;
         scrollToRoomCard(room);
+        // 퇴실자를 누르면 그 방의 이력 창을 입퇴실 탭으로 열고 해당 기록을 강조한다.
+        if(isHistory) showRoomHistoryModal(room, '입퇴실', p.id);
         const input = document.getElementById('globalSearchInput');
         if(input) input.value = '';
         box.style.display = 'none'; box.innerHTML = '';
@@ -2479,7 +2659,6 @@ function restoreFromHistory(h){
     DB.residentHistory = DB.residentHistory.filter(x=>x.id!==h.id);
     RESIDENT_HISTORY_COL.doc(h.id).delete().catch(e=> console.error('퇴실 이력 삭제 실패:', e));
     refreshHistoryCache();
-    UI.historyOpen[room.id] = false;
     // "복원" 버튼은 이 방에 재실 입실자가 하나도 없을 때만 나타나므로, 지금 복원하는 것 자체가
     // 그 공실 상태(=이 방의 현재 퇴실청소 플래그를 만든 바로 그 퇴실)를 되돌리는 것이다. 즉시
     // 퇴실 처리는 예약 퇴실과 달리 cleaningFlagSourceId를 남기지 않으므로, 여기서는 무조건
@@ -2656,12 +2835,12 @@ function renderRoomCard(room, sectionStatus){
   }
   header.querySelector('.rc-title').appendChild(doorLockBtn);
 
-  const historyOpen = !!UI.historyOpen[room.id];
+  // 입퇴실·수정이력·청소이력은 버튼 하나(이력)로 모아 창 안에서 탭으로 본다(담당자 요청).
   const historyBtn = document.createElement('button');
-  historyBtn.className = 'history-btn' + (historyOpen ? ' active' : '');
-  historyBtn.textContent = '히스토리';
-  historyBtn.title = '퇴실한 입실자 이력 보기';
-  historyBtn.onclick = ()=>{ UI.historyOpen[room.id] = !historyOpen; render(); };
+  historyBtn.className = 'history-btn';
+  historyBtn.textContent = '이력';
+  historyBtn.title = canEdit() ? '입퇴실·수정·청소 이력 보기' : '입퇴실·청소 이력 보기';
+  historyBtn.onclick = ()=> showRoomHistoryModal(room, '입퇴실');
   header.querySelector('.rc-header-badges').prepend(historyBtn);
   const contractBtn = document.createElement('button');
   const contractMismatch = contractEndDateMismatch(room);
@@ -2672,12 +2851,6 @@ function renderRoomCard(room, sectionStatus){
     : '계약 이력 보기';
   contractBtn.onclick = ()=> showContractHistoryModal(room);
   header.querySelector('.rc-header-badges').prepend(contractBtn);
-  const cleanHistBtn = document.createElement('button');
-  cleanHistBtn.className = 'history-btn';
-  cleanHistBtn.textContent = '청소이력';
-  cleanHistBtn.title = '청소/리터치 완료 이력 보기';
-  cleanHistBtn.onclick = ()=> showCleaningHistoryModal(room);
-  header.querySelector('.rc-header-badges').prepend(cleanHistBtn);
   const pencil = document.createElement('button');
   pencil.className = 'iconbtn' + (roomEditOn ? ' active' : '');
   pencil.innerHTML = roomEditOn ? '&#10003;' : '&#9998;';
@@ -2689,76 +2862,6 @@ function renderRoomCard(room, sectionStatus){
   };
   if(canEdit()) header.querySelector('.rc-header-top').appendChild(pencil);
   card.appendChild(header);
-
-  if(historyOpen){
-    const hist = DB.residentHistory.filter(h=>h.roomId===room.id).sort((a,b)=> (b.moveOut||'').localeCompare(a.moveOut||'')).slice(0,3);
-    const roomOccupied = roomHasActiveResident(room);
-    const histBox = document.createElement('div');
-    histBox.className = 'history-panel';
-    if(hist.length===0){
-      histBox.appendChild(el('div','history-empty','이 호실에는 아직 퇴실 이력이 없습니다.'));
-    } else {
-      hist.forEach((h, idx)=>{
-        const entry = document.createElement('div');
-        entry.className = 'history-entry';
-        const topRow = document.createElement('div');
-        topRow.className = 'history-top';
-        // 대리결제였던 기록은 이름 하나로 실거주자만 대신 보여주지 않고, 계약자(h.name/h.phone)와
-        // 실입실자를 각각 텍스트로 그대로 나열한다 — 색이 있는 플래그(배지)는 쓰지 않는다.
-        topRow.innerHTML = `<span class="nm">${esc(maskViewerName(h.name))}</span><span class="ph">${esc(h.phone||'-')}</span>`;
-        if(canEdit() && !roomOccupied){
-          if(idx === 0){
-            const restoreBtn = document.createElement('button');
-            restoreBtn.className = 'btn small';
-            restoreBtn.textContent = '복원';
-            restoreBtn.title = '이 입실자 정보를 다시 입실자로 복원';
-            restoreBtn.onclick = ()=> restoreFromHistory(h);
-            topRow.appendChild(restoreBtn);
-          }
-          const delHistBtn = document.createElement('button');
-          delHistBtn.className = 'iconbtn del';
-          delHistBtn.innerHTML = '&times;';
-          delHistBtn.title = '이 히스토리 항목 삭제';
-          delHistBtn.onclick = ()=>{
-            showConfirm(`"${h.name}" 님의 히스토리 기록을 완전히 삭제할까요? 이 작업은 되돌릴 수 없습니다.`, ()=>{
-              DB.residentHistory = DB.residentHistory.filter(x=>x.id!==h.id);
-              RESIDENT_HISTORY_COL.doc(h.id).delete().catch(e=> console.error('퇴실 이력 삭제 실패:', e));
-              refreshHistoryCache();
-              logChange(`"${h.name}" 히스토리 기록 삭제`);
-              scheduleSave(); render();
-            });
-          };
-          topRow.appendChild(delHistBtn);
-        }
-        entry.appendChild(topRow);
-        if(h.paymentProxy){
-          const actualLine = document.createElement('div');
-          actualLine.className = 'history-sub';
-          actualLine.textContent = `실입실자 ${maskViewerName(h.actualResidentName) || '-'} ${h.actualResidentPhone || '-'}`;
-          entry.appendChild(actualLine);
-        }
-        if(h.doubleOccupancy){
-          const doubleLine = document.createElement('div');
-          doubleLine.className = 'history-sub';
-          doubleLine.textContent = '2인 거주';
-          entry.appendChild(doubleLine);
-        }
-        const periodRow = document.createElement('div');
-        periodRow.className = 'history-period';
-        periodRow.textContent = `${h.moveIn || '-'}~${h.moveOut || '-'}`;
-        entry.appendChild(periodRow);
-        if(h.memo){
-          // 메모 원본의 색상/굵기 서식은 적용하지 않고, 다른 이력 항목들과 같은 일반 텍스트로 보여준다.
-          const memo = document.createElement('div');
-          memo.className = 'history-sub';
-          memo.textContent = h.memo;
-          entry.appendChild(memo);
-        }
-        histBox.appendChild(entry);
-      });
-    }
-    card.appendChild(histBox);
-  }
 
   if(!roomEditOn && room.reserved){
     const parts = [];
@@ -5159,62 +5262,191 @@ function showContractHistoryModal(room){
   document.body.appendChild(overlay);
 }
 
-function showCleaningHistoryModal(room){
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-  const box = document.createElement('div');
-  box.className = 'modal-box';
-  const close = ()=> overlay.remove();
+// 방 카드 "이력": 입퇴실·수정이력·청소이력을 한 창에서 탭으로 나눠 본다(담당자 요청 순서).
+//  - 입퇴실: 퇴실 이력(DB.residentHistory). 예전에는 카드 안에 최근 3건만 펼쳐졌는데, 창에서는 전부 보여준다.
+//    복원은 가장 최근 1건만, 방이 비어 있을 때만 된다(예전과 같은 규칙).
+//  - 수정이력: editHistory 컬렉션(수정 권한 계정만). 처음 누를 때 한 번 읽어 이 창이 열린 동안 재사용한다.
+//  - 청소이력: room.cleaningHistory.
+// focusHistoryId를 주면(퇴실자 검색 결과에서 연 경우) 입퇴실 탭의 그 기록을 강조한다.
+function showRoomHistoryModal(room, initialTab, focusHistoryId){
+  const tabs = [{ key:'입퇴실', render: renderResidentTab }]
+    .concat(canEdit() ? [{ key:'수정이력', render: renderEditTab }] : [])
+    .concat([{ key:'청소이력', render: renderCleaningTab }]);
+  let current = tabs.some(t=> t.key === initialTab) ? initialTab : tabs[0].key;
 
-  function renderBody(){
-    box.innerHTML = '';
-    const hist = (room.cleaningHistory || []).slice().sort((a,b)=> (b.date||'').localeCompare(a.date||''));
-    const title = el('div', 'modal-msg', `${room.number}호 청소 이력 (${hist.length}건)`, 'margin-bottom:10px;font-weight:700;');
-    box.appendChild(title);
+  const overlay = el('div', 'modal-overlay');
+  const box = el('div', 'modal-box room-hist-box');
+  const onKey = e=>{ if(e.key === 'Escape') close(); };
+  const close = ()=>{ overlay.remove(); document.removeEventListener('keydown', onKey); };
+  overlay.addEventListener('click', e=>{ if(e.target === overlay) close(); });
+  document.addEventListener('keydown', onKey);
 
-    if(hist.length===0){
-      box.appendChild(el('div', null, '등록된 청소 이력이 없습니다.', 'font-size:12.5px;color:var(--ink-soft);padding:12px 0;'));
-    } else {
-      const list = document.createElement('div');
-      hist.forEach(h=>{
-        const row = document.createElement('div');
-        row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 4px;border-bottom:1px solid var(--line);font-size:12.5px;';
-        const left = document.createElement('span');
-        left.textContent = `${h.date || '-'}  ${h.label || '-'}`;
-        row.appendChild(left);
-        if(canEdit()){
-          const delBtn = document.createElement('button');
-          delBtn.type = 'button';
-          delBtn.className = 'iconbtn del';
-          delBtn.innerHTML = '&times;';
-          delBtn.title = '이 청소 이력 삭제';
-          delBtn.onclick = ()=>{
-            showConfirm(`"${h.date || '-'} ${h.label || ''}" 이력을 삭제할까요?`, ()=>{
-              room.cleaningHistory = (room.cleaningHistory || []).filter(x=>x.id!==h.id);
-              logChange(`${room.number}호 청소 이력(${h.date || '-'} ${h.label || ''}) 삭제`);
-              scheduleSave();
-              renderBody();
-            });
-          };
-          row.appendChild(delBtn);
-        }
-        list.appendChild(row);
-      });
-      box.appendChild(list);
-    }
-
-    const btnRow = document.createElement('div');
-    btnRow.className = 'modal-btn-row';
-    const closeBtn = document.createElement('button');
-    closeBtn.className = 'btn'; closeBtn.textContent = '닫기'; closeBtn.onclick = close;
-    btnRow.appendChild(closeBtn);
-    box.appendChild(btnRow);
-  }
-  renderBody();
-
-  overlay.addEventListener('click', (e)=>{ if(e.target===overlay) close(); });
+  const top = el('div', 'room-hist-top');
+  const head = el('div', 'room-hist-head');
+  head.appendChild(el('div', 'room-hist-title', `${room.number}호 이력`));
+  const closeBtn = el('button', 'btn small', '닫기');
+  closeBtn.onclick = close;
+  head.appendChild(closeBtn);
+  top.appendChild(head);
+  const tabBar = el('div', 'room-hist-tabs');
+  top.appendChild(tabBar);
+  box.appendChild(top);
+  const body = el('div', 'room-hist-body');
+  box.appendChild(body);
   overlay.appendChild(box);
   document.body.appendChild(overlay);
+
+  const residentHistory = ()=> DB.residentHistory.filter(h=> h.roomId === room.id)
+    .sort((a,b)=> (b.moveOut||'').localeCompare(a.moveOut||''));
+  const cleaningHistory = ()=> (room.cleaningHistory || []).slice().sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+
+  function show(){
+    tabBar.innerHTML = '';
+    tabs.forEach(t=>{
+      const count = t.key === '입퇴실' ? residentHistory().length : (t.key === '청소이력' ? cleaningHistory().length : null);
+      const b = el('button', 'room-hist-tab' + (t.key === current ? ' active' : ''), t.key + (count != null ? ` ${count}` : ''));
+      b.type = 'button';
+      b.dataset.tab = t.key;
+      b.onclick = ()=>{ current = t.key; show(); };
+      tabBar.appendChild(b);
+    });
+    body.innerHTML = '';
+    tabs.find(t=> t.key === current).render();
+  }
+
+  function renderResidentTab(){
+    const hist = residentHistory();
+    if(hist.length === 0){ body.appendChild(el('div', 'history-empty', '이 호실에는 아직 퇴실 이력이 없습니다.')); return; }
+    const roomOccupied = roomHasActiveResident(room);
+    hist.forEach((h, idx)=>{
+      const entry = el('div', 'history-entry');
+      entry.dataset.historyId = h.id;
+      const topRow = el('div', 'history-top');
+      // 대리결제였던 기록은 이름 하나로 실거주자만 대신 보여주지 않고, 계약자(h.name/h.phone)와
+      // 실입실자를 각각 텍스트로 그대로 나열한다 — 색이 있는 플래그(배지)는 쓰지 않는다.
+      topRow.innerHTML = `<span class="nm">${esc(maskViewerName(h.name))}</span><span class="ph">${esc(h.phone||'-')}</span>`;
+      if(canEdit() && !roomOccupied){
+        if(idx === 0){
+          const restoreBtn = el('button', 'btn small', '복원');
+          restoreBtn.title = '이 입실자 정보를 다시 입실자로 복원';
+          restoreBtn.onclick = ()=>{ close(); restoreFromHistory(h); };
+          topRow.appendChild(restoreBtn);
+        }
+        const delBtn = el('button', 'iconbtn del');
+        delBtn.innerHTML = '&times;';
+        delBtn.title = '이 히스토리 항목 삭제';
+        delBtn.onclick = ()=>{
+          showConfirm(`"${h.name}" 님의 히스토리 기록을 완전히 삭제할까요? 이 작업은 되돌릴 수 없습니다.`, ()=>{
+            DB.residentHistory = DB.residentHistory.filter(x=> x.id !== h.id);
+            RESIDENT_HISTORY_COL.doc(h.id).delete().catch(e=> console.error('퇴실 이력 삭제 실패:', e));
+            refreshHistoryCache();
+            logChange(`"${h.name}" 히스토리 기록 삭제`);
+            scheduleSave(); render();
+            show();
+          });
+        };
+        topRow.appendChild(delBtn);
+      }
+      entry.appendChild(topRow);
+      if(h.paymentProxy) entry.appendChild(el('div', 'history-sub', `실입실자 ${maskViewerName(h.actualResidentName) || '-'} ${h.actualResidentPhone || '-'}`));
+      if(h.doubleOccupancy) entry.appendChild(el('div', 'history-sub', '2인 거주'));
+      entry.appendChild(el('div', 'history-period', `${h.moveIn || '-'}~${h.moveOut || '-'}`));
+      // 메모 원본의 색상/굵기 서식은 적용하지 않고, 다른 이력 항목들과 같은 일반 텍스트로 보여준다.
+      if(h.memo) entry.appendChild(el('div', 'history-sub', h.memo));
+      body.appendChild(entry);
+    });
+    if(focusHistoryId){
+      const target = [...body.querySelectorAll('.history-entry')].find(n=> n.dataset.historyId === focusHistoryId);
+      if(target){ target.classList.add('flash-highlight'); target.scrollIntoView({ block:'nearest' }); }
+      focusHistoryId = null;
+    }
+  }
+
+  let editLoaded = false, editLoading = false, editRows = [], editRawCount = 0, editError = '', editFilterValue = '';
+  function renderEditTab(){
+    if(!editLoaded){
+      body.appendChild(el('div', 'edit-hist-note', '불러오는 중…'));
+      if(editLoading) return;
+      editLoading = true;
+      EDIT_HISTORY_COL.where('roomKey', '>=', room.id + '|').where('roomKey', '<', room.id + '|~')
+        .orderBy('roomKey', 'desc').limit(EDIT_HISTORY_READ_LIMIT).get()
+        .then(snap=>{
+          const raw = [];
+          snap.forEach(d=> raw.push(d.data()));
+          editRawCount = raw.length;
+          editRows = coalesceEditRows(raw);
+        })
+        .catch(e=>{ editError = (e && e.message) || String(e); })
+        .then(()=>{ editLoaded = true; if(current === '수정이력' && overlay.isConnected) show(); });
+      return;
+    }
+    if(editError){
+      body.appendChild(el('div', 'edit-hist-empty', `수정 이력을 불러오지 못했습니다. Firebase 보안 규칙에 editHistory가 없으면 이 오류가 납니다.\n\n오류 내용: ${editError}`));
+      return;
+    }
+    const residents = new Map();
+    editRows.forEach(r=>{ if(r.entity === 'resident' && !residents.has(r.entityId)) residents.set(r.entityId, r.target); });
+    const bar = el('div', 'edit-hist-toolbar');
+    const filter = document.createElement('select');
+    filter.className = 'edit-hist-filter';
+    filter.innerHTML = '<option value="">전체</option><option value="room">방 정보</option>'
+      + [...residents].map(([id, name])=> `<option value="${esc(id)}">입실자 ${esc(name)}</option>`).join('');
+    filter.value = editFilterValue;
+    filter.onchange = ()=>{ editFilterValue = filter.value; show(); };
+    bar.appendChild(filter);
+    if(editRawCount) bar.appendChild(el('span', 'edit-hist-note', `최근 ${editRawCount}건` + (editRawCount >= EDIT_HISTORY_READ_LIMIT ? ' (그보다 오래된 기록은 표시하지 않음)' : '')));
+    body.appendChild(bar);
+    const shown = !editFilterValue ? editRows
+      : editRows.filter(r=> editFilterValue === 'room' ? r.entity === 'room' : r.entityId === editFilterValue);
+    if(shown.length === 0){ body.appendChild(el('div', 'edit-hist-empty', '기록된 수정 이력이 없습니다.')); return; }
+    shown.forEach(r=>{
+      const row = el('div', 'edit-hist-row');
+      const meta = el('div', 'edit-hist-meta');
+      meta.appendChild(el('span', 'edit-hist-time', formatKstStamp(r.at)));
+      meta.appendChild(el('span', r.by === EDIT_BY_AUTO ? 'edit-hist-by auto' : 'edit-hist-by', r.by || '알 수 없음'));
+      row.appendChild(meta);
+      const what = r.action === 'add' ? '등록' : r.action === 'remove' ? '삭제' : r.action === 'moveout' ? '퇴실 처리' : r.fieldLabel;
+      row.appendChild(el('div', 'edit-hist-target',
+        `${r.entity === 'room' ? '방' : '입실자 ' + r.target} · ${what}` + (r.count > 1 ? ` (${r.count}번 저장)` : '')));
+      if(r.action === 'change'){
+        const ch = el('div', 'edit-hist-change');
+        ch.appendChild(el('span', 'edit-hist-before', r.before));
+        ch.appendChild(el('span', 'edit-hist-arrow', '→'));
+        ch.appendChild(el('span', 'edit-hist-after', r.after));
+        row.appendChild(ch);
+      }else{
+        row.appendChild(el('div', 'edit-hist-change', r.after || r.before));
+      }
+      body.appendChild(row);
+    });
+  }
+
+  function renderCleaningTab(){
+    const hist = cleaningHistory();
+    if(hist.length === 0){ body.appendChild(el('div', 'history-empty', '등록된 청소 이력이 없습니다.')); return; }
+    hist.forEach(h=>{
+      const row = el('div', 'clean-hist-row');
+      row.appendChild(el('span', null, `${h.date || '-'}  ${h.label || '-'}`));
+      if(canEdit()){
+        const delBtn = el('button', 'iconbtn del');
+        delBtn.type = 'button';
+        delBtn.innerHTML = '&times;';
+        delBtn.title = '이 청소 이력 삭제';
+        delBtn.onclick = ()=>{
+          showConfirm(`"${h.date || '-'} ${h.label || ''}" 이력을 삭제할까요?`, ()=>{
+            room.cleaningHistory = (room.cleaningHistory || []).filter(x=> x.id !== h.id);
+            logChange(`${room.number}호 청소 이력(${h.date || '-'} ${h.label || ''}) 삭제`);
+            scheduleSave();
+            show();
+          });
+        };
+        row.appendChild(delBtn);
+      }
+      body.appendChild(row);
+    });
+  }
+
+  show();
 }
 
 function toISODateStr(v){
@@ -6167,6 +6399,7 @@ async function restoreLatestBackup(){
       DB.residents = core.residents;
       if(Array.isArray(core.channelList)) DB.channelList = core.channelList;
       if(Array.isArray(core.shortcuts)) DB.shortcuts = core.shortcuts;
+      resetEditBaseline();   // 백업 복원은 항목별 수정 이력으로 남기지 않는다(변경 로그에 복원 한 줄로 남는다)
       try{
         const newCore = { branches: DB.branches, rooms: DB.rooms, residents: DB.residents, channelList: DB.channelList, shortcuts: DB.shortcuts };
         await FIRESTORE_DOC.set({ json: JSON.stringify(newCore), updatedAt: new Date().toISOString() });
@@ -7046,6 +7279,7 @@ const HANDOVER_NOTES = [
     '방 카드의 방 타입도 방 가격 원장(가격표)이 기준이다. 가격표를 올리면 원장에서 찾은 호실의 room.type을 원장 타입으로 바꾸고(저장 전 확인 창에 미리 보여줌), 이미 올린 가격표와 다른 호실은 방 가격 관리의 "가격표 기준으로 맞추기"로 맞춘다. 원장에 없는 호실은 건드리지 않는다. 호실 찾기는 방 카드 가격과 같은 roomLedgerRow를 쓴다 — 둘이 다른 규칙으로 호실을 찾으면 가격과 타입이 서로 다른 행에서 나올 수 있다.',
     '타임라인에서 퇴실 처리된 입실자는 계약현황의 계약 날짜가 아니라 퇴실 이력의 입실일~퇴실일로 그린다. 계약의 주인은 지금 입실자와 퇴실 이력을 함께 후보로 놓고 찾는다(sourceContractId → 계약서 이름 일치 → 입실일이 계약 시작일에 가장 가까운 순, findContractOwner). 예전처럼 겹치는 지금 입실자가 있다고 이력을 보지 않으면, 중도퇴실한 사람의 계약이 다음 입실자 이름으로 계약 종료일까지 이용중처럼 그려진다. 같은 이력에 연결된 여러 계약은 막대 하나로 합치고, 어느 계약에도 연결되지 않은 이력은 따로 회색 막대로 보여준다.',
     '퇴실청소는 "그 사람이 나간 날 방이 비는지"로 건다 — 퇴실확정(roomWouldBeVacantExcept)과 실제 퇴실 처리(moveResidentToHistory) 모두 keepsLivingThrough(퇴실일 이전부터 살고 그 뒤에도 사는 사람만 셈)로 판단한다. occupiesRoom처럼 먼 미래 입실예정자를, 또는 당일 입실자를 "재실"로 세면 퇴실청소가 안 걸린다(마곡발산 902호, 성수 301호 — 당일 청소 후 당일 입실하는 경우가 있다). 새 입실자가 살기 시작해도 퇴실청소는 지우지 않고(청소완료 버튼으로만 지움) 리터치만 지운다(clearCleaningFlagsOnMoveIn, 2026-09 담당자 정책).',
+    '방 카드의 "이력" 버튼 하나로 입퇴실·수정이력·청소이력을 탭으로 본다(showRoomHistoryModal, 담당자 요청 순서). 수정이력은 저장할 때 "마지막으로 불러오거나 기록한 상태 ↔ 지금 상태"를 항목 단위로 비교해 editHistory 컬렉션에 남긴다(captureEdits·diffForEditHistory). 수정 화면마다 기록 코드를 붙이지 않는 방식이라 새 항목도 자동으로 기록된다 — 대신 계산값·내부값은 EDIT_HISTORY_IGNORE에 넣어야 이력이 지저분해지지 않는다. 로그인 직후·매시간 자동 처리는 앞뒤로 captureEdits를 불러 "자동"으로 남기고, 다른 탭 변경 반영(applyLoadedCore)·백업 가져오기 때는 기준 상태만 다시 잡는다(안 그러면 남의 변경이 내 이름으로 기록됨). 새로운 자동 처리를 추가하면 같은 방식으로 감쌀 것. Firestore 규칙에 editHistory(읽기·추가: 수정 권한, 수정·삭제 불가)가 필요하다.',
     '관제센터 특성상 탭을 며칠씩 켜둔다. 그래서 실시간 동기화(onSnapshot)와 저장 시 충돌 검사가 들어가 있고, 날짜가 바뀌면 세션을 초기화한다. "고쳤는데 반영이 안 된다"는 제보는 대부분 오래된 탭이 옛 코드를 돌리고 있는 경우다.',
     '입실자 상태(이용중/입실확정 등)는 계약이 아니라 입실자 레코드에서 계산한다. 반대로 타임라인·계약만료는 계약 기준이라, 계약 데이터가 없는 외부 채널 예약(엔코스테이·리브애니웨어)이 누락되지 않도록 별도 처리가 들어가 있다.',
     '계산기 예비 가격(Calculator/room-prices.js의 ROOMS 배열)은 원장을 못 읽었을 때만 쓰는 값이니 거기서 가격을 고치지 말 것 — 고쳐도 대시보드와 어긋나기만 한다. 가격은 관리자 설정 > 방 가격 관리에서 올린다.',
@@ -10310,6 +10544,8 @@ async function initApp(user){
     }
   });
   if(canEdit() && roomTypesFilled) scheduleSave();
+  // 로그인 직후 자동 처리(자동 퇴실·방이동·청소/리터치 지정·해제·상태 정리)로 바뀐 값은 "자동"으로 기록한다.
+  if(canEdit()) captureEdits(EDIT_BY_AUTO);
   // 방 가격은 이 대시보드에서 관리하지 않으므로 typePrices 기본값을 채우지 않는다.
   // 이미 저장된 값은 그대로 두고, 엑셀 일괄 업데이트에서만 계속 다룬다.
   if(canEdit()) maybeCreateDailyBackup();
@@ -10682,7 +10918,12 @@ if(isPublicDoorlockShareUrl()){
 // PC를 계속 켜둔 채 로그인 화면을 새로고침 없이 며칠씩 열어두면 initApp()이 다시 실행되지
 // 않아 날짜가 바뀌어도 자동 백업/리터치 자동 예약이 안 갱신된다. 그래서 별도로 주기적으로
 // (1시간마다) 오늘 백업이 있는지, 새로 리터치 예약 대상이 된 방이 있는지 확인한다.
-setInterval(()=>{ if(canEdit()){ maybeCreateDailyBackup(); autoFlagDueRetouch(); clearCleaningFlagsOnMoveIn(); clearCleaningFlagsForExcludedBranches(); } }, 60*60*1000);
+setInterval(()=>{ if(canEdit()){
+  // 매시간 자동 처리로 바뀐 값은 "자동"으로 기록한다. 그 전에 사용자가 고친(아직 저장 전인) 값은 먼저 사용자 이름으로 떼어 둔다.
+  captureEdits(editHistoryUserLabel());
+  maybeCreateDailyBackup(); autoFlagDueRetouch(); clearCleaningFlagsOnMoveIn(); clearCleaningFlagsForExcludedBranches();
+  captureEdits(EDIT_BY_AUTO);
+} }, 60*60*1000);
 
 // 관제센터 특성상 PC를 끄지 않고 탭을 며칠씩 열어두는 경우가 많다. 예전에는 그렇게 오래 열린
 // 세션이 로그인 시점의(=시간이 지날수록 오래된) 데이터를 계속 들고 있다가 저장 시 다른 곳의
