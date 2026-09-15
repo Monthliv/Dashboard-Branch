@@ -1091,7 +1091,7 @@ let lastKnownUpdatedAt = null;
       내 이름으로 기록된다.
    기록은 editHistory 컬렉션(칸 하나 = 문서 하나, 수정·삭제 불가 규칙)에 쌓고, roomKey(호실id|시각|순번) 한 필드로
    범위 조회해 복합 색인 없이 호실별 최신순으로 읽는다. 계산값·내부값은 EDIT_HISTORY_IGNORE에 넣어 기록하지 않는다.
-   화면은 방 카드 "이력" 창의 수정이력 탭(showRoomHistoryModal)이다. */
+   화면은 방 카드 "변경이력" 창의 수정이력 탭(showRoomHistoryModal)이다. */
 const EDIT_HISTORY_COL = firestoreDB.collection('editHistory');
 const EDIT_BY_AUTO = '자동';
 // 수정이력 탭에서 한 번에 읽는 건수. 문서 1건 = 읽기 1회라, 오래 쌓인 방을 열 때마다 수백 건씩 읽으면 무료 요금제
@@ -1230,7 +1230,7 @@ function coalesceEditRows(rowsDesc){
 // 보인다" 같은 문제는 화면만 봐서는 캐시를 쓴 건지, 서버에서 0건을 받은 건지, 권한 오류로
 // 실패한 건지 구분이 안 돼서 진단이 계속 헛돌았다. 관리자 설정의 "데이터 로딩 상태"에서
 // 그대로 보여준다.
-const APP_BUILD = '2026-09-15-c';
+const APP_BUILD = '2026-09-15-d';
 let LOAD_DIAG = {
   contracts: { count: 0, source: '아직 불러오지 않음', error: '' },
   history:   { count: 0, source: '아직 불러오지 않음', error: '' },
@@ -2838,10 +2838,10 @@ function renderRoomCard(room, sectionStatus){
   }
   header.querySelector('.rc-title').appendChild(doorLockBtn);
 
-  // 입퇴실·수정이력·청소이력은 버튼 하나(이력)로 모아 창 안에서 탭으로 본다(담당자 요청).
+  // 입퇴실·수정이력·청소이력은 버튼 하나(변경이력)로 모아 창 안에서 탭으로 본다(담당자 요청).
   const historyBtn = document.createElement('button');
   historyBtn.className = 'history-btn';
-  historyBtn.textContent = '이력';
+  historyBtn.textContent = '변경이력';
   historyBtn.title = canEdit() ? '입퇴실·수정·청소 이력 보기' : '입퇴실·청소 이력 보기';
   historyBtn.onclick = ()=> showRoomHistoryModal(room, '입퇴실');
   header.querySelector('.rc-header-badges').prepend(historyBtn);
@@ -5265,7 +5265,7 @@ function showContractHistoryModal(room){
   document.body.appendChild(overlay);
 }
 
-// 방 카드 "이력": 입퇴실·수정이력·청소이력을 한 창에서 탭으로 나눠 본다(담당자 요청 순서).
+// 방 카드 "변경이력": 입퇴실·수정이력·청소이력을 한 창에서 탭으로 나눠 본다(담당자 요청 순서).
 //  - 입퇴실: 퇴실 이력(DB.residentHistory). 예전에는 카드 안에 최근 3건만 펼쳐졌는데, 창에서는 전부 보여준다.
 //    복원은 가장 최근 1건만, 방이 비어 있을 때만 된다(예전과 같은 규칙).
 //  - 수정이력: editHistory 컬렉션(수정 권한 계정만). 처음 누를 때 한 번 읽어 이 창이 열린 동안 재사용한다.
@@ -5286,7 +5286,7 @@ function showRoomHistoryModal(room, initialTab, focusHistoryId){
 
   const top = el('div', 'room-hist-top');
   const head = el('div', 'room-hist-head');
-  head.appendChild(el('div', 'room-hist-title', `${room.number}호 이력`));
+  head.appendChild(el('div', 'room-hist-title', `${room.number}호 변경이력`));
   const closeBtn = el('button', 'btn small', '닫기');
   closeBtn.onclick = close;
   head.appendChild(closeBtn);
@@ -7296,7 +7296,7 @@ const HANDOVER_NOTES = [
     '방 카드의 방 타입도 방 가격 원장(가격표)이 기준이다. 가격표를 올리면 원장에서 찾은 호실의 room.type을 원장 타입으로 바꾸고(저장 전 확인 창에 미리 보여줌), 이미 올린 가격표와 다른 호실은 방 가격 관리의 "가격표 기준으로 맞추기"로 맞춘다. 원장에 없는 호실은 건드리지 않는다. 호실 찾기는 방 카드 가격과 같은 roomLedgerRow를 쓴다 — 둘이 다른 규칙으로 호실을 찾으면 가격과 타입이 서로 다른 행에서 나올 수 있다.',
     '타임라인에서 퇴실 처리된 입실자는 계약현황의 계약 날짜가 아니라 퇴실 이력의 입실일~퇴실일로 그린다. 계약의 주인은 지금 입실자와 퇴실 이력을 함께 후보로 놓고 찾는다(sourceContractId → 계약서 이름 일치 → 입실일이 계약 시작일에 가장 가까운 순, findContractOwner). 예전처럼 겹치는 지금 입실자가 있다고 이력을 보지 않으면, 중도퇴실한 사람의 계약이 다음 입실자 이름으로 계약 종료일까지 이용중처럼 그려진다. 같은 이력에 연결된 여러 계약은 막대 하나로 합치고, 어느 계약에도 연결되지 않은 이력은 따로 회색 막대로 보여준다.',
     '퇴실청소는 "그 사람이 나간 날 방이 비는지"로 건다 — 퇴실확정(roomWouldBeVacantExcept)과 실제 퇴실 처리(moveResidentToHistory) 모두 keepsLivingThrough(퇴실일 이전부터 살고 그 뒤에도 사는 사람만 셈)로 판단한다. occupiesRoom처럼 먼 미래 입실예정자를, 또는 당일 입실자를 "재실"로 세면 퇴실청소가 안 걸린다(마곡발산 902호, 성수 301호 — 당일 청소 후 당일 입실하는 경우가 있다). 새 입실자가 살기 시작해도 퇴실청소는 지우지 않고(청소완료 버튼으로만 지움) 리터치만 지운다(clearCleaningFlagsOnMoveIn, 2026-09 담당자 정책).',
-    '방 카드의 "이력" 버튼 하나로 입퇴실·수정이력·청소이력을 탭으로 본다(showRoomHistoryModal, 담당자 요청 순서). 수정이력은 저장할 때 "마지막으로 불러오거나 기록한 상태 ↔ 지금 상태"를 항목 단위로 비교해 editHistory 컬렉션에 남긴다(captureEdits·diffForEditHistory). 수정 화면마다 기록 코드를 붙이지 않는 방식이라 새 항목도 자동으로 기록된다 — 대신 계산값·내부값은 EDIT_HISTORY_IGNORE에 넣어야 이력이 지저분해지지 않는다. 로그인 직후·매시간 자동 처리는 앞뒤로 captureEdits를 불러 "자동"으로 남기고, 다른 탭 변경 반영(applyLoadedCore)·백업 가져오기 때는 기준 상태만 다시 잡는다(안 그러면 남의 변경이 내 이름으로 기록됨). 새로운 자동 처리를 추가하면 같은 방식으로 감쌀 것. Firestore 규칙에 editHistory(읽기·추가: 수정 권한, 수정·삭제 불가)가 필요하다.',
+    '방 카드의 "변경이력" 버튼 하나로 입퇴실·수정이력·청소이력을 탭으로 본다(showRoomHistoryModal, 담당자 요청 순서). 수정이력은 저장할 때 "마지막으로 불러오거나 기록한 상태 ↔ 지금 상태"를 항목 단위로 비교해 editHistory 컬렉션에 남긴다(captureEdits·diffForEditHistory). 수정 화면마다 기록 코드를 붙이지 않는 방식이라 새 항목도 자동으로 기록된다 — 대신 계산값·내부값은 EDIT_HISTORY_IGNORE에 넣어야 이력이 지저분해지지 않는다. 로그인 직후·매시간 자동 처리는 앞뒤로 captureEdits를 불러 "자동"으로 남기고, 다른 탭 변경 반영(applyLoadedCore)·백업 가져오기 때는 기준 상태만 다시 잡는다(안 그러면 남의 변경이 내 이름으로 기록됨). 새로운 자동 처리를 추가하면 같은 방식으로 감쌀 것. Firestore 규칙에 editHistory(읽기·추가: 수정 권한, 수정·삭제 불가)가 필요하다.',
     '수정이력 탭은 10건씩 읽고 "이전 기록 더 보기"로 이어 읽는다(EDIT_HISTORY_PAGE_SIZE, startAfter). 문서 1건이 읽기 1회라, 방을 열 때마다 수백 건을 한꺼번에 읽게 늘리면 무료 요금제 일일 읽기 한도(5만 건)를 금방 쓴다. 쓰기(바뀐 칸 1개 = 1건, 하루 2만 건 한도)와 저장 용량(1GB)은 운영 규모상 여유가 있지만, 엑셀 일괄 수정처럼 수백 개 호실을 한 번에 바꾸면 그만큼 기록이 생긴다.',
     '퇴실청소 완료(completeCleaningEntry)는 플래그를 끈 경우에도 cleaningDismissedMoveOut에 그 퇴실일을 남긴다. 안 남기면 퇴실확정 입실자가 아직 퇴실 처리 전인 동안(퇴실 처리는 퇴실일 다음 날) 같은 방이 "플래그 없는 퇴실청소 예정"(roomUpcomingLeaveDate)으로 목록·방 카드에 다시 떠서, 한 번 더 누르면 같은 날 청소완료가 두 번 기록된다(성수역 102호). 미리보기 경로는 미리보기가 실제로 떠 있을 때만 기록한다. 청소 이력은 방마다 최근 5건(CLEANING_HISTORY_MAX)만 남으니 중복이 생기면 오래된 기록이 밀려난다.',
     '관제센터 특성상 탭을 며칠씩 켜둔다. 그래서 실시간 동기화(onSnapshot)와 저장 시 충돌 검사가 들어가 있고, 날짜가 바뀌면 세션을 초기화한다. "고쳤는데 반영이 안 된다"는 제보는 대부분 오래된 탭이 옛 코드를 돌리고 있는 경우다.',
