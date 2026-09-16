@@ -626,6 +626,10 @@
   .login-links a{ color:var(--accent-ink); text-decoration:none; }
   .login-links a:hover{ text-decoration:underline; }
 
+  /* 새 버전 안내(checkForNewBuild). 모달(2100)보다 아래에 둔다. */
+  .new-build-banner{ position:fixed; left:50%; bottom:16px; transform:translateX(-50%); z-index:2050; display:flex; align-items:center;
+    flex-wrap:wrap; gap:10px; max-width:calc(100% - 32px); box-sizing:border-box; padding:10px 14px; border-radius:10px;
+    background:var(--ink); color:#fff; font-size:12.5px; box-shadow:0 6px 20px rgba(0,0,0,.2); }
   .modal-overlay{
     position:fixed; inset:0; background:rgba(30,42,50,.45); z-index:2100;
     display:flex; align-items:center; justify-content:center; padding:20px;
@@ -1240,7 +1244,7 @@ function coalesceEditRows(rowsDesc){
 // 보인다" 같은 문제는 화면만 봐서는 캐시를 쓴 건지, 서버에서 0건을 받은 건지, 권한 오류로
 // 실패한 건지 구분이 안 돼서 진단이 계속 헛돌았다. 관리자 설정의 "데이터 로딩 상태"에서
 // 그대로 보여준다.
-const APP_BUILD = '2026-09-16-c';
+const APP_BUILD = '2026-09-16-d';
 let LOAD_DIAG = {
   contracts: { count: 0, source: '아직 불러오지 않음', error: '' },
   history:   { count: 0, source: '아직 불러오지 않음', error: '' },
@@ -6205,6 +6209,7 @@ function renderLoadDiagnosticsPanel(){
 
   const rows = [
     ['실행 중인 코드 버전', APP_BUILD],
+    ['배포된 최신 버전', newerBuildSeen ? `${newerBuildSeen} (새로고침 필요)` : '실행 중인 버전과 같음 (30분마다 확인)'],
     ['로그인 계정', (CURRENT_USER && CURRENT_USER.email) || '-'],
     ['권한', USER_ROLE || '-'],
     ['지점 접근 범위', USER_BRANCH_SCOPE === 'selected' ? `선택한 지점 ${Array.isArray(USER_BRANCH_IDS) ? USER_BRANCH_IDS.length : 0}곳` : '전체'],
@@ -6215,7 +6220,7 @@ function renderLoadDiagnosticsPanel(){
   const table = document.createElement('table');
   table.style.cssText = 'width:100%;border-collapse:collapse;font-size:12.5px;';
   table.innerHTML = rows.map(([k,v])=>{
-    const bad = /실패|오류/.test(String(v)) || (k.includes('이력') && /^0건/.test(String(v)));
+    const bad = /실패|오류|새로고침 필요/.test(String(v)) || (k.includes('이력') && /^0건/.test(String(v)));
     return `<tr>
       <td style="padding:6px 4px;color:var(--ink-soft);width:150px;">${esc(k)}</td>
       <td style="padding:6px 4px;font-weight:700;${bad ? 'color:var(--st-hold);' : ''}">${esc(v)}</td>
@@ -6258,7 +6263,7 @@ function adminHelpSections(){
     { id:'diag', title:'데이터 로딩 상태',
       summary:'지금 이 화면이 어떤 코드 버전과 계정으로 실행 중인지, 계약·퇴실 이력을 몇 건 불러왔는지 보여줍니다. 문제가 생기면 이 표를 캡처해서 알려주시면 원인을 바로 찾을 수 있습니다.',
       items:[
-        ['실행 중인 코드 버전', '배포된 최신 버전과 다르면 오래된 탭입니다. Ctrl+Shift+R로 새로고침하세요.'],
+        ['실행 중인 코드 버전 · 배포된 최신 버전', '둘이 다르면 옛 코드로 돌고 있는 오래된 탭입니다(옛 코드로 한 수정은 수정이력 등 새 기능이 빠집니다). 화면 아래의 "지금 새로고침"을 누르거나 Ctrl+Shift+R로 새로고침하세요. 30분마다 확인하고, 안 보고 있는 탭은 편집 중이 아니면 알아서 새로고침합니다. 자정 세션 초기화 때도 새로고침됩니다.'],
         ['권한 · 지점 접근 범위', '로그인한 계정의 권한과 볼 수 있는 지점 범위입니다.'],
         ['계약 이력 · 퇴실 이력', '불러온 건수와 출처입니다. 0건이거나 빨간색으로 보이면 불러오기에 문제가 있는 것입니다.'],
         ['캐시 비우고 다시 불러오기', '이 브라우저에 저장해 둔 계약·퇴실 이력 캐시를 지우고 서버에서 새로 읽어옵니다. 다른 PC에서는 보이는 이력이 여기서만 안 보일 때 씁니다.']
@@ -7510,6 +7515,7 @@ const HANDOVER_NOTES = [
     '방 카드의 "변경이력" 버튼 하나로 입퇴실·수정이력·청소이력을 탭으로 본다(showRoomHistoryModal, 담당자 요청 순서). 수정이력은 저장할 때 "마지막으로 불러오거나 기록한 상태 ↔ 지금 상태"를 항목 단위로 비교해 editHistory 컬렉션에 남긴다(captureEdits·diffForEditHistory). 수정 화면마다 기록 코드를 붙이지 않는 방식이라 새 항목도 자동으로 기록된다 — 대신 계산값·내부값은 EDIT_HISTORY_IGNORE에 넣어야 이력이 지저분해지지 않는다. 로그인 직후·매시간 자동 처리는 앞뒤로 captureEdits를 불러 "자동"으로 남기고, 다른 탭 변경 반영(applyLoadedCore)·백업 가져오기 때는 기준 상태만 다시 잡는다(안 그러면 남의 변경이 내 이름으로 기록됨). 새로운 자동 처리를 추가하면 같은 방식으로 감쌀 것. Firestore 규칙에 editHistory(읽기·추가: 수정 권한, 수정·삭제 불가)가 필요하다.',
     '수정이력 탭은 10건씩 읽고 "이전 기록 더 보기"로 이어 읽는다(EDIT_HISTORY_PAGE_SIZE, startAfter). 문서 1건이 읽기 1회라, 방을 열 때마다 수백 건을 한꺼번에 읽게 늘리면 무료 요금제 일일 읽기 한도(5만 건)를 금방 쓴다. 쓰기(바뀐 칸 1개 = 1건, 하루 2만 건 한도)와 저장 용량(1GB)은 운영 규모상 여유가 있지만, 엑셀 일괄 수정처럼 수백 개 호실을 한 번에 바꾸면 그만큼 기록이 생긴다.',
     '퇴실청소 완료(completeCleaningEntry)는 플래그를 끈 경우에도 cleaningDismissedMoveOut에 그 퇴실일을 남긴다. 안 남기면 퇴실확정 입실자가 아직 퇴실 처리 전인 동안(퇴실 처리는 퇴실일 다음 날) 같은 방이 "플래그 없는 퇴실청소 예정"(roomUpcomingLeaveDate)으로 목록·방 카드에 다시 떠서, 한 번 더 누르면 같은 날 청소완료가 두 번 기록된다(성수역 102호). 미리보기 경로는 미리보기가 실제로 떠 있을 때만 기록한다. 청소 이력은 방마다 최근 5건(CLEANING_HISTORY_MAX)만 남으니 중복이 생기면 오래된 기록이 밀려난다.',
+    '오래 켜 둔 탭이 옛 코드로 계속 저장하는 문제(수정 이력 배포 뒤 "연장했는데 수정이력이 없다" 제보) 때문에, 30분마다·탭을 다시 볼 때 배포된 페이지의 APP_BUILD를 읽어 다르면 새로고침 안내를 띄우고(안 보는 탭은 편집 중이 아니면 바로 새로고침), 자정 세션 초기화도 로그아웃 뒤 새로고침하게 했다(checkForNewBuild). APP_BUILD는 반드시 "YYYY-MM-DD-글자" 형식으로 올릴 것 — 확인 정규식이 그 형식만 읽는다.',
     '입실자 카드의 퇴실·연장·방이동 버튼은 이름 줄 오른쪽에 있었는데, 버튼이 줄어들지 않아 긴 이름이 가려지거나 줄이 깨진다는 제보로 입실자 정보 맨 아래(.resident-acts)로 옮겼다(담당자가 기간 줄 오른쪽·이름 바로 아래 줄 대신 고름, 처음엔 오른쪽 정렬이었다가 왼쪽 정렬로 바꿈). 이름은 이제 줄바꿈된다.',
     '대리결제 입실자는 카드 이름·연락처가 실입실자 것(residentDisplayName)이라 결제자가 안 보인다는 제보로, 입실자 카드에 실입실자와 결제자를 둘 다 "실입실자"/"결제자" 표시를 붙여 구분해 보여준다(실입실자를 안 적었으면 큰 이름이 결제자, 아랫줄이 "실입실자 미입력"). 실입실자 이름 밑 연락처는 실입실자 연락처만 쓴다 — 예전엔 비어 있으면 결제자 연락처로 채워 실입실자 연락처처럼 보였다. 조회 전용 계정에는 결제자 이름도 maskViewerName으로 가린다. 지점 화면의 "대리결제" 필터와 전체 검색(결제자·실입실자 이름 둘 다 검색됨)은 원래 있었다.',
     '방이동하면 그 사람의 계약도 이동한 방으로 옮긴다(담당자가 "새 방에서 함께 보기" 대신 "실제로 옮기기"를 골랐다). 계약의 방은 시트의 지점·방이름으로 정해지므로 옮긴 계약에 처음 방(sheetRoomId)·옮겨 온 날(roomMovedOn)을 남기고, 붙여넣기에서 이전 방이름으로 들어온 그 사람 행은 movedContractRouteFor가 옮긴 방으로 보낸다(안 그러면 재붙여넣기 때 이전 방에 중복이 생긴다). 타임라인은 옮겨 온 날부터 그린다. 실시간 반영 때문에 importedAt을 새로 매기되 환불·정정 대체 판정 순서를 지키려고 그 사람 계약을 원래 순서대로 다시 매긴다. 이 기능 전 방이동은 계약관리의 "방이동 계약 옮기기"로 옮긴다(방이동으로 들어온 지금 입실자 기준, 퇴실 이력의 이름·이동일로 거슬러 올라감). 참고로 정산 화면은 계약 데이터를 읽지 않아 지점 간 이동이어도 정산에는 영향이 없다.',
@@ -11176,6 +11182,59 @@ setInterval(()=>{ if(canEdit()){
   captureEdits(EDIT_BY_AUTO);
 } }, 60*60*1000);
 
+/* ---------------- 새 버전 확인 ----------------
+   관제센터 탭은 며칠씩 켜져 있고, 자정 세션 초기화도 예전엔 로그아웃만 해서 페이지(코드)는 그대로 남았다. 그래서 새 기능이
+   배포돼도 오래된 탭은 옛 코드로 계속 저장했다(수정 이력 배포 뒤 "연장했는데 수정이력이 없다"는 제보, 2026-09-16).
+   30분마다, 그리고 탭을 다시 볼 때 배포된 페이지의 APP_BUILD를 읽어 다르면 화면 아래에 새로고침 안내를 띄운다. 탭이 안
+   보이고 편집·저장 중이 아니면 바로 새로고침한다. 같은 사이트의 HTML을 읽는 것이라 Firestore 읽기 한도와 무관하다.
+   APP_BUILD는 "날짜-글자" 형식을 지켜야 한다(아래 정규식이 그 형식만 읽는다 — 이 주석·정규식 자체와 헷갈리지 않게). */
+const BUILD_CHECK_INTERVAL_MS = 30 * 60 * 1000;
+let newerBuildSeen = '';
+let lastBuildCheckAt = 0;
+function canReloadQuietly(){
+  return document.hidden && !anyEditInProgress() && !document.querySelector('.modal-overlay');
+}
+function checkForNewBuild(){
+  if(!/^https?:$/.test(location.protocol)) return;
+  if(Date.now() - lastBuildCheckAt < 60 * 1000) return;
+  lastBuildCheckAt = Date.now();
+  return fetch(location.pathname + '?build-check=' + Date.now(), { cache: 'no-store' })
+    .then(r=> r.ok ? r.text() : '')
+    .then(text=>{
+      const m = /const APP_BUILD = '(\d{4}-\d{2}-\d{2}-[a-z0-9]+)'/.exec(text || '');
+      if(!m || m[1] === APP_BUILD) return;
+      newerBuildSeen = m[1];
+      if(canReloadQuietly()){ location.reload(); return; }
+      showNewBuildBanner();
+    })
+    .catch(e=> console.warn('새 버전 확인 실패:', e));
+}
+function showNewBuildBanner(){
+  if(document.getElementById('newBuildBanner')) return;
+  const bar = document.createElement('div');
+  bar.id = 'newBuildBanner';
+  bar.className = 'new-build-banner';
+  const msg = document.createElement('span');
+  msg.textContent = '대시보드가 업데이트되었습니다. 새로고침하면 새 버전으로 바뀝니다.';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'btn small primary';
+  btn.textContent = '지금 새로고침';
+  btn.onclick = ()=>{
+    if(anyEditInProgress()) showConfirm('편집 중이거나 저장 중인 내용이 있습니다. 새로고침하면 저장되지 않은 내용은 사라집니다. 그래도 새로고침할까요?', ()=> location.reload());
+    else location.reload();
+  };
+  bar.appendChild(msg);
+  bar.appendChild(btn);
+  document.body.appendChild(bar);
+}
+setInterval(checkForNewBuild, BUILD_CHECK_INTERVAL_MS);
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState === 'visible') checkForNewBuild();
+  else if(newerBuildSeen && canReloadQuietly()) location.reload();
+});
+/* ---- 새 버전 확인 끝 ---- */
+
 // 관제센터 특성상 PC를 끄지 않고 탭을 며칠씩 열어두는 경우가 많다. 예전에는 그렇게 오래 열린
 // 세션이 로그인 시점의(=시간이 지날수록 오래된) 데이터를 계속 들고 있다가 저장 시 다른 곳의
 // 변경사항을 되돌릴 위험이 있어 유휴 시간 기준으로 주기적으로 로그아웃시켰는데, 지금은 실시간
@@ -11187,6 +11246,7 @@ setInterval(()=>{ if(canEdit()){
 // 로컬 날짜를 계산했지만, 지금은 todayISO() 자체가 한국시간 기준이라 그대로 쓰면 된다.
 function localDateKey(){ return todayISO(); }
 let lastSeenLocalDate = localDateKey();
+const SESSION_RESET_NOTICE_KEY = 'dashboardSessionResetNotice';
 let idleLoggedOut = false;
 function checkDailySessionReset(){
   if(!CURRENT_USER || idleLoggedOut) return;
@@ -11194,14 +11254,22 @@ function checkDailySessionReset(){
   if(today === lastSeenLocalDate) return;
   lastSeenLocalDate = today;
   idleLoggedOut = true;
+  // 로그아웃만 하면 페이지(코드)는 그대로라 며칠 전 코드가 계속 돈다 — 새로고침까지 해서 그날 배포된 코드로 다시 시작한다.
   firebase.auth().signOut().then(()=>{
-    showAlert('날짜가 바뀌어 세션이 초기화되었습니다. 다시 로그인해주세요.');
+    try{ sessionStorage.setItem(SESSION_RESET_NOTICE_KEY, '1'); }catch(e){ /* 저장소를 못 쓰면 안내만 빠진다 */ }
+    location.reload();
   });
 }
 setInterval(checkDailySessionReset, 60*1000);
 // 백그라운드 탭에는 타이머 정확도가 떨어질 수 있으므로, 다시 화면을 보는 순간(visible로 전환)
 // 바로 한 번 더 확인한다.
 document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') checkDailySessionReset(); });
+try{
+  if(sessionStorage.getItem(SESSION_RESET_NOTICE_KEY)){
+    sessionStorage.removeItem(SESSION_RESET_NOTICE_KEY);
+    showAlert('날짜가 바뀌어 세션이 초기화되었습니다(새 버전으로 새로고침됨). 다시 로그인해주세요.');
+  }
+}catch(e){ /* 저장소를 못 쓰는 환경 */ }
 </script>
 </body>
 </html>
