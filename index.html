@@ -1279,7 +1279,7 @@ function coalesceEditRows(rowsDesc){
 // 보인다" 같은 문제는 화면만 봐서는 캐시를 쓴 건지, 서버에서 0건을 받은 건지, 권한 오류로
 // 실패한 건지 구분이 안 돼서 진단이 계속 헛돌았다. 관리자 설정의 "데이터 로딩 상태"에서
 // 그대로 보여준다.
-const APP_BUILD = '2026-09-17-c';
+const APP_BUILD = '2026-09-17-d';
 let LOAD_DIAG = {
   contracts: { count: 0, source: '아직 불러오지 않음', error: '' },
   history:   { count: 0, source: '아직 불러오지 않음', error: '' },
@@ -6244,10 +6244,14 @@ function renderStatsView(){
   branchSection.innerHTML = `<h3 style="margin:0 0 12px;font-size:19px;">지점별 현황 (${localDateKey().replace(/-/g,'/')})</h3>`;
   const table = document.createElement('table');
   table.className = 'branch-table branch-stat-table';
-  // 열 너비 합계 100% — 마지막 판매보류 열이 정확히 40%다.
+  // 조회 전용 계정에는 판매보류를 호실·메모 대신 건수로만 보여준다(담당자 요청). 수정 가능·슈퍼어드민은 그대로.
+  const holdCountOnly = USER_ROLE === 'viewer';
+  // 열 너비 합계 100% — 호실·메모를 보여줄 때는 마지막 판매보류 열이 정확히 40%, 건수만 보여줄 때는 다른 숫자 칸과 같다.
   table.innerHTML = `<colgroup>`
-    + `<col style="width:16%"><col style="width:8%"><col style="width:9%"><col style="width:9%">`
-    + `<col style="width:9%"><col style="width:9%"><col style="width:40%">`
+    + (holdCountOnly
+      ? `<col style="width:28%"><col style="width:12%"><col style="width:12%"><col style="width:12%"><col style="width:12%"><col style="width:12%"><col style="width:12%">`
+      : `<col style="width:16%"><col style="width:8%"><col style="width:9%"><col style="width:9%">`
+        + `<col style="width:9%"><col style="width:9%"><col style="width:40%">`)
     + `</colgroup>`
     + `<thead><tr><th>지점</th><th>호실수</th><th>이용중</th><th>판매중</th><th>입실율</th><th>예약</th><th>판매보류</th></tr></thead>`;
   const tbody = document.createElement('tbody');
@@ -6273,13 +6277,14 @@ function renderStatsView(){
     totals.total += total; totals.occupied += occupied; totals.forSale += forSale;
     totals.hold += holdRooms.length; totals.reserved += reserved;
     const occColor = occRate >= 90 ? 'var(--ink)' : (occRate >= 80 ? 'var(--st-forsale)' : 'var(--st-hold)');
-    const holdText = holdRooms.length
-      ? holdRooms.map(r=> esc(r.note ? `${r.number}: ${r.note}` : `${r.number}`)).join('<br>')
-      : '-';
+    const holdText = holdCountOnly ? holdRooms.length
+      : holdRooms.length
+        ? holdRooms.map(r=> esc(r.note ? `${r.number}: ${r.note}` : `${r.number}`)).join('<br>')
+        : '-';
     const tabCell = (tab, content, cls)=> `<td${cls ? ` class="${cls}"` : ''}><a href="#" data-goto="${b.id}" data-tab="${tab}" class="stat-cell-link">${content}</a></td>`;
     const tr = document.createElement('tr');
     tr.innerHTML = `<td><a href="#" data-goto="${b.id}" data-tab="전체" style="color:var(--accent-ink);font-weight:700;text-decoration:none;">${esc(branchLabel(b))}</a></td>
-      <td>${total}</td>${tabCell('이용중', occupied)}${tabCell('판매중', forSale)}<td style="color:${occColor};font-weight:700;">${occRate}%</td>${tabCell('예약', reserved)}${tabCell('판매보류', holdText, 'hold-cell')}`;
+      <td>${total}</td>${tabCell('이용중', occupied)}${tabCell('판매중', forSale)}<td style="color:${occColor};font-weight:700;">${occRate}%</td>${tabCell('예약', reserved)}${tabCell('판매보류', holdText, holdCountOnly ? '' : 'hold-cell')}`;
     tbody.appendChild(tr);
   });
   const totalOccRate = totals.total ? Math.round((totals.occupied/totals.total)*100) : 0;
@@ -6463,7 +6468,7 @@ function adminHelpSections(){
     { id:'users', title:'사용자 관리',
       summary:'로그인 계정의 가입 승인, 권한, 볼 수 있는 지점 범위를 관리합니다.',
       items:[
-        ['권한', '조회 전용(보기만) / 수정 가능(입력·수정 가능, 로그인하면 지점 화면으로 바로 이동) / 슈퍼어드민(관리자 설정까지 전체).'],
+        ['권한', '조회 전용(보기만, 대시보드 지점별 현황의 판매보류는 건수만) / 수정 가능(입력·수정 가능, 로그인하면 지점 화면으로 바로 이동) / 슈퍼어드민(관리자 설정까지 전체).'],
         ['지점 범위', '전체 지점, 또는 지점 선택입니다. 지점 선택이면 1곳 이상 골라야 합니다.'],
         ['승인 · 거절', '승인 대기 줄의 버튼입니다. "승인"은 고른 권한·지점 범위로 사용을 허락하고, "거절"은 요청을 사용자 목록에서 지웁니다.'],
         ['역할 변경 · 접근 차단', '쓰고 있는 계정 줄의 버튼입니다. "역할 변경"은 권한·지점 범위를 저장하고, "접근 차단"은 계정을 두고 승인 대기로 돌립니다(다시 승인하면 복구).'],
@@ -7622,6 +7627,7 @@ const HANDOVER_NOTES = [
     '방 카드의 "변경이력" 버튼 하나로 입퇴실·수정이력·청소이력을 탭으로 본다(showRoomHistoryModal, 담당자 요청 순서). 수정이력은 저장할 때 "마지막으로 불러오거나 기록한 상태 ↔ 지금 상태"를 항목 단위로 비교해 editHistory 컬렉션에 남긴다(captureEdits·diffForEditHistory). 수정 화면마다 기록 코드를 붙이지 않는 방식이라 새 항목도 자동으로 기록된다 — 대신 계산값·내부값은 EDIT_HISTORY_IGNORE에 넣어야 이력이 지저분해지지 않는다. 로그인 직후·매시간 자동 처리는 앞뒤로 captureEdits를 불러 "자동"으로 남기고, 다른 탭 변경 반영(applyLoadedCore)·백업 가져오기 때는 기준 상태만 다시 잡는다(안 그러면 남의 변경이 내 이름으로 기록됨). 새로운 자동 처리를 추가하면 같은 방식으로 감쌀 것. Firestore 규칙에 editHistory(읽기·추가: 수정 권한, 수정·삭제 불가)가 필요하다.',
     '수정이력 탭은 10건씩 읽고 "이전 기록 더 보기"로 이어 읽는다(EDIT_HISTORY_PAGE_SIZE, startAfter). 문서 1건이 읽기 1회라, 방을 열 때마다 수백 건을 한꺼번에 읽게 늘리면 무료 요금제 일일 읽기 한도(5만 건)를 금방 쓴다. 쓰기(바뀐 칸 1개 = 1건, 하루 2만 건 한도)와 저장 용량(1GB)은 운영 규모상 여유가 있지만, 엑셀 일괄 수정처럼 수백 개 호실을 한 번에 바꾸면 그만큼 기록이 생긴다.',
     '퇴실청소 완료(completeCleaningEntry)는 플래그를 끈 경우에도 cleaningDismissedMoveOut에 그 퇴실일을 남긴다. 안 남기면 퇴실확정 입실자가 아직 퇴실 처리 전인 동안(퇴실 처리는 퇴실일 다음 날) 같은 방이 "플래그 없는 퇴실청소 예정"(roomUpcomingLeaveDate)으로 목록·방 카드에 다시 떠서, 한 번 더 누르면 같은 날 청소완료가 두 번 기록된다(성수역 102호). 미리보기 경로는 미리보기가 실제로 떠 있을 때만 기록한다. 청소 이력은 방마다 최근 5건(CLEANING_HISTORY_MAX)만 남으니 중복이 생기면 오래된 기록이 밀려난다.',
+    '조회 전용(viewer) 계정은 대시보드 "지점별 현황"의 판매보류 칸을 호실·메모 대신 건수로만 본다(담당자 요청, holdCountOnly). 칸을 누르면 판매보류 목록으로 가는 동작과 수정 가능·슈퍼어드민 화면은 그대로다.',
     '사용자 관리에 "계정 삭제"를 추가했다(users·emailIndex 문서 삭제, 슈퍼어드민만 — 보안 규칙에서 둘 다 isSuperAdmin 삭제 허용). 로그인 계정(Firebase Authentication)은 브라우저 SDK로 남의 계정을 지울 수 없어(관리자 SDK·Cloud Functions 필요, 무료 요금제라 없음) 대시보드 목록에서만 지운다(처음엔 삭제 뒤 Firebase 콘솔 안내 창을 띄웠는데 담당자 요청으로 뺐다). 로그인 계정이 남아 있으면 그 사람이 다시 로그인할 때 initApp이 승인 대기 문서를 새로 만든다. 로그인한 본인 줄은 역할 변경·차단·삭제를 잠갔다(담당자 요청 — 스스로 권한을 없애는 사고 방지). 버튼은 처음에 ×=차단, "계정 삭제"=삭제였는데 "흔한 UI가 아니다"는 지적으로 승인 대기 줄 [승인][거절](거절=요청 삭제), 쓰는 계정 줄 [역할 변경][접근 차단] + 맨 오른쪽 ×=계정 삭제로 바꿨다. 거절(요청 삭제)과 ×(계정 삭제) 모두 확인 창만 거쳐 목록에서 지운다.',
     '변경이력 창의 수정이력 탭에도 건수를 보여준다. compat SDK(10.12.2)에는 count API가 없어 Firestore REST runAggregationQuery를 로그인 토큰으로 부른다(countEditHistoryForRoom — 창을 열 때 1회, 결과 1,000건마다 읽기 1회). 실패하면 탭을 연 뒤 불러온 건수("10+")를 보여준다. 건수는 저장된 기록 수라, 5분 안의 같은 칸 저장을 한 줄로 합쳐 보여주는 목록 줄 수와 다를 수 있다.',
     '오래 켜 둔 탭이 옛 코드로 계속 저장하는 문제(수정 이력 배포 뒤 "연장했는데 수정이력이 없다" 제보) 때문에, 30분마다·탭을 다시 볼 때 배포된 페이지의 APP_BUILD를 읽어 다르면 새로고침 안내를 띄우고(안 보는 탭은 편집 중이 아니면 바로 새로고침), 자정 세션 초기화도 로그아웃 뒤 새로고침하게 했다(checkForNewBuild). APP_BUILD는 반드시 "YYYY-MM-DD-글자" 형식으로 올릴 것 — 확인 정규식이 그 형식만 읽는다.',
