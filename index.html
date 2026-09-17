@@ -562,6 +562,7 @@
   .user-row{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   .user-row .user-email{ font-weight:600; font-size:12.5px; min-width:160px; }
   .user-row select{ font-size:12px; }
+  .user-row .user-self{ font-size:11px; font-weight:700; color:var(--accent-ink); background:var(--accent-soft); border-radius:4px; padding:1px 6px; }
   .user-branch-checks{ display:flex; flex-wrap:wrap; gap:4px 14px; margin:8px 0 2px 0; padding:8px 10px; background:#FAF8F2; border-radius:8px; }
   .user-branch-check-item{ display:flex; align-items:center; gap:5px; font-size:12px; color:var(--ink); cursor:pointer; }
   .log-row{ display:flex; align-items:center; gap:10px; padding:6px 0; border-bottom:1px dashed var(--line); font-size:12px; }
@@ -1276,7 +1277,7 @@ function coalesceEditRows(rowsDesc){
 // 보인다" 같은 문제는 화면만 봐서는 캐시를 쓴 건지, 서버에서 0건을 받은 건지, 권한 오류로
 // 실패한 건지 구분이 안 돼서 진단이 계속 헛돌았다. 관리자 설정의 "데이터 로딩 상태"에서
 // 그대로 보여준다.
-const APP_BUILD = '2026-09-16-e';
+const APP_BUILD = '2026-09-17-a';
 let LOAD_DIAG = {
   contracts: { count: 0, source: '아직 불러오지 않음', error: '' },
   history:   { count: 0, source: '아직 불러오지 않음', error: '' },
@@ -5780,6 +5781,10 @@ function renderUserManagePanel(){
       emailSpan.className = 'user-email';
       emailSpan.textContent = u.email || u.id;
       row.appendChild(emailSpan);
+      // 로그인한 본인 계정은 여기서 권한을 바꾸거나 차단·삭제할 수 없다(담당자 요청 — 스스로 권한을 없애 관리자 설정에서 잠기는 일을 막는다).
+      const isSelf = !!CURRENT_USER && u.id === CURRENT_USER.uid;
+      const SELF_LOCK_TITLE = '로그인한 본인 계정은 여기서 바꾸거나 삭제할 수 없습니다. 다른 슈퍼어드민 계정으로 처리하세요.';
+      if(isSelf) row.appendChild(el('span', 'user-self', '현재 로그인'));
 
       if(isPending){
         const badge = document.createElement('span');
@@ -5842,6 +5847,7 @@ function renderUserManagePanel(){
       approveBtn.className = 'btn small primary';
       approveBtn.textContent = isPending ? '승인' : '역할 변경';
       approveBtn.onclick = ()=>{
+        if(isSelf){ showAlert(SELF_LOCK_TITLE); return; }
         const newRole = roleSel.value;
         const branchScope = newRole === 'superadmin' ? 'all' : scopeSel.value;
         const branchIds = branchScope === 'selected' ? checkInputs.filter(cb=>cb.checked).map(cb=>cb.value) : [];
@@ -5866,12 +5872,40 @@ function renderUserManagePanel(){
       delBtn.innerHTML = '&times;';
       delBtn.title = isPending ? '요청 거절' : '계정 접근 차단 (대기 상태로 전환)';
       delBtn.onclick = ()=>{
+        if(isSelf){ showAlert(SELF_LOCK_TITLE); return; }
         showConfirm(isPending ? `${u.email} 계정 요청을 거절할까요?` : `${u.email} 계정의 접근을 차단할까요? (승인 대기 상태로 전환됩니다)`, ()=>{
           USERS_COL.doc(u.id).set({ email: u.email, role:'pending' }, { merge:true })
             .then(()=>{ writeChangeLog(`${u.email} 계정 접근 차단/거절`); render(); });
         });
       };
       row.appendChild(delBtn);
+
+      // 계정 삭제: 사용자 목록(users)과 이메일 등록 정보(emailIndex)를 지운다. 로그인 계정(Firebase Authentication)은
+      // 브라우저에서 남의 것을 지울 수 없어(관리자 SDK 필요) Firebase 콘솔에서 따로 지우도록 안내한다(showAccountDeleteGuide).
+      const removeBtn = el('button', 'btn small danger', '계정 삭제');
+      removeBtn.title = '사용자 목록에서 계정을 지웁니다(로그인 계정은 Firebase 콘솔에서 따로 삭제)';
+      removeBtn.onclick = ()=>{
+        if(isSelf){ showAlert(SELF_LOCK_TITLE); return; }
+        const label = u.email || u.id;
+        showConfirm(`${label} 계정을 삭제할까요?\n\n사용자 목록과 이메일 등록 정보가 지워지며 되돌릴 수 없습니다.\n로그인 계정은 이어서 Firebase 콘솔에서 삭제해야 다시 로그인할 수 없습니다.`, ()=>{
+          const batch = firestoreDB.batch();
+          batch.delete(USERS_COL.doc(u.id));
+          const emailKey = normalizeEmailKey(u.email);
+          if(emailKey) batch.delete(EMAIL_INDEX_COL.doc(emailKey));
+          batch.commit()
+            .then(()=>{
+              writeChangeLog(`${label} 계정 삭제(사용자 목록)`);
+              render();
+              showAccountDeleteGuide(label);
+            })
+            .catch(e=> showAlert('계정 삭제 실패: ' + e.message));
+        });
+      };
+      row.appendChild(removeBtn);
+
+      if(isSelf){
+        [roleSel, scopeSel, approveBtn, delBtn, removeBtn, ...checkInputs].forEach(x=>{ x.disabled = true; x.title = SELF_LOCK_TITLE; });
+      }
 
       entryWrap.appendChild(row);
       entryWrap.appendChild(branchChecks);
@@ -5880,6 +5914,35 @@ function renderUserManagePanel(){
   }).catch(e=>{ body.textContent = '사용자 목록을 불러오지 못했습니다: ' + e.message; });
 
   return box;
+}
+
+// 계정 삭제 뒤 안내: 로그인 계정은 Firebase 콘솔(Authentication → 사용자)에서만 지울 수 있다.
+function showAccountDeleteGuide(label){
+  const overlay = el('div', 'modal-overlay');
+  const box = el('div', 'modal-box');
+  const close = ()=> overlay.remove();
+  box.appendChild(el('div', 'modal-msg',
+    `${label} 계정을 대시보드 사용자 목록에서 삭제했습니다.\n\n`
+    + '로그인 계정은 Firebase 콘솔에서 따로 삭제해야 합니다. 삭제하지 않으면 이 사람이 다시 로그인할 때 "승인 대기"로 다시 나타납니다.\n\n'
+    + 'Firebase 콘솔 → Authentication → 사용자에서 이 이메일을 찾아 오른쪽 ⋮ → "계정 삭제"를 누르세요.'));
+  const row = el('div', 'modal-btn-row');
+  const copyBtn = el('button', 'btn', '이메일 복사');
+  copyBtn.onclick = ()=>{
+    const done = ()=>{ copyBtn.textContent = '복사됨'; };
+    if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(label).then(done, ()=>{});
+  };
+  const open = el('a', 'btn primary', 'Firebase 콘솔 열기');
+  open.href = `https://console.firebase.google.com/project/${firebaseConfig.projectId}/authentication/users`;
+  open.target = '_blank';
+  open.rel = 'noopener';
+  open.style.textDecoration = 'none';
+  const closeBtn = el('button', 'btn', '닫기');
+  closeBtn.onclick = close;
+  overlay.addEventListener('click', e=>{ if(e.target === overlay) close(); });
+  row.appendChild(copyBtn); row.appendChild(open); row.appendChild(closeBtn);
+  box.appendChild(row);
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
 }
 
 const CHANGELOG_PAGE_SIZE = 10;
@@ -6415,10 +6478,15 @@ function adminHelpSections(){
         ['권한', '조회 전용(보기만) / 수정 가능(입력·수정 가능, 로그인하면 지점 화면으로 바로 이동) / 슈퍼어드민(관리자 설정까지 전체).'],
         ['지점 범위', '전체 지점, 또는 지점 선택입니다. 지점 선택이면 1곳 이상 골라야 합니다.'],
         ['승인 · 역할 변경', '승인 대기 계정은 "승인", 이미 쓰는 계정은 "역할 변경"으로 권한과 지점 범위를 저장합니다.'],
-        ['거절 · 차단 버튼', '승인 대기 요청은 거절하고, 쓰고 있는 계정은 접근을 차단합니다(승인 대기 상태로 돌아갑니다).']
+        ['거절 · 차단 버튼(×)', '승인 대기 요청은 거절하고, 쓰고 있는 계정은 접근을 차단합니다(승인 대기 상태로 돌아갑니다).'],
+        ['계정 삭제', '사용자 목록과 이메일 등록 정보를 지웁니다. 로그인 계정은 Firebase 콘솔(Authentication → 사용자)에서 따로 지워야 하며, 삭제 뒤 뜨는 안내 창에서 콘솔을 바로 열 수 있습니다.']
       ],
       notes:['새 가입 요청이 있으면 슈퍼어드민이 로그인할 때 알림이 뜹니다. 요청에는 이름·연락처·희망 권한이 함께 보입니다.'],
-      cautions:['차단은 계정을 지우지 않고 승인 대기로 돌리는 것입니다. 다시 승인하면 그대로 복구됩니다.'] },
+      cautions:[
+        '차단은 계정을 지우지 않고 승인 대기로 돌리는 것입니다. 다시 승인하면 그대로 복구됩니다.',
+        '계정 삭제는 되돌릴 수 없습니다. 로그인 계정을 Firebase 콘솔에서 지우지 않으면 그 사람이 다시 로그인할 때 승인 대기로 다시 나타납니다.',
+        '로그인한 본인 계정("현재 로그인" 표시)은 권한 변경·차단·삭제를 할 수 없습니다. 다른 슈퍼어드민 계정으로 처리하세요.'
+      ] },
 
     { id:'log', title:'변경 로그',
       summary:'누가 언제 무엇을 바꿨는지 기록을 봅니다. 시간은 한국시간 기준입니다.',
@@ -7566,6 +7634,7 @@ const HANDOVER_NOTES = [
     '방 카드의 "변경이력" 버튼 하나로 입퇴실·수정이력·청소이력을 탭으로 본다(showRoomHistoryModal, 담당자 요청 순서). 수정이력은 저장할 때 "마지막으로 불러오거나 기록한 상태 ↔ 지금 상태"를 항목 단위로 비교해 editHistory 컬렉션에 남긴다(captureEdits·diffForEditHistory). 수정 화면마다 기록 코드를 붙이지 않는 방식이라 새 항목도 자동으로 기록된다 — 대신 계산값·내부값은 EDIT_HISTORY_IGNORE에 넣어야 이력이 지저분해지지 않는다. 로그인 직후·매시간 자동 처리는 앞뒤로 captureEdits를 불러 "자동"으로 남기고, 다른 탭 변경 반영(applyLoadedCore)·백업 가져오기 때는 기준 상태만 다시 잡는다(안 그러면 남의 변경이 내 이름으로 기록됨). 새로운 자동 처리를 추가하면 같은 방식으로 감쌀 것. Firestore 규칙에 editHistory(읽기·추가: 수정 권한, 수정·삭제 불가)가 필요하다.',
     '수정이력 탭은 10건씩 읽고 "이전 기록 더 보기"로 이어 읽는다(EDIT_HISTORY_PAGE_SIZE, startAfter). 문서 1건이 읽기 1회라, 방을 열 때마다 수백 건을 한꺼번에 읽게 늘리면 무료 요금제 일일 읽기 한도(5만 건)를 금방 쓴다. 쓰기(바뀐 칸 1개 = 1건, 하루 2만 건 한도)와 저장 용량(1GB)은 운영 규모상 여유가 있지만, 엑셀 일괄 수정처럼 수백 개 호실을 한 번에 바꾸면 그만큼 기록이 생긴다.',
     '퇴실청소 완료(completeCleaningEntry)는 플래그를 끈 경우에도 cleaningDismissedMoveOut에 그 퇴실일을 남긴다. 안 남기면 퇴실확정 입실자가 아직 퇴실 처리 전인 동안(퇴실 처리는 퇴실일 다음 날) 같은 방이 "플래그 없는 퇴실청소 예정"(roomUpcomingLeaveDate)으로 목록·방 카드에 다시 떠서, 한 번 더 누르면 같은 날 청소완료가 두 번 기록된다(성수역 102호). 미리보기 경로는 미리보기가 실제로 떠 있을 때만 기록한다. 청소 이력은 방마다 최근 5건(CLEANING_HISTORY_MAX)만 남으니 중복이 생기면 오래된 기록이 밀려난다.',
+    '사용자 관리에 "계정 삭제"를 추가했다(users·emailIndex 문서 삭제, 슈퍼어드민만 — 보안 규칙에서 둘 다 isSuperAdmin 삭제 허용). 로그인 계정(Firebase Authentication)은 브라우저 SDK로 남의 계정을 지울 수 없어(관리자 SDK·Cloud Functions 필요, 무료 요금제라 없음) 삭제 뒤 Firebase 콘솔 Authentication 화면으로 안내한다. 콘솔에서 안 지우면 그 사람이 다시 로그인할 때 initApp이 승인 대기 문서를 새로 만든다. 로그인한 본인 줄은 역할 변경·차단·삭제를 잠갔다(담당자 요청 — 스스로 권한을 없애는 사고 방지).',
     '변경이력 창의 수정이력 탭에도 건수를 보여준다. compat SDK(10.12.2)에는 count API가 없어 Firestore REST runAggregationQuery를 로그인 토큰으로 부른다(countEditHistoryForRoom — 창을 열 때 1회, 결과 1,000건마다 읽기 1회). 실패하면 탭을 연 뒤 불러온 건수("10+")를 보여준다. 건수는 저장된 기록 수라, 5분 안의 같은 칸 저장을 한 줄로 합쳐 보여주는 목록 줄 수와 다를 수 있다.',
     '오래 켜 둔 탭이 옛 코드로 계속 저장하는 문제(수정 이력 배포 뒤 "연장했는데 수정이력이 없다" 제보) 때문에, 30분마다·탭을 다시 볼 때 배포된 페이지의 APP_BUILD를 읽어 다르면 새로고침 안내를 띄우고(안 보는 탭은 편집 중이 아니면 바로 새로고침), 자정 세션 초기화도 로그아웃 뒤 새로고침하게 했다(checkForNewBuild). APP_BUILD는 반드시 "YYYY-MM-DD-글자" 형식으로 올릴 것 — 확인 정규식이 그 형식만 읽는다.',
     '입실자 카드의 퇴실·연장·방이동 버튼은 이름 줄 오른쪽에 있었는데, 버튼이 줄어들지 않아 긴 이름이 가려지거나 줄이 깨진다는 제보로 입실자 정보 맨 아래(.resident-acts)로 옮겼다(담당자가 기간 줄 오른쪽·이름 바로 아래 줄 대신 고름, 처음엔 오른쪽 정렬이었다가 왼쪽 정렬로 바꿈). 이름은 이제 줄바꿈된다.',
