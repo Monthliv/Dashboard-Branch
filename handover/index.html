@@ -69,6 +69,10 @@ if(/\/handover$/.test(location.pathname)) location.replace(location.pathname + '
   .checklist input{ margin-top:5px; width:16px; height:16px; accent-color:var(--accent); flex:none; }
   .checklist input:checked + span{ color:var(--ink-soft); text-decoration:line-through; }
   .links a{ color:var(--accent-ink); font-weight:500; }
+  pre.prompt{ margin:6px 0 8px; padding:12px 14px; background:#F1EEE6; border-radius:10px; overflow-x:auto; }
+  pre.prompt code{ background:none; padding:0; font-size:12.5px; line-height:1.6; white-space:pre; word-break:normal; }
+  .copy-btn{ font:inherit; font-size:13px; font-weight:700; color:var(--accent-ink); background:var(--accent-soft); border:1px solid var(--accent);
+    border-radius:8px; padding:4px 12px; cursor:pointer; margin-bottom:12px; }
   footer{ color:var(--ink-soft); font-size:12.5px; text-align:center; margin-top:24px; }
   @media (max-width:560px){
     h1{ font-size:23px; }
@@ -94,6 +98,7 @@ if(/\/handover$/.test(location.pathname)) location.replace(location.pathname + '
     <a href="#step4">4 슈퍼어드민</a>
     <a href="#step5">5 인수인계 자료</a>
     <a href="#step6">6 확인·정리</a>
+    <a href="#step7">7 무료 Claude로 수정</a>
     <a href="#checklist">체크리스트</a>
   </nav>
 
@@ -104,10 +109,12 @@ if(/\/handover$/.test(location.pathname)) location.replace(location.pathname + '
         <thead><tr><th>바로가기</th><th>쓰는 단계</th></tr></thead>
         <tbody>
           <tr><td><a href="https://monthliv.github.io/Dashboard-Branch/" target="_blank" rel="noopener">운영 대시보드</a></td><td>1·4·5·6단계</td></tr>
-          <tr><td><a href="https://github.com/signup" target="_blank" rel="noopener">GitHub 가입</a></td><td>1단계</td></tr>
+          <tr><td><a href="https://github.com/login" target="_blank" rel="noopener">GitHub 가입</a></td><td>1단계</td></tr>
           <tr><td><a href="https://github.com/orgs/Monthliv/people" target="_blank" rel="noopener">GitHub 조직 구성원(People)</a></td><td>2·6단계</td></tr>
           <tr><td><a href="https://github.com/Monthliv/Dashboard-Branch" target="_blank" rel="noopener">GitHub 저장소 Dashboard-Branch</a></td><td>2단계</td></tr>
           <tr><td><a href="https://github.com/Monthliv/Calculator" target="_blank" rel="noopener">GitHub 저장소 Calculator</a></td><td>2단계</td></tr>
+          <tr><td><a href="https://github.dev/Monthliv/Dashboard-Branch" target="_blank" rel="noopener">github.dev 편집기(Dashboard-Branch)</a></td><td>7단계</td></tr>
+          <tr><td><a href="https://claude.ai" target="_blank" rel="noopener">Claude(무료 버전)</a></td><td>7단계</td></tr>
           <tr><td><a href="https://console.firebase.google.com/project/monthliv-482bd" target="_blank" rel="noopener">Firebase 콘솔</a></td><td>3·4·6단계</td></tr>
           <tr><td><a href="https://console.firebase.google.com/project/monthliv-482bd/settings/iam" target="_blank" rel="noopener">Firebase 사용자 및 권한</a></td><td>3·6단계</td></tr>
           <tr><td><a href="https://docs.github.com/en/organizations/managing-membership-in-your-organization/inviting-users-to-join-your-organization" target="_blank" rel="noopener">GitHub 도움말: 조직에 사용자 초대하기</a></td><td>2단계</td></tr>
@@ -297,6 +304,51 @@ if(/\/handover$/.test(location.pathname)) location.replace(location.pathname + '
     <div class="note"><p>세 곳 모두 최고 권한자(조직 Owner, 프로젝트 소유자, 슈퍼어드민)가 한 명 이상 남아 있어야 합니다. 받는 사람 권한을 먼저 확인하고 기존 권한을 뺍니다.</p></div>
   </section>
 
+  <section id="step7">
+    <h2><span class="no">7</span>(참고) Claude 무료 버전으로 대시보드 고치기</h2>
+    <p class="lead">Claude 무료 버전(claude.ai 채팅)으로도 문구 수정·버튼 위치·작은 동작 변경은 할 수 있습니다. <code>index.html</code>(약 11,400줄) 전체는 한 번에 읽히지 않으니 고칠 함수만 떼어 붙여넣고, 받은 코드를 github.dev에서 직접 넣어 커밋합니다.</p>
+    <ol>
+      <li>고칠 곳 찾기
+        <ul>
+          <li>저장소 Dashboard-Branch에서 <code>.</code>(마침표) 키를 눌러 github.dev를 열고 <code>index.html</code>을 엽니다.</li>
+          <li>Ctrl+F로 화면에 보이는 글자(예: "계정 삭제")를 찾고, 그 위의 <code>function 이름(</code> 줄을 찾습니다.</li>
+          <li>그 줄을 클릭하고 Shift+Alt+→를 여러 번 눌러 함수 전체를 선택해 복사합니다.</li>
+        </ul>
+      </li>
+      <li>Claude에 붙여넣기: 아래 설명문 끝에 고치고 싶은 것과 복사한 코드를 넣어 보냅니다. Claude는 이전 대화를 기억하지 못하니 매번 함께 붙여넣습니다.</li>
+      <li>받은 코드 넣기
+        <ul>
+          <li>기존 함수를 같은 방법으로 선택하고 받은 코드로 바꿉니다.</li>
+          <li>Ctrl+Shift+M(문제 패널)에 빨간 오류가 있으면 그 문구를 Claude에게 보내 고칩니다.</li>
+          <li><code>const APP_BUILD</code> 값을 올리고(예: <code>2026-09-18-a</code>), 기능을 바꿨다면 <code>HANDOVER_NOTES</code>에 한 줄 추가합니다.</li>
+        </ul>
+      </li>
+      <li>올리고 확인하기
+        <ul>
+          <li>소스 제어에서 새 브랜치로 커밋해 Pull Request를 만든 뒤 Merge합니다. 문제가 생기면 그 PR의 Revert로 되돌립니다.</li>
+          <li>1분쯤 뒤 대시보드를 Ctrl+Shift+R로 새로고침해 바꾼 기능을 확인하고, F12 → Console에 빨간 오류가 없는지 봅니다.</li>
+        </ul>
+      </li>
+    </ol>
+    <p>Claude에 붙여넣을 설명문(복사해서 사용):</p>
+    <pre class="prompt"><code>너는 아래 웹 대시보드 코드를 고치는 개발자야.
+- 프로젝트: MONTHLIV 운영 대시보드. index.html 한 파일(HTML+CSS+순수 JavaScript, 프레임워크 없음),
+  GitHub Pages로 배포, 데이터는 Firebase Firestore(compat SDK 10.12.2).
+- 내가 붙여넣는 건 파일 전체가 아니라 고칠 부분만이야. 붙여넣지 않은 함수·변수는 이미 있다고 보고,
+  없는 이름을 지어내지 마. 필요한 코드가 안 보이면 어떤 부분을 더 붙여넣을지 물어봐.
+- 규칙
+  1. 바꾼 함수를 처음부터 끝까지 통째로 다시 줘. "…생략…"은 쓰지 마. 들여쓰기(스페이스 2칸)와 주변 스타일을 따라.
+  2. 데이터를 바꾸는 코드는 logChange('무엇을 바꿨는지'); scheduleSave(); render(); 흐름을 지켜.
+  3. Firestore 무료 한도(하루 읽기 5만 건) 때문에 컬렉션 전체를 읽거나 실시간 구독하는 코드는 넣지 마.
+  4. 화면 문구는 한국어로 쓰고, 조회 전용 계정의 이름 가림(maskViewerName)은 유지해.
+  5. 끝에 바꾼 점을 3줄 이내로 요약하고, 화면에서 확인할 방법을 알려줘.
+- 고치고 싶은 것: (여기에 원하는 변경을 구체적으로 적기)
+- 현재 코드:
+(여기에 복사한 함수 붙여넣기)</code></pre>
+    <button type="button" class="copy-btn" id="copyPrompt">설명문 복사</button>
+    <div class="note"><p>여러 함수에 걸친 큰 변경, 새 기능, 데이터 구조 변경(보안 규칙 수정이 함께 필요)은 대화가 길어져 무료 사용량 한도에 걸리기 쉬우니 Claude Code로 합니다.</p></div>
+  </section>
+
   <section id="checklist">
     <h2>체크리스트</h2>
     <p>체크 표시는 이 브라우저에만 저장됩니다.</p>
@@ -316,6 +368,18 @@ if(/\/handover$/.test(location.pathname)) location.replace(location.pathname + '
 
   <footer>이 페이지의 원본: 저장소 Dashboard-Branch의 <code>handover/index.html</code></footer>
 </div>
+<script>
+// 7단계 설명문 복사
+(function(){
+  const btn = document.getElementById('copyPrompt');
+  if(!btn) return;
+  btn.addEventListener('click', ()=>{
+    const text = document.querySelector('#step7 pre.prompt code').textContent;
+    const done = ()=>{ btn.textContent = '복사됨'; setTimeout(()=>{ btn.textContent = '설명문 복사'; }, 1500); };
+    if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, ()=>{});
+  });
+})();
+</script>
 <script>
 // 체크리스트 표시는 보는 사람 브라우저에만 남긴다(저장소를 못 쓰는 환경이면 그냥 저장하지 않음).
 (function(){
