@@ -247,8 +247,20 @@ if(/\/handover$/.test(location.pathname)) location.replace(location.pathname + '
         </tbody>
       </table>
     </div>
-    <p>사용자 관리의 × 버튼은 계정을 지우지 않고 "승인 대기"로 돌려 접근만 막습니다. 계정을 없애려면 "계정 삭제"를 누릅니다. 대시보드 사용자 목록과 이메일 등록 정보가 지워지고, 이어서 뜨는 안내 창의 "Firebase 콘솔 열기"로 로그인 계정(Authentication → 사용자)도 삭제합니다. 콘솔에서 지우지 않으면 그 사람이 다시 로그인할 때 승인 대기로 다시 나타납니다.</p>
-    <p>로그인한 본인 줄에는 "현재 로그인" 표시가 붙고 역할 변경·차단·계정 삭제가 잠깁니다. 본인 계정은 다른 슈퍼어드민 계정으로 처리합니다.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>줄</th><th>버튼</th><th>하는 일</th></tr></thead>
+        <tbody>
+          <tr><td>승인 대기</td><td>승인</td><td>고른 권한·지점 범위로 사용을 허락</td></tr>
+          <tr><td>승인 대기</td><td>거절</td><td>요청을 사용자 목록에서 지움(되돌릴 수 없음)</td></tr>
+          <tr><td>쓰고 있는 계정</td><td>역할 변경</td><td>권한·지점 범위 저장</td></tr>
+          <tr><td>쓰고 있는 계정</td><td>접근 차단</td><td>계정은 두고 승인 대기로 돌림(다시 승인하면 복구)</td></tr>
+          <tr><td>쓰고 있는 계정</td><td>×(맨 오른쪽)</td><td>계정 삭제: 사용자 목록에서 지움(되돌릴 수 없음)</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>거절이나 ×로 지운 뒤에는 안내 창이 뜹니다. "Firebase 콘솔 열기"로 로그인 계정(Authentication → 사용자)도 삭제합니다. 콘솔에서 지우지 않으면 그 사람이 다시 로그인할 때 승인 대기로 다시 나타납니다.</p>
+    <p>로그인한 본인 줄에는 "현재 로그인" 표시가 붙고 역할 변경·접근 차단·계정 삭제(×)가 잠깁니다. 본인 계정은 다른 슈퍼어드민 계정으로 처리합니다.</p>
     <div class="note"><p>슈퍼어드민이 한 명도 남지 않으면 대시보드 안에서는 권한을 고칠 수 없습니다. 이때는 Firebase 콘솔 → Firestore Database → <code>users</code> → 해당 계정 문서의 <code>role</code> 값을 <code>superadmin</code>으로 직접 바꿉니다.</p></div>
   </section>
 
@@ -276,7 +288,7 @@ if(/\/handover$/.test(location.pathname)) location.replace(location.pathname + '
           <li>GitHub: <code>APP_BUILD</code>만 올린 작은 수정을 <code>main</code>에 올려, 열어 둔 대시보드에 30분 안에 "지금 새로고침" 안내가 뜬다.</li>
         </ul>
       </li>
-      <li>대시보드: 사용자 관리에서 기존 담당자 계정을 필요한 역할로 낮추거나, ×로 접근을 막거나, "계정 삭제"로 지웁니다. 로그인한 본인 계정은 잠겨 있으니 받는 사람 계정으로 처리합니다.</li>
+      <li>대시보드: 사용자 관리에서 기존 담당자 계정을 필요한 역할로 낮추거나, "접근 차단"으로 막거나, ×(계정 삭제)로 지웁니다. 로그인한 본인 계정은 잠겨 있으니 받는 사람 계정으로 처리합니다.</li>
       <li>Firebase: 사용자 및 권한에서 기존 담당자를 제거하거나 역할을 낮춥니다.</li>
       <li>GitHub: Monthliv 조직 People에서 기존 담당자를 제거하거나 Member로 낮춥니다. 저장소 Admin으로만 넘긴 경우 조직 Owner는 기존 담당자에게 남으니, 조직 Owner를 누가 맡을지 함께 정합니다.</li>
     </ol>
