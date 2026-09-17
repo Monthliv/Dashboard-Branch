@@ -231,7 +231,7 @@ if(/\/handover$/.test(location.pathname)) location.replace(location.pathname + '
     <p class="lead">기존 담당자가 받는 사람의 계정 요청을 슈퍼어드민으로 승인합니다. 슈퍼어드민만 관리자 설정과 사용자 관리를 쓸 수 있습니다.</p>
     <p>위쪽의 "관리자 설정"(첫 사진)을 누르고, 사용자 관리에서 받는 사람 줄의 역할을 "슈퍼어드민"으로 바꿔 승인합니다(둘째 사진).</p>
     <figure><img src="img/app.png" alt="위쪽의 관리자 설정 버튼" width="1400" height="420" loading="lazy"><figcaption>위쪽의 관리자 설정 버튼</figcaption></figure>
-    <figure><img src="img/users.png" alt="사용자 관리에서 슈퍼어드민으로 승인" width="932" height="330" loading="lazy"><figcaption>사용자 관리에서 역할을 슈퍼어드민으로 고르고 승인</figcaption></figure>
+    <figure><img src="img/users.png" alt="사용자 관리에서 슈퍼어드민으로 승인" width="1000" height="300" loading="lazy"><figcaption>사용자 관리에서 역할을 슈퍼어드민으로 고르고 승인</figcaption></figure>
     <ol>
       <li><span class="who">기존 담당자</span>대시보드 → 관리자 설정 → 사용자 관리 → "승인 대기"인 받는 사람 이메일 줄에서 역할 "슈퍼어드민" 선택 → 승인</li>
       <li><span class="who">받는 사람</span>다시 로그인해 위쪽에 관리자 설정 버튼이 보이는지 확인합니다. 관리자 설정 → 데이터 로딩 상태의 "권한"이 <code>superadmin</code>이면 됩니다.</li>
@@ -247,7 +247,8 @@ if(/\/handover$/.test(location.pathname)) location.replace(location.pathname + '
         </tbody>
       </table>
     </div>
-    <p>사용자 관리의 × 버튼은 계정을 지우지 않고 "승인 대기"로 돌려 접근만 막습니다. 로그인 계정 자체를 지우려면 Firebase 콘솔 Authentication → Users에서 삭제합니다.</p>
+    <p>사용자 관리의 × 버튼은 계정을 지우지 않고 "승인 대기"로 돌려 접근만 막습니다. 계정을 없애려면 "계정 삭제"를 누릅니다. 대시보드 사용자 목록과 이메일 등록 정보가 지워지고, 이어서 뜨는 안내 창의 "Firebase 콘솔 열기"로 로그인 계정(Authentication → 사용자)도 삭제합니다. 콘솔에서 지우지 않으면 그 사람이 다시 로그인할 때 승인 대기로 다시 나타납니다.</p>
+    <p>로그인한 본인 줄에는 "현재 로그인" 표시가 붙고 역할 변경·차단·계정 삭제가 잠깁니다. 본인 계정은 다른 슈퍼어드민 계정으로 처리합니다.</p>
     <div class="note"><p>슈퍼어드민이 한 명도 남지 않으면 대시보드 안에서는 권한을 고칠 수 없습니다. 이때는 Firebase 콘솔 → Firestore Database → <code>users</code> → 해당 계정 문서의 <code>role</code> 값을 <code>superadmin</code>으로 직접 바꿉니다.</p></div>
   </section>
 
@@ -275,7 +276,7 @@ if(/\/handover$/.test(location.pathname)) location.replace(location.pathname + '
           <li>GitHub: <code>APP_BUILD</code>만 올린 작은 수정을 <code>main</code>에 올려, 열어 둔 대시보드에 30분 안에 "지금 새로고침" 안내가 뜬다.</li>
         </ul>
       </li>
-      <li>대시보드: 사용자 관리에서 기존 담당자 계정을 필요한 역할로 낮추거나 ×로 접근을 막습니다.</li>
+      <li>대시보드: 사용자 관리에서 기존 담당자 계정을 필요한 역할로 낮추거나, ×로 접근을 막거나, "계정 삭제"로 지웁니다. 로그인한 본인 계정은 잠겨 있으니 받는 사람 계정으로 처리합니다.</li>
       <li>Firebase: 사용자 및 권한에서 기존 담당자를 제거하거나 역할을 낮춥니다.</li>
       <li>GitHub: Monthliv 조직 People에서 기존 담당자를 제거하거나 Member로 낮춥니다. 저장소 Admin으로만 넘긴 경우 조직 Owner는 기존 담당자에게 남으니, 조직 Owner를 누가 맡을지 함께 정합니다.</li>
     </ol>
