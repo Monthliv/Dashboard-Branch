@@ -6857,7 +6857,7 @@ function renderHotelSalesSection(){
   HOTEL_SALES.rows.forEach(r=>{
     const tr = document.createElement('tr');
     tr.innerHTML = `<td style="background:var(--accent-soft);color:var(--accent-ink);font-weight:700;">${esc(r.branch)}</td>
-      <td style="text-align:right;">${esc(r.month)}월</td>
+      <td style="text-align:right;background:var(--accent-soft);color:var(--accent-ink);font-weight:700;">${esc(r.month)}월</td>
       <td style="text-align:right;">${formatWon(r.revenue)}</td>
       <td style="text-align:right;">${formatWon(r.adr)}</td>
       <td style="text-align:right;">${formatWon(r.revpar)}</td>
