@@ -6819,15 +6819,145 @@ function requestHotelSalesRefresh(){
   });
 }
 
+// 표를 캔버스에 직접 그려서 PNG로 클립보드에 복사한다 — 버튼 등 화면의 다른 요소는
+// 안 찍히고 표 이미지만 딱 나와서, 카카오톡/슬랙 등에 바로 붙여넣기(Ctrl+V) 할 수 있다.
+// (외부 라이브러리 없이 순수 canvas로 표를 다시 그리는 방식 — html2canvas 등을 새로
+// 추가하지 않으려고 이렇게 함.)
+const HOTEL_SALES_IMAGE_COLUMNS = [
+  { label:'지점', align:'left', bg:'#E1F1F1', fg:'#0B5457', bold:true, value:r=> r.branch },
+  { label:'월', align:'center', bg:'#FFFBE6', fg:'#8a7220', bold:true, value:r=> r.month + '월' },
+  { label:'총 매출', align:'right', value:r=> formatWon(r.revenue) },
+  { label:'객단가', align:'right', value:r=> formatWon(r.adr) },
+  { label:'객실당 매출', align:'right', value:r=> formatWon(r.revpar) },
+  { label:'총 객실수', align:'right', value:r=> String(r.totalRooms) },
+  { label:'숙박자수', align:'right', value:r=> String(r.occupied) },
+  { label:'점유율', align:'right', value:r=> r.rate + '%' },
+];
+
+function buildHotelSalesCanvas(){
+  const rows = HOTEL_SALES.rows;
+  const asOfDate = HOTEL_SALES.asOf ? HOTEL_SALES.asOf.slice(0,10).replace(/-/g,'/') : localDateKey().replace(/-/g,'/');
+  const title = `호텔 스테이 지점별 매출 현황 (${asOfDate})`;
+  const font = "13px -apple-system, 'Malgun Gothic', sans-serif";
+  const boldFont = "bold 13px -apple-system, 'Malgun Gothic', sans-serif";
+  const titleFont = "bold 17px -apple-system, 'Malgun Gothic', sans-serif";
+  const cellPadX = 16, rowH = 34, headerH = 36, titleH = 46, outerPad = 18;
+
+  const measureCtx = document.createElement('canvas').getContext('2d');
+  const colWidths = HOTEL_SALES_IMAGE_COLUMNS.map(c=>{
+    measureCtx.font = boldFont;
+    let w = measureCtx.measureText(c.label).width;
+    measureCtx.font = c.bold ? boldFont : font;
+    rows.forEach(r=>{ w = Math.max(w, measureCtx.measureText(c.value(r)).width); });
+    return Math.ceil(w) + cellPadX * 2;
+  });
+  const tableWidth = colWidths.reduce((a,b)=>a+b, 0);
+  measureCtx.font = titleFont;
+  const width = Math.ceil(Math.max(tableWidth, measureCtx.measureText(title).width) + outerPad * 2);
+  const height = Math.ceil(titleH + headerH + rows.length * rowH + outerPad * 2);
+
+  const scale = 2; // 붙여넣었을 때 흐릿하지 않도록 2배 해상도로 그림
+  const canvas = document.createElement('canvas');
+  canvas.width = width * scale;
+  canvas.height = height * scale;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(scale, scale);
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, width, height);
+
+  ctx.fillStyle = '#1E2A32';
+  ctx.font = titleFont;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  ctx.fillText(title, outerPad, outerPad + titleH / 2);
+
+  let y = outerPad + titleH;
+  const drawRow = (h, draw)=>{
+    let x = outerPad;
+    colWidths.forEach((w, i)=>{ draw(i, x, y, w, h); x += w; });
+    y += h;
+  };
+  const textX = (align, x, w)=> align==='right' ? x + w - cellPadX : align==='center' ? x + w/2 : x + cellPadX;
+
+  // 헤더 (표 전체 초록색 — 실제 화면과 동일)
+  drawRow(headerH, (i, x, yy, w, h)=>{
+    ctx.fillStyle = '#E1F1F1';
+    ctx.fillRect(x, yy, w, h);
+    ctx.fillStyle = '#0B5457';
+    ctx.font = boldFont;
+    ctx.textAlign = 'center';
+    ctx.fillText(HOTEL_SALES_IMAGE_COLUMNS[i].label, x + w/2, yy + h/2);
+  });
+
+  rows.forEach(r=>{
+    drawRow(rowH, (i, x, yy, w, h)=>{
+      const col = HOTEL_SALES_IMAGE_COLUMNS[i];
+      ctx.fillStyle = col.bg || '#ffffff';
+      ctx.fillRect(x, yy, w, h);
+      ctx.fillStyle = col.fg || '#1E2A32';
+      ctx.font = col.bold ? boldFont : font;
+      ctx.textAlign = col.align === 'right' ? 'right' : col.align === 'center' ? 'center' : 'left';
+      ctx.fillText(col.value(r), textX(col.align, x, w), yy + h/2);
+    });
+  });
+
+  // 세로/가로 구분선
+  ctx.strokeStyle = 'rgba(0,0,0,.15)';
+  ctx.lineWidth = 1;
+  let lineX = outerPad;
+  colWidths.forEach(w=>{
+    lineX += w;
+    ctx.beginPath(); ctx.moveTo(lineX, outerPad + titleH); ctx.lineTo(lineX, outerPad + titleH + headerH + rows.length*rowH);
+    ctx.stroke();
+  });
+  for(let i=0;i<=rows.length;i++){
+    const ly = outerPad + titleH + headerH + i*rowH;
+    ctx.beginPath(); ctx.moveTo(outerPad, ly); ctx.lineTo(outerPad + tableWidth, ly);
+    ctx.stroke();
+  }
+  ctx.strokeRect(outerPad, outerPad + titleH, tableWidth, headerH + rows.length*rowH);
+
+  return canvas;
+}
+
+function canvasToPngBlob(canvas){
+  return new Promise((resolve, reject)=>{
+    canvas.toBlob(b=> b ? resolve(b) : reject(new Error('이미지 변환에 실패했습니다.')), 'image/png');
+  });
+}
+
+async function copyHotelSalesTableAsImage(btn){
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '복사 중...';
+  try{
+    const canvas = buildHotelSalesCanvas();
+    const blob = await canvasToPngBlob(canvas);
+    if(!navigator.clipboard || !window.ClipboardItem){
+      throw new Error('이 브라우저는 이미지 클립보드 복사를 지원하지 않습니다.');
+    }
+    await navigator.clipboard.write([ new ClipboardItem({ 'image/png': blob }) ]);
+    showAlert('표 이미지를 복사했습니다. 원하는 곳에 붙여넣기(Ctrl+V)해주세요.');
+  }catch(e){
+    console.error('표 이미지 복사 실패:', e);
+    showAlert('이미지 복사에 실패했습니다: ' + e.message);
+  }finally{
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
+}
+
 function renderHotelSalesSection(){
   const box = document.createElement('div');
   box.className = 'stat-section';
   const asOfDate = HOTEL_SALES.asOf ? HOTEL_SALES.asOf.slice(0,10).replace(/-/g,'/') : localDateKey().replace(/-/g,'/');
   const refreshing = !!HOTEL_SALES_REFRESH_REQUESTED_AT;
+  const hasRows = !!(HOTEL_SALES.rows && HOTEL_SALES.rows.length);
   const heading = document.createElement('div');
   heading.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin:0 0 12px;';
   heading.innerHTML = `<h3 style="margin:0;font-size:19px;">호텔 스테이 지점별 매출 현황 (${asOfDate})</h3>`;
-  if(canEdit()){
+  {
     const btnWrap = document.createElement('div');
     btnWrap.style.cssText = 'display:flex;align-items:center;gap:8px;';
     if(refreshing){
@@ -6837,14 +6967,24 @@ function renderHotelSalesSection(){
       btnWrap.appendChild(spinner);
       btnWrap.appendChild(label);
     }
-    const refreshBtn = document.createElement('button');
-    refreshBtn.className = 'btn small';
-    refreshBtn.textContent = '새로고침';
-    refreshBtn.title = '지금 VPMS에서 매출을 다시 가져옵니다 (1~2분 소요)';
-    refreshBtn.disabled = refreshing;
-    refreshBtn.onclick = requestHotelSalesRefresh;
-    btnWrap.appendChild(refreshBtn);
-    heading.appendChild(btnWrap);
+    if(canEdit()){
+      const refreshBtn = document.createElement('button');
+      refreshBtn.className = 'btn small';
+      refreshBtn.textContent = '새로고침';
+      refreshBtn.title = '지금 VPMS에서 매출을 다시 가져옵니다 (1~2분 소요)';
+      refreshBtn.disabled = refreshing;
+      refreshBtn.onclick = requestHotelSalesRefresh;
+      btnWrap.appendChild(refreshBtn);
+    }
+    if(hasRows){
+      const copyBtn = document.createElement('button');
+      copyBtn.className = 'btn small';
+      copyBtn.textContent = '이미지 복사';
+      copyBtn.title = '표만 이미지로 복사합니다 (버튼 등은 안 찍힘) — 바로 Ctrl+V로 붙여넣을 수 있어요.';
+      copyBtn.onclick = ()=> copyHotelSalesTableAsImage(copyBtn);
+      btnWrap.appendChild(copyBtn);
+    }
+    if(btnWrap.children.length) heading.appendChild(btnWrap);
   }
   box.appendChild(heading);
 
