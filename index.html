@@ -603,6 +603,9 @@
   table.branch-table .branch-table-total td{ border-bottom:2px solid var(--accent); color:var(--accent-ink); }
   table.branch-table .stat-cell-link{ color:inherit; text-decoration:none; display:block; }
   table.branch-table .stat-cell-link:hover{ color:var(--accent-ink); text-decoration:underline; }
+  /* 호텔 스테이 매출 표: 세로줄이 없으면 숫자 칸 정렬이 어긋나 보인다는 피드백으로 흐린 구분선 추가 */
+  table.hotel-sales-table th, table.hotel-sales-table td{ border-left:1px solid var(--line); }
+  table.hotel-sales-table th:first-child, table.hotel-sales-table td:first-child{ border-left:none; }
   /* 방 가격 관리: 등록된 가격표는 접어두고, 펼쳐도 표 안에서만 스크롤한다 */
   .room-price-details{ margin-top:14px; }
   .room-price-details > summary{ cursor:pointer; font-size:13px; font-weight:700; color:var(--ink-soft); padding:6px 0; user-select:none; }
@@ -6850,7 +6853,7 @@ function renderHotelSalesSection(){
   }
 
   const table = document.createElement('table');
-  table.className = 'branch-table';
+  table.className = 'branch-table hotel-sales-table';
   const th = (label)=> `<th style="text-align:center;background:var(--accent-soft);color:var(--accent-ink);">${label}</th>`;
   table.innerHTML = `<thead><tr><th style="text-align:center;background:var(--accent-soft);color:var(--accent-ink);">지점</th>${th('월')}${th('총 매출')}${th('객단가')}${th('객실당 매출')}${th('총 객실수')}${th('숙박자수')}${th('점유율')}</tr></thead>`;
   const tbody = document.createElement('tbody');
