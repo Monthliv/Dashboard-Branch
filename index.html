@@ -109,6 +109,13 @@
   }
   .subnav button.active{ background:#fff; color:var(--ink); box-shadow:0 1px 2px rgba(0,0,0,.08); }
 
+  .spinner-small{
+    display:inline-block; width:13px; height:13px; border-radius:50%;
+    border:2px solid var(--line); border-top-color:var(--accent);
+    animation:spin-small .7s linear infinite;
+  }
+  @keyframes spin-small{ to{ transform:rotate(360deg); } }
+
   main{ padding-top:6px; }
 
   select, input[type=text], input[type=date], input[type=tel], input[type=number], textarea{
@@ -5037,23 +5044,39 @@ function resizeImageFileToDataURL(file, maxDim){
   });
 }
 
-// 지점 직인 이미지 맵. 계약서 발급 패널을 열 때 한 번만 불러온다(메인 상태 문서와 무관).
+// 지점별 계약서 발급 부가정보(직인 이미지 + 특약 기본값) 맵. 계약서 발급 패널을
+// 열 때 한 번만 불러온다(메인 상태 문서와 무관). 예전엔 {[지점id]: 직인dataUrl}
+// 처럼 직인만 저장했어서, 이미 저장된 값이 문자열이면 {sealDataUrl: 그 문자열}로
+// 취급해 예전 데이터도 그대로 보이게 한다.
 let BRANCH_SEALS = null;
+function normalizeBranchIssuanceInfo(v){
+  if(typeof v === 'string') return { sealDataUrl: v, defaultTerms: '' };
+  return { sealDataUrl: (v && v.sealDataUrl) || '', defaultTerms: (v && v.defaultTerms) || '' };
+}
 async function loadBranchSeals(){
   if(BRANCH_SEALS) return BRANCH_SEALS;
   try{
     const snap = await BRANCH_SEALS_DOC.get();
-    BRANCH_SEALS = snap.exists ? (snap.data() || {}) : {};
+    const raw = snap.exists ? (snap.data() || {}) : {};
+    BRANCH_SEALS = {};
+    Object.keys(raw).forEach(id=> BRANCH_SEALS[id] = normalizeBranchIssuanceInfo(raw[id]));
   }catch(e){
-    console.error('직인 이미지 불러오기 실패:', e);
+    console.error('직인/특약 정보 불러오기 실패:', e);
     BRANCH_SEALS = {};
   }
   return BRANCH_SEALS;
 }
 async function saveBranchSeal(branchId, dataUrl){
   BRANCH_SEALS = BRANCH_SEALS || {};
-  BRANCH_SEALS[branchId] = dataUrl;
-  await BRANCH_SEALS_DOC.set({ [branchId]: dataUrl }, { merge:true });
+  const next = { ...(BRANCH_SEALS[branchId] || normalizeBranchIssuanceInfo(null)), sealDataUrl: dataUrl };
+  BRANCH_SEALS[branchId] = next;
+  await BRANCH_SEALS_DOC.set({ [branchId]: next }, { merge:true });
+}
+async function saveBranchDefaultTerms(branchId, terms){
+  BRANCH_SEALS = BRANCH_SEALS || {};
+  const next = { ...(BRANCH_SEALS[branchId] || normalizeBranchIssuanceInfo(null)), defaultTerms: terms };
+  BRANCH_SEALS[branchId] = next;
+  await BRANCH_SEALS_DOC.set({ [branchId]: next }, { merge:true });
 }
 
 function renderContractIssuancePanel(){
@@ -5122,10 +5145,46 @@ function renderContractIssuancePanel(){
   sealRow.appendChild(sealBtn);
   sealRow.appendChild(sealFileInput);
   box.appendChild(sealRow);
+
+  // 특약 기본값 (선택된 지점 기준). 실제 계약에 특약(contractContent)이 있으면 그걸
+  // 우선 쓰고, 없을 때만(빈 양식 발급 등) 여기서 미리 넣어둔 기본값으로 채운다
+  // (issueContractDocument 참고). 발급 팝업에서도 어차피 다시 고칠 수 있다.
+  const termsBox = document.createElement('div');
+  termsBox.style.cssText = 'margin-bottom:12px; padding:8px 10px; background:var(--panel); border-radius:8px;';
+  termsBox.appendChild(el('div', null, '이 지점 특약 기본값', 'font-size:12px;color:var(--ink-soft);margin-bottom:6px;'));
+  const termsHint = el('div', null,
+    '계약서를 발급할 때 특약란에 미리 채워둘 문구입니다. 실제 계약에 저장된 특약이 있으면 그걸 우선 쓰고, 없을 때만(빈 양식 발급 등) 여기 내용으로 채웁니다. 줄마다 ※가 자동으로 붙습니다.',
+    'font-size:11.5px;color:var(--ink-soft);margin-bottom:6px;line-height:1.5;');
+  termsBox.appendChild(termsHint);
+  const termsTextarea = document.createElement('textarea');
+  termsTextarea.rows = 3;
+  termsTextarea.style.cssText = 'width:100%;font-size:13px;';
+  termsTextarea.placeholder = '예) 반려동물 사육 금지\n주차 공간 제공하지 않음';
+  termsBox.appendChild(termsTextarea);
+  const termsSaveRow = document.createElement('div');
+  termsSaveRow.style.cssText = 'display:flex;justify-content:flex-end;margin-top:6px;';
+  const termsSaveBtn = document.createElement('button');
+  termsSaveBtn.className = 'btn small';
+  termsSaveBtn.textContent = '특약 기본값 저장';
+  termsSaveBtn.onclick = async ()=>{
+    try{
+      await saveBranchDefaultTerms(st.branchId, termsTextarea.value);
+      logChange(`"${(DB.branches.find(b=>b.id===st.branchId)||{}).name}" 지점 특약 기본값 저장`);
+      showAlert('저장했습니다.');
+    }catch(e){
+      console.error(e);
+      showAlert('저장하지 못했습니다: ' + e.message);
+    }
+  };
+  termsSaveRow.appendChild(termsSaveBtn);
+  termsBox.appendChild(termsSaveRow);
+  box.appendChild(termsBox);
+
   loadBranchSeals().then(seals=>{
-    const url = seals[st.branchId];
-    if(url){ sealPreview.src = url; sealPreview.style.display=''; sealNone.style.display='none'; }
+    const info = seals[st.branchId] || { sealDataUrl:'', defaultTerms:'' };
+    if(info.sealDataUrl){ sealPreview.src = info.sealDataUrl; sealPreview.style.display=''; sealNone.style.display='none'; }
     else { sealPreview.style.display='none'; sealNone.style.display=''; }
+    termsTextarea.value = info.defaultTerms || '';
   });
 
   // 계약 검색
@@ -5186,6 +5245,7 @@ async function issueContractDocument(branch, contract){
   const room = contract ? DB.rooms.find(r=> r.id===contract.roomId) : null;
   const range = contract ? parseContractPeriodRange(contract.contractPeriod) : null;
   const seals = await loadBranchSeals();
+  const branchInfo = seals[branch.id] || { sealDataUrl:'', defaultTerms:'' };
 
   const data = {
     // 실입실자(계약자와 다를 수 있음) 이름으로 발급을 요청하는 경우가 많아, 입실자 이름을
@@ -5198,9 +5258,11 @@ async function issueContractDocument(branch, contract){
     branchPhone: branch.phone || '',
     branchAddress: branch.address || '',
     roomNumber: room ? room.number : '',
-    specialTerms: (contract && contract.contractContent) || '',
+    // 실제 계약에 저장된 특약이 있으면 그걸 우선 쓰고, 없을 때만(빈 양식 발급 등)
+    // 관리자 설정에서 지점별로 미리 넣어둔 기본값으로 채운다.
+    specialTerms: (contract && contract.contractContent) || branchInfo.defaultTerms || '',
     signedDate: new Date().toLocaleString('ko-KR', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }),
-    sealDataUrl: seals[branch.id] || ''
+    sealDataUrl: branchInfo.sealDataUrl || ''
   };
   win.document.open();
   win.document.write(buildContractDocumentHTML(data));
@@ -6719,21 +6781,37 @@ function renderStatsView(){
 // VPMS(pms.vendit.co.kr)에서 지점별·월별 매출을 하루 3번(14/18/22시) 긁어오는 로컬
 // 자동화 스크립트(vpms-report-automation)가 monthliv/hotelStaySales에 써 넣은 값을
 // 그대로 표로 보여준다. 이 대시보드는 읽기만 하고, 값을 만들거나 고치는 화면은 아니다.
-function requestHotelSalesRefresh(btn){
-  const originalText = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = '요청 중...';
+// 새로고침 버튼을 누른 뒤부터 watcher.py가 실제로 값을 갱신할 때까지는 시간이
+// 걸려서(1~2분), 그동안 화면에 "새로고침 중" 표시를 계속 띄워둔다. 우리가 요청한
+// 시각(HOTEL_SALES_REFRESH_REQUESTED_AT)보다 asOf가 같거나 늦은 스냅샷이 오면
+// (applyHotelSalesSnapshot) 로딩 표시를 끈다. watcher.py가 꺼져 있는 등의 이유로
+// 끝내 응답이 없을 수도 있어 안전장치로 3분 뒤엔 자동으로 로딩 표시를 접는다.
+let HOTEL_SALES_REFRESH_REQUESTED_AT = null;
+let hotelSalesRefreshTimeoutId = null;
+
+function requestHotelSalesRefresh(){
+  const requestedAt = new Date().toISOString();
+  HOTEL_SALES_REFRESH_REQUESTED_AT = requestedAt;
+  clearTimeout(hotelSalesRefreshTimeoutId);
+  hotelSalesRefreshTimeoutId = setTimeout(()=>{
+    if(HOTEL_SALES_REFRESH_REQUESTED_AT === requestedAt){
+      HOTEL_SALES_REFRESH_REQUESTED_AT = null;
+      render();
+    }
+  }, 3 * 60 * 1000);
+  render();
+
   HOTEL_SALES_TRIGGER_DOC.set({
-    requestedAt: new Date().toISOString(),
+    requestedAt,
     requestedBy: (CURRENT_USER && CURRENT_USER.email) || ''
-  }).then(()=>{
-    showAlert('새로고침을 요청했습니다. VPMS를 다시 확인하는 데 1~2분 정도 걸려요 — 끝나면 이 화면이 자동으로 갱신됩니다.\n\n(watcher.py가 켜져 있는 PC가 있어야 처리됩니다)');
   }).catch(err=>{
     console.error('새로고침 요청 실패:', err);
+    if(HOTEL_SALES_REFRESH_REQUESTED_AT === requestedAt){
+      HOTEL_SALES_REFRESH_REQUESTED_AT = null;
+      clearTimeout(hotelSalesRefreshTimeoutId);
+    }
     showAlert('새로고침 요청에 실패했습니다: ' + err.message);
-  }).finally(()=>{
-    btn.disabled = false;
-    btn.textContent = originalText;
+    render();
   });
 }
 
@@ -6741,16 +6819,28 @@ function renderHotelSalesSection(){
   const box = document.createElement('div');
   box.className = 'stat-section';
   const asOfDate = HOTEL_SALES.asOf ? HOTEL_SALES.asOf.slice(0,10).replace(/-/g,'/') : localDateKey().replace(/-/g,'/');
+  const refreshing = !!HOTEL_SALES_REFRESH_REQUESTED_AT;
   const heading = document.createElement('div');
   heading.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin:0 0 12px;';
   heading.innerHTML = `<h3 style="margin:0;font-size:19px;">호텔 스테이 지점별 매출 현황 (${asOfDate})</h3>`;
   if(canEdit()){
+    const btnWrap = document.createElement('div');
+    btnWrap.style.cssText = 'display:flex;align-items:center;gap:8px;';
+    if(refreshing){
+      const spinner = el('span', 'spinner-small');
+      const label = el('span', null, 'VPMS 확인 중...');
+      label.style.cssText = 'font-size:12.5px;color:var(--ink-soft);';
+      btnWrap.appendChild(spinner);
+      btnWrap.appendChild(label);
+    }
     const refreshBtn = document.createElement('button');
     refreshBtn.className = 'btn small';
     refreshBtn.textContent = '새로고침';
     refreshBtn.title = '지금 VPMS에서 매출을 다시 가져옵니다 (1~2분 소요)';
-    refreshBtn.onclick = ()=> requestHotelSalesRefresh(refreshBtn);
-    heading.appendChild(refreshBtn);
+    refreshBtn.disabled = refreshing;
+    refreshBtn.onclick = requestHotelSalesRefresh;
+    btnWrap.appendChild(refreshBtn);
+    heading.appendChild(btnWrap);
   }
   box.appendChild(heading);
 
@@ -6761,18 +6851,18 @@ function renderHotelSalesSection(){
 
   const table = document.createElement('table');
   table.className = 'branch-table';
-  table.innerHTML = `<thead><tr><th>지점</th><th>월</th><th>총 매출</th><th>객단가</th><th>객실당 매출</th><th>총 객실수</th><th>숙박자수</th><th>점유율</th></tr></thead>`;
+  table.innerHTML = `<thead><tr><th>지점</th><th style="text-align:right;">월</th><th style="text-align:right;">총 매출</th><th style="text-align:right;">객단가</th><th style="text-align:right;">객실당 매출</th><th style="text-align:right;">총 객실수</th><th style="text-align:right;">숙박자수</th><th style="text-align:right;">점유율</th></tr></thead>`;
   const tbody = document.createElement('tbody');
   HOTEL_SALES.rows.forEach(r=>{
     const tr = document.createElement('tr');
     tr.innerHTML = `<td style="color:var(--accent-ink);font-weight:700;">${esc(r.branch)}</td>
-      <td>${esc(r.month)}월</td>
-      <td>${formatWon(r.revenue)}</td>
-      <td>${formatWon(r.adr)}</td>
-      <td>${formatWon(r.revpar)}</td>
-      <td>${esc(r.totalRooms)}</td>
-      <td>${esc(r.occupied)}</td>
-      <td>${esc(r.rate)}%</td>`;
+      <td style="text-align:right;">${esc(r.month)}월</td>
+      <td style="text-align:right;">${formatWon(r.revenue)}</td>
+      <td style="text-align:right;">${formatWon(r.adr)}</td>
+      <td style="text-align:right;">${formatWon(r.revpar)}</td>
+      <td style="text-align:right;">${esc(r.totalRooms)}</td>
+      <td style="text-align:right;">${esc(r.occupied)}</td>
+      <td style="text-align:right;">${esc(r.rate)}%</td>`;
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
@@ -6942,15 +7032,16 @@ function adminHelpSections(){
         ['지점 선택 + 검색', '지점을 고르고 계약자·연락처·호실로 검색하면 그 지점의 계약 이력(계약관리에 저장된 것) 중에서 찾아 고를 수 있습니다. 고르면 성명·연락처·계약기간·입실료가 자동으로 채워집니다.'],
         ['빈 양식으로 직접 입력해 발급', '계약 이력에 없는 경우 빈 계약서를 열어 직접 채웁니다.'],
         ['미리보기 화면', '새 창으로 열리며, 회색으로 강조되는 항목(성명·연락처·계약기간·입실료·지점 정보·서명일·특약)은 클릭해서 바로 고칠 수 있습니다. "인쇄 / PDF로 저장"을 누르면 브라우저 인쇄창이 뜨고, 인쇄 대상을 "PDF로 저장"으로 바꾸면 PDF 파일로 받을 수 있습니다.'],
-        ['이 지점 직인', '지점별로 직인(도장) 이미지를 한 번 등록해두면 그 지점 계약서를 발급할 때마다 서명란에 자동으로 들어갑니다. "이미지 등록/변경"으로 바꿀 수 있습니다.']
+        ['이 지점 직인', '지점별로 직인(도장) 이미지를 한 번 등록해두면 그 지점 계약서를 발급할 때마다 서명란에 자동으로 들어갑니다. "이미지 등록/변경"으로 바꿀 수 있습니다.'],
+        ['이 지점 특약 기본값', '지점별로 자주 쓰는 특약 문구를 미리 저장해두면, 선택한 계약에 저장된 특약이 없을 때(빈 양식 발급 등) 자동으로 채워줍니다. 줄마다 ※가 자동으로 붙습니다.']
       ],
       notes:[
         '제1조~제8조 약관 본문은 모든 지점이 같은 고정 문구를 씁니다(특약사항만 계약마다 다릅니다). 약관 문구 자체를 바꿔야 하면 화면이 아니라 코드(CONTRACT_ARTICLES_HTML)를 고쳐야 합니다.',
-        '특약사항은 선택한 계약의 "계약내용"(계약관리 데이터의 contractContent)을 그대로 가져와 보여주며, 미리보기에서 고친 내용은 저장되지 않고 그 인쇄에만 반영됩니다.',
+        '특약사항은 선택한 계약의 "계약내용"(계약관리 데이터의 contractContent)이 있으면 그걸 우선 가져오고, 없으면 지점별 특약 기본값을 대신 채웁니다. 미리보기에서 고친 내용은 저장되지 않고 그 인쇄에만 반영됩니다.',
         '지점 연락처는 "지점 · 호실 관리 > 지점 정보 수정"에서 입력해두면 계약서에 자동으로 채워집니다. 비어 있으면 미리보기에서 빈 칸으로 나오니 그 자리에서 채워 넣어도 됩니다.'
       ],
       cautions:[
-        '직인 이미지는 이 화면에서만 쓰는 용도라 메인 데이터와 별도로 저장됩니다. 휴대폰으로 찍은 사진처럼 큰 파일을 올려도 자동으로 작게 줄여 저장합니다.',
+        '직인 이미지·특약 기본값은 이 화면에서만 쓰는 용도라 메인 데이터와 별도로 저장되지만, 어느 PC에서 등록하든 모든 사람에게 똑같이 보입니다(로그인 계정이 아니라 지점에 붙는 값). 휴대폰으로 찍은 사진처럼 큰 파일을 올려도 자동으로 작게 줄여 저장합니다.',
         '미리보기 새 창이 안 뜨면 브라우저가 팝업을 차단한 것입니다. 주소창의 팝업 차단 알림에서 이 사이트를 허용한 뒤 다시 눌러주세요.'
       ] },
 
@@ -7389,6 +7480,12 @@ function applyHotelSalesSnapshot(snap){
     asOf,
     title: (d && d.title) || ''
   };
+  // 우리가 요청한 새로고침(HOTEL_SALES_REFRESH_REQUESTED_AT)이 반영된 값이 왔으면
+  // 로딩 표시를 끈다. asOf도 ISO 문자열이라 문자열 비교로 순서 비교가 된다.
+  if(HOTEL_SALES_REFRESH_REQUESTED_AT && asOf >= HOTEL_SALES_REFRESH_REQUESTED_AT){
+    HOTEL_SALES_REFRESH_REQUESTED_AT = null;
+    clearTimeout(hotelSalesRefreshTimeoutId);
+  }
   if(anyEditInProgress()) return;
   render();
 }
