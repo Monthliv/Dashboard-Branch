@@ -604,7 +604,8 @@
   table.branch-table .stat-cell-link{ color:inherit; text-decoration:none; display:block; }
   table.branch-table .stat-cell-link:hover{ color:var(--accent-ink); text-decoration:underline; }
   /* 호텔 스테이 매출 표: 세로줄이 없으면 숫자 칸 정렬이 어긋나 보인다는 피드백으로 흐린 구분선 추가 */
-  table.hotel-sales-table th, table.hotel-sales-table td{ border-left:1px solid var(--line); }
+  /* var(--line)은 흰 배경 위에서는 거의 안 보여서, 이 표만 좀 더 또렷한 회색으로 구분선을 준다 */
+  table.hotel-sales-table th, table.hotel-sales-table td{ border-left:1px solid rgba(0,0,0,.15); }
   table.hotel-sales-table th:first-child, table.hotel-sales-table td:first-child{ border-left:none; }
   /* 방 가격 관리: 등록된 가격표는 접어두고, 펼쳐도 표 안에서만 스크롤한다 */
   .room-price-details{ margin-top:14px; }
@@ -6855,12 +6856,13 @@ function renderHotelSalesSection(){
   const table = document.createElement('table');
   table.className = 'branch-table hotel-sales-table';
   const th = (label)=> `<th style="text-align:center;background:var(--accent-soft);color:var(--accent-ink);">${label}</th>`;
-  table.innerHTML = `<thead><tr><th style="text-align:center;background:var(--accent-soft);color:var(--accent-ink);">지점</th>${th('월')}${th('총 매출')}${th('객단가')}${th('객실당 매출')}${th('총 객실수')}${th('숙박자수')}${th('점유율')}</tr></thead>`;
+  const MONTH_BG = '#FFF3B0', MONTH_FG = '#7A5C00';
+  table.innerHTML = `<thead><tr><th style="text-align:center;background:var(--accent-soft);color:var(--accent-ink);">지점</th><th style="text-align:center;background:${MONTH_BG};color:${MONTH_FG};">월</th>${th('총 매출')}${th('객단가')}${th('객실당 매출')}${th('총 객실수')}${th('숙박자수')}${th('점유율')}</tr></thead>`;
   const tbody = document.createElement('tbody');
   HOTEL_SALES.rows.forEach(r=>{
     const tr = document.createElement('tr');
     tr.innerHTML = `<td style="background:var(--accent-soft);color:var(--accent-ink);font-weight:700;">${esc(r.branch)}</td>
-      <td style="text-align:right;background:var(--accent-soft);color:var(--accent-ink);font-weight:700;">${esc(r.month)}월</td>
+      <td style="text-align:center;background:${MONTH_BG};color:${MONTH_FG};font-weight:700;">${esc(r.month)}월</td>
       <td style="text-align:right;">${formatWon(r.revenue)}</td>
       <td style="text-align:right;">${formatWon(r.adr)}</td>
       <td style="text-align:right;">${formatWon(r.revpar)}</td>
