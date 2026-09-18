@@ -6856,8 +6856,8 @@ function renderHotelSalesSection(){
   const table = document.createElement('table');
   table.className = 'branch-table hotel-sales-table';
   const th = (label)=> `<th style="text-align:center;background:var(--accent-soft);color:var(--accent-ink);">${label}</th>`;
-  const MONTH_BG = '#FFF3B0', MONTH_FG = '#7A5C00';
-  table.innerHTML = `<thead><tr><th style="text-align:center;background:var(--accent-soft);color:var(--accent-ink);">지점</th><th style="text-align:center;background:${MONTH_BG};color:${MONTH_FG};">월</th>${th('총 매출')}${th('객단가')}${th('객실당 매출')}${th('총 객실수')}${th('숙박자수')}${th('점유율')}</tr></thead>`;
+  const MONTH_BG = '#FFFBE6', MONTH_FG = '#8a7220';
+  table.innerHTML = `<thead><tr><th style="text-align:center;background:var(--accent-soft);color:var(--accent-ink);">지점</th>${th('월')}${th('총 매출')}${th('객단가')}${th('객실당 매출')}${th('총 객실수')}${th('숙박자수')}${th('점유율')}</tr></thead>`;
   const tbody = document.createElement('tbody');
   HOTEL_SALES.rows.forEach(r=>{
     const tr = document.createElement('tr');
