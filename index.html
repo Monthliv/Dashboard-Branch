@@ -6834,8 +6834,26 @@ const HOTEL_SALES_IMAGE_COLUMNS = [
   { label:'점유율', align:'right', value:r=> r.rate + '%' },
 ];
 
+// 지점이 같은 채로 이어지는 행은(월별로 여러 줄) 지점 칸을 하나로 병합해서 보여준다.
+// rows는 이미 지점별로 묶여서 정렬되어 온다는 전제(vpms-report-automation) — 흩어져
+// 있으면 이 함수가 그룹을 잘못 잡으니, 여기서 다시 정렬하진 않는다.
+// 반환값: 각 인덱스에 대해, 그 행이 병합 그룹의 첫 행이면 남은 줄 수(rowspan)를,
+// 그 그룹의 나머지 행이면 0을 담은 배열.
+function computeBranchRowSpans(rows){
+  const spans = new Array(rows.length).fill(0);
+  let i = 0;
+  while(i < rows.length){
+    let j = i + 1;
+    while(j < rows.length && rows[j].branch === rows[i].branch) j++;
+    spans[i] = j - i;
+    i = j;
+  }
+  return spans;
+}
+
 function buildHotelSalesCanvas(){
   const rows = HOTEL_SALES.rows;
+  const spans = computeBranchRowSpans(rows);
   const asOfDate = HOTEL_SALES.asOf ? HOTEL_SALES.asOf.slice(0,10).replace(/-/g,'/') : localDateKey().replace(/-/g,'/');
   const title = `호텔 스테이 지점별 매출 현황 (${asOfDate})`;
   const font = "13px -apple-system, 'Malgun Gothic', sans-serif";
@@ -6872,35 +6890,60 @@ function buildHotelSalesCanvas(){
   ctx.textAlign = 'left';
   ctx.fillText(title, outerPad, outerPad + titleH / 2);
 
-  let y = outerPad + titleH;
-  const drawRow = (h, draw)=>{
-    let x = outerPad;
-    colWidths.forEach((w, i)=>{ draw(i, x, y, w, h); x += w; });
-    y += h;
-  };
+  const bodyTop = outerPad + titleH + headerH;
   const textX = (align, x, w)=> align==='right' ? x + w - cellPadX : align==='center' ? x + w/2 : x + cellPadX;
 
   // 헤더 (표 전체 초록색 — 실제 화면과 동일)
-  drawRow(headerH, (i, x, yy, w, h)=>{
-    ctx.fillStyle = '#E1F1F1';
-    ctx.fillRect(x, yy, w, h);
-    ctx.fillStyle = '#0B5457';
-    ctx.font = boldFont;
-    ctx.textAlign = 'center';
-    ctx.fillText(HOTEL_SALES_IMAGE_COLUMNS[i].label, x + w/2, yy + h/2);
-  });
-
-  rows.forEach(r=>{
-    drawRow(rowH, (i, x, yy, w, h)=>{
-      const col = HOTEL_SALES_IMAGE_COLUMNS[i];
-      ctx.fillStyle = col.bg || '#ffffff';
-      ctx.fillRect(x, yy, w, h);
-      ctx.fillStyle = col.fg || '#1E2A32';
-      ctx.font = col.bold ? boldFont : font;
-      ctx.textAlign = col.align === 'right' ? 'right' : col.align === 'center' ? 'center' : 'left';
-      ctx.fillText(col.value(r), textX(col.align, x, w), yy + h/2);
+  {
+    let x = outerPad;
+    colWidths.forEach((w, i)=>{
+      ctx.fillStyle = '#E1F1F1';
+      ctx.fillRect(x, outerPad + titleH, w, headerH);
+      ctx.fillStyle = '#0B5457';
+      ctx.font = boldFont;
+      ctx.textAlign = 'center';
+      ctx.fillText(HOTEL_SALES_IMAGE_COLUMNS[i].label, x + w/2, outerPad + titleH + headerH/2);
+      x += w;
     });
-  });
+  }
+
+  // 지점 열(병합 셀) — 그룹당 한 번만, 그룹 전체 높이만큼 칸을 그리고 가운데에 글자를 놓는다.
+  {
+    const col = HOTEL_SALES_IMAGE_COLUMNS[0];
+    let y = bodyTop;
+    rows.forEach((r, idx)=>{
+      if(spans[idx] > 0){
+        const h = spans[idx] * rowH;
+        ctx.fillStyle = col.bg;
+        ctx.fillRect(outerPad, y, colWidths[0], h);
+        ctx.fillStyle = col.fg;
+        ctx.font = boldFont;
+        ctx.textAlign = 'left';
+        ctx.fillText(col.value(r), outerPad + cellPadX, y + h/2);
+      }
+      y += rowH;
+    });
+  }
+
+  // 나머지 열은 기존처럼 행마다 그린다.
+  {
+    let y = bodyTop;
+    rows.forEach(r=>{
+      let x = outerPad + colWidths[0];
+      for(let i=1;i<HOTEL_SALES_IMAGE_COLUMNS.length;i++){
+        const col = HOTEL_SALES_IMAGE_COLUMNS[i];
+        const w = colWidths[i];
+        ctx.fillStyle = col.bg || '#ffffff';
+        ctx.fillRect(x, y, w, rowH);
+        ctx.fillStyle = col.fg || '#1E2A32';
+        ctx.font = col.bold ? boldFont : font;
+        ctx.textAlign = col.align === 'right' ? 'right' : col.align === 'center' ? 'center' : 'left';
+        ctx.fillText(col.value(r), textX(col.align, x, w), y + rowH/2);
+        x += w;
+      }
+      y += rowH;
+    });
+  }
 
   // 세로/가로 구분선
   ctx.strokeStyle = 'rgba(0,0,0,.15)';
@@ -6908,12 +6951,16 @@ function buildHotelSalesCanvas(){
   let lineX = outerPad;
   colWidths.forEach(w=>{
     lineX += w;
-    ctx.beginPath(); ctx.moveTo(lineX, outerPad + titleH); ctx.lineTo(lineX, outerPad + titleH + headerH + rows.length*rowH);
+    ctx.beginPath(); ctx.moveTo(lineX, outerPad + titleH); ctx.lineTo(lineX, bodyTop + rows.length*rowH);
     ctx.stroke();
   });
   for(let i=0;i<=rows.length;i++){
-    const ly = outerPad + titleH + headerH + i*rowH;
-    ctx.beginPath(); ctx.moveTo(outerPad, ly); ctx.lineTo(outerPad + tableWidth, ly);
+    const ly = bodyTop + i*rowH;
+    // 지점 칸이 병합되는 경계(같은 지점의 다음 줄)에서는 지점 칸 밑줄은 긋지 않는다.
+    const isMergeBoundary = i>0 && i<rows.length && rows[i].branch === rows[i-1].branch;
+    ctx.beginPath();
+    ctx.moveTo(isMergeBoundary ? outerPad + colWidths[0] : outerPad, ly);
+    ctx.lineTo(outerPad + tableWidth, ly);
     ctx.stroke();
   }
   ctx.strokeRect(outerPad, outerPad + titleH, tableWidth, headerH + rows.length*rowH);
@@ -6999,9 +7046,14 @@ function renderHotelSalesSection(){
   const MONTH_BG = '#FFFBE6', MONTH_FG = '#8a7220';
   table.innerHTML = `<thead><tr><th style="text-align:center;background:var(--accent-soft);color:var(--accent-ink);">지점</th>${th('월')}${th('총 매출')}${th('객단가')}${th('객실당 매출')}${th('총 객실수')}${th('숙박자수')}${th('점유율')}</tr></thead>`;
   const tbody = document.createElement('tbody');
-  HOTEL_SALES.rows.forEach(r=>{
+  const branchSpans = computeBranchRowSpans(HOTEL_SALES.rows);
+  HOTEL_SALES.rows.forEach((r, idx)=>{
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td style="background:var(--accent-soft);color:var(--accent-ink);font-weight:700;">${esc(r.branch)}</td>
+    // 같은 지점이 이어지는 줄은 지점 칸을 병합(rowspan)하고, 그 다음 줄들은 이 칸을 아예 안 그린다.
+    const branchCell = branchSpans[idx] > 0
+      ? `<td rowspan="${branchSpans[idx]}" style="background:var(--accent-soft);color:var(--accent-ink);font-weight:700;vertical-align:middle;">${esc(r.branch)}</td>`
+      : '';
+    tr.innerHTML = `${branchCell}
       <td style="text-align:center;background:${MONTH_BG};color:${MONTH_FG};font-weight:700;">${esc(r.month)}월</td>
       <td style="text-align:right;">${formatWon(r.revenue)}</td>
       <td style="text-align:right;">${formatWon(r.adr)}</td>
