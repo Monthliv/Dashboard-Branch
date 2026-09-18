@@ -1017,6 +1017,9 @@ const ROOM_PRICES_DOC = firestoreDB.collection('monthliv').doc('roomPrices');
 // 긁어오는 로컬 자동화 스크립트(vpms-report-automation, Firebase Admin SDK로 씀)가
 // 채워 넣고, 이 대시보드는 읽기 전용으로 구독만 한다.
 const HOTEL_SALES_DOC = firestoreDB.collection('monthliv').doc('hotelStaySales');
+// "새로고침" 버튼이 여기에 요청 시각을 써두면, 사용자 PC에서 계속 떠 있는
+// watcher.py가 이 문서를 실시간 구독하다가 즉시 VPMS를 한 번 더 긁어온다.
+const HOTEL_SALES_TRIGGER_DOC = firestoreDB.collection('monthliv').doc('hotelStaySalesTrigger');
 // 지점 직인 이미지. 계약서 발급 화면에서만 쓰는 값이라 메인 상태 문서에는 넣지 않고(문서
 // 용량 제한과 무관한 데이터를 모든 사용자가 매번 함께 내려받게 되는 것을 피하려고), 계약서
 // 발급 화면을 열 때만 별도로 읽어온다(roomPrices와 같은 구조: 지점id를 키로 하는 맵 하나).
@@ -6624,9 +6627,16 @@ function renderStatsView(){
     wrap.appendChild(renderRefundPendingStatsCard());
   }
 
+  // 호텔 스테이 매출은 전 지점 매출이 한눈에 다 보이는 자료라, 일부 지점만 볼 수 있는
+  // 계정에는 다른 지점 매출까지 노출되지 않도록 "전체 지점" 권한 계정에만 탭 자체를 보여준다.
+  const canViewHotelSales = USER_BRANCH_SCOPE === 'all';
+
+  const statsTabs = [['occupancy','지점별 현황']];
+  if(canViewHotelSales) statsTabs.push(['sales','호텔 스테이 지점별 매출 현황']);
+
   const statsSubnav = document.createElement('div');
   statsSubnav.className = 'subnav';
-  [['occupancy','지점별 현황'],['sales','호텔 스테이 지점별 매출 현황']].forEach(([key,label])=>{
+  statsTabs.forEach(([key,label])=>{
     const b = document.createElement('button');
     b.textContent = label;
     b.className = UI.statsTab===key ? 'active' : '';
@@ -6635,7 +6645,7 @@ function renderStatsView(){
   });
   wrap.appendChild(statsSubnav);
 
-  if(UI.statsTab === 'sales'){
+  if(UI.statsTab === 'sales' && canViewHotelSales){
     wrap.appendChild(renderHotelSalesSection());
     return wrap;
   }
@@ -6709,11 +6719,40 @@ function renderStatsView(){
 // VPMS(pms.vendit.co.kr)에서 지점별·월별 매출을 하루 3번(14/18/22시) 긁어오는 로컬
 // 자동화 스크립트(vpms-report-automation)가 monthliv/hotelStaySales에 써 넣은 값을
 // 그대로 표로 보여준다. 이 대시보드는 읽기만 하고, 값을 만들거나 고치는 화면은 아니다.
+function requestHotelSalesRefresh(btn){
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '요청 중...';
+  HOTEL_SALES_TRIGGER_DOC.set({
+    requestedAt: new Date().toISOString(),
+    requestedBy: (CURRENT_USER && CURRENT_USER.email) || ''
+  }).then(()=>{
+    showAlert('새로고침을 요청했습니다. VPMS를 다시 확인하는 데 1~2분 정도 걸려요 — 끝나면 이 화면이 자동으로 갱신됩니다.\n\n(watcher.py가 켜져 있는 PC가 있어야 처리됩니다)');
+  }).catch(err=>{
+    console.error('새로고침 요청 실패:', err);
+    showAlert('새로고침 요청에 실패했습니다: ' + err.message);
+  }).finally(()=>{
+    btn.disabled = false;
+    btn.textContent = originalText;
+  });
+}
+
 function renderHotelSalesSection(){
   const box = document.createElement('div');
   box.className = 'stat-section';
   const asOfDate = HOTEL_SALES.asOf ? HOTEL_SALES.asOf.slice(0,10).replace(/-/g,'/') : localDateKey().replace(/-/g,'/');
-  box.innerHTML = `<h3 style="margin:0 0 12px;font-size:19px;">호텔 스테이 지점별 매출 현황 (${asOfDate})</h3>`;
+  const heading = document.createElement('div');
+  heading.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin:0 0 12px;';
+  heading.innerHTML = `<h3 style="margin:0;font-size:19px;">호텔 스테이 지점별 매출 현황 (${asOfDate})</h3>`;
+  if(canEdit()){
+    const refreshBtn = document.createElement('button');
+    refreshBtn.className = 'btn small';
+    refreshBtn.textContent = '새로고침';
+    refreshBtn.title = '지금 VPMS에서 매출을 다시 가져옵니다 (1~2분 소요)';
+    refreshBtn.onclick = ()=> requestHotelSalesRefresh(refreshBtn);
+    heading.appendChild(refreshBtn);
+  }
+  box.appendChild(heading);
 
   if(!HOTEL_SALES.rows || HOTEL_SALES.rows.length===0){
     box.appendChild(el('div','empty-hint','아직 매출 데이터가 없습니다. VPMS 자동화가 실행되면 여기 나타납니다.'));
