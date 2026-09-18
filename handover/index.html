@@ -99,6 +99,7 @@ if(/\/handover$/.test(location.pathname)) location.replace(location.pathname + '
     <a href="#step5">5 인수인계 자료</a>
     <a href="#step6">6 확인·정리</a>
     <a href="#step7">7 무료 Claude로 수정</a>
+    <a href="#step8">8 VPMS 매출 자동화</a>
     <a href="#checklist">체크리스트</a>
   </nav>
 
@@ -349,6 +350,32 @@ if(/\/handover$/.test(location.pathname)) location.replace(location.pathname + '
     <div class="note"><p>여러 함수에 걸친 큰 변경, 새 기능, 데이터 구조 변경(보안 규칙 수정이 함께 필요)은 대화가 길어져 무료 사용량 한도에 걸리기 쉬우니 Claude Code로 합니다.</p></div>
   </section>
 
+  <section id="step8">
+    <h2><span class="no">8</span>VPMS 매출 자동화</h2>
+    <p class="lead">대시보드의 "호텔 스테이 지점별 매출 현황" 탭 값은 이 저장소 코드가 만드는 게 아니라, VPMS(pms.vendit.co.kr)에서 지점별 매출을 하루 3번(14/18/22시) 긁어와 Firestore에 써 넣는 별도의 로컬 자동화 스크립트(<code>vpms-report-automation</code>)가 채워 넣습니다. 이 스크립트는 GitHub 저장소가 아니라 특정 PC에만 있어서, 위 1~7단계로 대시보드·Firebase·GitHub 권한을 넘겨도 이 부분은 저절로 따라가지 않습니다.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>항목</th><th>위치</th><th>내용</th></tr></thead>
+        <tbody>
+          <tr><td>스크립트</td><td>자동화가 돌고 있는 PC의 <code>vpms-report-automation</code> 폴더</td><td>Python + Playwright. Git 저장소가 아니라 이 PC에만 있는 폴더입니다.</td></tr>
+          <tr><td>VPMS 로그인 정보</td><td>그 폴더의 <code>.env</code> 파일</td><td><code>VPMS_USERNAME</code>, <code>VPMS_PASSWORD</code> 두 줄. 파일 안에 평문으로 저장되며 어디에도 업로드되지 않습니다.</td></tr>
+          <tr><td>Firebase 쓰기 권한</td><td>그 폴더의 <code>firebase-service-account.json</code></td><td>monthliv-482bd 프로젝트의 서비스 계정 키. 대시보드 로그인 계정과는 별개입니다.</td></tr>
+          <tr><td>실행 예약</td><td>그 PC의 Windows 작업 스케줄러</td><td>"VPMS 매출 보고서 14시/18시/22시"(하루 3번 자동 수집), "VPMS 수동 새로고침 대기"(대시보드의 "새로고침" 버튼 요청을 받아 즉시 실행, 상시 실행)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p><strong>VPMS 아이디·비밀번호가 바뀌었을 때:</strong></p>
+    <ol>
+      <li>자동화가 돌고 있는 PC에서 <code>vpms-report-automation\.env</code> 파일을 메모장으로 엽니다.</li>
+      <li><code>VPMS_USERNAME</code>, <code>VPMS_PASSWORD</code> 값을 새 아이디·비밀번호로 고치고 저장합니다.</li>
+      <li>따로 재시작하거나 다시 실행할 필요 없습니다. 다음 예약 실행(14/18/22시)이나 대시보드의 "새로고침" 버튼을 누르는 시점부터 새 계정으로 로그인합니다.</li>
+    </ol>
+    <p>Firebase 서비스 계정 키가 만료됐거나 다시 만들어야 하면, <a href="https://console.firebase.google.com/project/monthliv-482bd/settings/serviceaccounts/adminsdk" target="_blank" rel="noopener">Firebase 콘솔의 서비스 계정 설정</a>에서 "새 비공개 키 생성"으로 새로 받아 같은 이름(<code>firebase-service-account.json</code>)으로 그 폴더에 덮어 저장하면 됩니다.</p>
+
+    <div class="note"><p>이 자동화는 해당 PC가 켜져서 로그인되어 있는 동안만 동작합니다. 담당 PC를 바꾸거나 다른 사람에게 넘길 때는, 이 폴더 전체를 새 PC로 옮기고 위 표의 두 파일(<code>.env</code>, <code>firebase-service-account.json</code>)과 작업 스케줄러 등록을 그대로(또는 새로) 만들어줘야 계속 동작합니다. Git 저장소로 관리되지 않으니 옮길 때 폴더째로 복사해야 합니다.</p></div>
+  </section>
+
   <section id="checklist">
     <h2>체크리스트</h2>
     <p>체크 표시는 이 브라우저에만 저장됩니다.</p>
@@ -363,6 +390,7 @@ if(/\/handover$/.test(location.pathname)) location.replace(location.pathname + '
       <li><label><input type="checkbox"><span>받는 사람이 main에 테스트 배포, "지금 새로고침" 안내 확인</span></label></li>
       <li><label><input type="checkbox"><span>기존 담당자 권한 정리: 대시보드 → Firebase → GitHub</span></label></li>
       <li><label><input type="checkbox"><span>세 곳 모두 최고 권한자가 1명 이상 남았는지 확인</span></label></li>
+      <li><label><input type="checkbox"><span>VPMS 매출 자동화(vpms-report-automation) 폴더·.env·서비스 계정 키·작업 스케줄러를 새 PC/담당자에게 전달(8단계)</span></label></li>
     </ul>
   </section>
 
