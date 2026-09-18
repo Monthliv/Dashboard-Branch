@@ -748,7 +748,7 @@
 const STORE_KEY = 'monthliv-state';
 let DB = null;
 let UI = {
-  view:'stats', branchId:null, branchTab:'rooms',
+  view:'stats', branchId:null, branchTab:'rooms', statsTab:'occupancy',
   roomEditMode:{}, residentEditMode:{}, roomSnapshots:{}, residentSnapshots:{}, draftResident:{}, parkingListOpen:{}, residentFieldEdit:{},
   branchEditMode:{}, branchSnapshots:{}, branchInfoOpen:{}, addingBranch:false, addingRoom:false, managingRoom:false, managingTypePrice:false, editingBranchId:null, branchOrderOpen:false,
   tlYear:null, tlMonth:null, tlScrollLeft:null, roomStatusFilter:'전체', cleanWeekStart:null, overdueTabKey:null,
@@ -1013,6 +1013,10 @@ const DOORLOCK_PUBLIC_DOC = firestoreDB.collection('monthliv').doc('doorlockPubl
 // 방 가격 원장. 대시보드와 연장 계산기(Calculator/Extend.html)가 같은 값을 봐야 해서 한 문서에
 // 모아두고, 계산기는 로그인 없이 읽어야 하므로 공개 읽기 규칙을 쓴다(도어락 공개 미러와 같은 구조).
 const ROOM_PRICES_DOC = firestoreDB.collection('monthliv').doc('roomPrices');
+// 호텔 스테이 지점별 매출 현황. VPMS(pms.vendit.co.kr)에서 하루 3번(14/18/22시) 값을
+// 긁어오는 로컬 자동화 스크립트(vpms-report-automation, Firebase Admin SDK로 씀)가
+// 채워 넣고, 이 대시보드는 읽기 전용으로 구독만 한다.
+const HOTEL_SALES_DOC = firestoreDB.collection('monthliv').doc('hotelStaySales');
 // 지점 직인 이미지. 계약서 발급 화면에서만 쓰는 값이라 메인 상태 문서에는 넣지 않고(문서
 // 용량 제한과 무관한 데이터를 모든 사용자가 매번 함께 내려받게 되는 것을 피하려고), 계약서
 // 발급 화면을 열 때만 별도로 읽어온다(roomPrices와 같은 구조: 지점id를 키로 하는 맵 하나).
@@ -1584,6 +1588,7 @@ function tryApplyPendingContractUpserts(){
 let pendingHistoryUpserts = [];
 let historyUnsubscribe = null;
 let roomPricesUnsubscribe = null;   // 방 가격 원장(monthliv/roomPrices) 실시간 구독
+let hotelSalesUnsubscribe = null;   // 호텔 스테이 매출(monthliv/hotelStaySales) 실시간 구독
 function tryApplyPendingHistoryUpserts(){
   if(pendingHistoryUpserts.length===0 || anyEditInProgress()) return false;
   const upserts = pendingHistoryUpserts;
@@ -6619,6 +6624,22 @@ function renderStatsView(){
     wrap.appendChild(renderRefundPendingStatsCard());
   }
 
+  const statsSubnav = document.createElement('div');
+  statsSubnav.className = 'subnav';
+  [['occupancy','지점별 현황'],['sales','호텔 스테이 지점별 매출 현황']].forEach(([key,label])=>{
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.className = UI.statsTab===key ? 'active' : '';
+    b.onclick = ()=>{ UI.statsTab = key; render(); };
+    statsSubnav.appendChild(b);
+  });
+  wrap.appendChild(statsSubnav);
+
+  if(UI.statsTab === 'sales'){
+    wrap.appendChild(renderHotelSalesSection());
+    return wrap;
+  }
+
   const branchSection = document.createElement('div');
   branchSection.className = 'stat-section';
   branchSection.innerHTML = `<h3 style="margin:0 0 12px;font-size:19px;">지점별 현황 (${localDateKey().replace(/-/g,'/')})</h3>`;
@@ -6683,6 +6704,49 @@ function renderStatsView(){
   });
 
   return wrap;
+}
+
+// VPMS(pms.vendit.co.kr)에서 지점별·월별 매출을 하루 3번(14/18/22시) 긁어오는 로컬
+// 자동화 스크립트(vpms-report-automation)가 monthliv/hotelStaySales에 써 넣은 값을
+// 그대로 표로 보여준다. 이 대시보드는 읽기만 하고, 값을 만들거나 고치는 화면은 아니다.
+function renderHotelSalesSection(){
+  const box = document.createElement('div');
+  box.className = 'stat-section';
+  const asOfDate = HOTEL_SALES.asOf ? HOTEL_SALES.asOf.slice(0,10).replace(/-/g,'/') : localDateKey().replace(/-/g,'/');
+  box.innerHTML = `<h3 style="margin:0 0 12px;font-size:19px;">호텔 스테이 지점별 매출 현황 (${asOfDate})</h3>`;
+
+  if(!HOTEL_SALES.rows || HOTEL_SALES.rows.length===0){
+    box.appendChild(el('div','empty-hint','아직 매출 데이터가 없습니다. VPMS 자동화가 실행되면 여기 나타납니다.'));
+    return box;
+  }
+
+  const table = document.createElement('table');
+  table.className = 'branch-table';
+  table.innerHTML = `<thead><tr><th>지점</th><th>월</th><th>총 매출</th><th>객단가</th><th>객실당 매출</th><th>총 객실수</th><th>숙박자수</th><th>점유율</th></tr></thead>`;
+  const tbody = document.createElement('tbody');
+  HOTEL_SALES.rows.forEach(r=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td style="color:var(--accent-ink);font-weight:700;">${esc(r.branch)}</td>
+      <td>${esc(r.month)}월</td>
+      <td>${formatWon(r.revenue)}</td>
+      <td>${formatWon(r.adr)}</td>
+      <td>${formatWon(r.revpar)}</td>
+      <td>${esc(r.totalRooms)}</td>
+      <td>${esc(r.occupied)}</td>
+      <td>${esc(r.rate)}%</td>`;
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  box.appendChild(table);
+
+  if(HOTEL_SALES.asOf){
+    const note = document.createElement('div');
+    note.style.cssText = 'margin-top:10px;font-size:12px;color:var(--ink-soft);';
+    note.textContent = `VPMS 기준 시각: ${HOTEL_SALES.asOf.replace('T',' ').slice(0,16)}`;
+    box.appendChild(note);
+  }
+
+  return box;
 }
 
 // "이 PC(계정)에서만 퇴실자 검색·이력이 안 보인다"류 문제를 화면만 보고 진단할 수 있게,
@@ -6819,7 +6883,7 @@ function adminHelpSections(){
         ['계약 데이터 붙여넣기', '계약 관리 페이지의 표를 복사해 그대로 붙여넣습니다. 고시원 명·방이름으로 지점·호실을 찾아 저장합니다.'],
         ['⬇ 양식 다운로드 · ⬆ 엑셀 업로드', '붙여넣기 대신 같은 형식의 엑셀 파일로 올립니다.'],
         ['중복 계약 정리', '세 가지 중복을 한 번에 찾아 각각 최신 1건만 남기고 삭제합니다. ① 모든 항목이 완전히 같은 계약 ② 계약일만 다르게 다시 등록된 계약(계약현황에서 취소선으로 보이는 것 — 계약일이 가장 늦은 건을 남김) ③ 계약기간만 다르게 다시 등록된 계약(어드민에서 입실자 날짜를 바꾼 경우 등 — 나중에 등록된 건을 남김). 확인 창에 기준별 건수가 나옵니다.'],
-        ['방이동 계약 옮기기', '이 기능이 생기기 전에 방이동한 입실자의 이전 방에 남은 그 사람 계약을 지금 사는 방으로 옮깁니다. 확인 창에 사람별 건수가 나옵니다. 이미 옮긴 계약은 다시 옮기지 않습니다.']
+        ['방이동 계약 옮기기', '방이동한 입실자의 이전 방에 남은 그 사람 계약을 지금 사는 방으로 옮깁니다. 방이동을 처리할 때 "계약도 함께 옮길까요?"에 아니요를 눌렀거나, 이 기능이 생기기 전에 방이동한 경우를 나중에 한꺼번에 정리할 때 씁니다. 확인 창에 사람별 건수가 나옵니다. 이미 옮긴 계약은 다시 옮기지 않습니다.']
       ],
       notes:[
         '표의 열 순서: 계약내용 / 계약일 / 계약기간 / 고시원 명 / 방이름 / 계약자 / 계약자 연락처 / 입실자 / 입실료 / 결제금액 / 계약구분 / 결제구분 / 보증금 / 보증금 안내',
@@ -7235,6 +7299,8 @@ const ROOM_PRICE_SEED = [
 ];
 
 let ROOM_PRICES = { rooms: [], updatedAt: '', updatedBy: '' };
+// rows: [{branch, month, revenue, adr, revpar, totalRooms, occupied, rate}, ...]
+let HOTEL_SALES = { rows: [], asOf: '', title: '' };
 
 // 엑셀은 호실 1개 = 1행으로 다룬다(실무에서 호실 단위로 관리하기 때문). 저장은 계산기가
 // 쓰는 구조에 맞춰 지점+룸타입으로 묶어 nums 배열로 되돌린다.
@@ -7269,6 +7335,20 @@ function applyRoomPricesSnapshot(snap){
     rooms: (d && Array.isArray(d.rooms)) ? d.rooms : [],
     updatedAt,
     updatedBy: (d && d.updatedBy) || ''
+  };
+  if(anyEditInProgress()) return;
+  render();
+}
+
+function applyHotelSalesSnapshot(snap){
+  if(!CURRENT_USER) return;
+  const d = snap.exists ? snap.data() : null;
+  const asOf = (d && d.asOf) || '';
+  if(asOf === HOTEL_SALES.asOf) return;
+  HOTEL_SALES = {
+    rows: (d && Array.isArray(d.rows)) ? d.rows : [],
+    asOf,
+    title: (d && d.title) || ''
   };
   if(anyEditInProgress()) return;
   render();
@@ -8032,7 +8112,7 @@ const HANDOVER_NOTES = [
     '오래 켜 둔 탭이 옛 코드로 계속 저장하는 문제(수정 이력 배포 뒤 "연장했는데 수정이력이 없다" 제보) 때문에, 30분마다·탭을 다시 볼 때 배포된 페이지의 APP_BUILD를 읽어 다르면 새로고침 안내를 띄우고(안 보는 탭은 편집 중이 아니면 바로 새로고침), 자정 세션 초기화도 로그아웃 뒤 새로고침하게 했다(checkForNewBuild). APP_BUILD는 반드시 "YYYY-MM-DD-글자" 형식으로 올릴 것 — 확인 정규식이 그 형식만 읽는다.',
     '입실자 카드의 퇴실·연장·방이동 버튼은 이름 줄 오른쪽에 있었는데, 버튼이 줄어들지 않아 긴 이름이 가려지거나 줄이 깨진다는 제보로 입실자 정보 맨 아래(.resident-acts)로 옮겼다(담당자가 기간 줄 오른쪽·이름 바로 아래 줄 대신 고름, 처음엔 오른쪽 정렬이었다가 왼쪽 정렬로 바꿈). 이름은 이제 줄바꿈된다.',
     '대리결제 입실자는 카드 이름·연락처가 실입실자 것(residentDisplayName)이라 결제자가 안 보인다는 제보로, 입실자 카드에 실입실자와 결제자를 둘 다 "실입실자"/"결제자" 표시를 붙여 구분해 보여준다(실입실자를 안 적었으면 큰 이름이 결제자, 아랫줄이 "실입실자 미입력"). 실입실자 이름 밑 연락처는 실입실자 연락처만 쓴다 — 예전엔 비어 있으면 결제자 연락처로 채워 실입실자 연락처처럼 보였다. 조회 전용 계정에는 결제자 이름도 maskViewerName으로 가린다. 지점 화면의 "대리결제" 필터와 전체 검색(결제자·실입실자 이름 둘 다 검색됨)은 원래 있었다.',
-    '방이동하면 그 사람의 계약도 이동한 방으로 옮긴다(담당자가 "새 방에서 함께 보기" 대신 "실제로 옮기기"를 골랐다). 계약의 방은 시트의 지점·방이름으로 정해지므로 옮긴 계약에 처음 방(sheetRoomId)·옮겨 온 날(roomMovedOn)을 남기고, 붙여넣기에서 이전 방이름으로 들어온 그 사람 행은 movedContractRouteFor가 옮긴 방으로 보낸다(안 그러면 재붙여넣기 때 이전 방에 중복이 생긴다). 타임라인은 옮겨 온 날부터 그린다. 실시간 반영 때문에 importedAt을 새로 매기되 환불·정정 대체 판정 순서를 지키려고 그 사람 계약을 원래 순서대로 다시 매긴다. 이 기능 전 방이동은 계약관리의 "방이동 계약 옮기기"로 옮긴다(방이동으로 들어온 지금 입실자 기준, 퇴실 이력의 이름·이동일로 거슬러 올라감). 참고로 정산 화면은 계약 데이터를 읽지 않아 지점 간 이동이어도 정산에는 영향이 없다.',
+    '방이동을 방 카드에서 지금 바로 처리하면, 방이동 확인과는 별도로 "계약도 함께 옮길까요?"를 한 번 더 물어보고 예를 선택한 경우에만 그 사람의 계약을 이동한 방으로 옮긴다(자동으로 옮기던 것을, 잘못 매칭된 계약까지 딸려가는 걸 막을 방법이 없다는 이유로 선택형으로 바꿨다 — executeRoomMove의 carryContracts 인자, 기본값 true). 예약된(미래 날짜) 방이동은 아무도 지켜보지 않는 상태로 processPendingRoomMoves가 나중에 자동 처리하므로 물어보지 않고 그대로 옮긴다(carryContracts 기본값 그대로 둠). 지금 처리하면서 아니요를 고른 경우만 계약관리의 "방이동 계약 옮기기"로 나중에 한꺼번에 옮긴다. 계약의 방은 시트의 지점·방이름으로 정해지므로 옮긴 계약에 처음 방(sheetRoomId)·옮겨 온 날(roomMovedOn)을 남기고, 붙여넣기에서 이전 방이름으로 들어온 그 사람 행은 movedContractRouteFor가 옮긴 방으로 보낸다(안 그러면 재붙여넣기 때 이전 방에 중복이 생긴다). 타임라인은 옮겨 온 날부터 그린다. 실시간 반영 때문에 importedAt을 새로 매기되 환불·정정 대체 판정 순서를 지키려고 그 사람 계약을 원래 순서대로 다시 매긴다. 이 기능 전 방이동은 계약관리의 "방이동 계약 옮기기"로 옮긴다(방이동으로 들어온 지금 입실자 기준, 퇴실 이력의 이름·이동일로 거슬러 올라감). 참고로 정산 화면은 계약 데이터를 읽지 않아 지점 간 이동이어도 정산에는 영향이 없다.',
     '방 카드 방 번호 옆에 있던 잇소키 연동 자물쇠 토글(room.doorLinked)은 담당자 요청으로 뺐다(2026-09). 저장된 doorLinked 값은 지우지 않았고, 옛 변경이력이 읽히도록 이력 이름표(도어락 연결)는 남겨뒀다. 도어락 관리 화면(붙여넣기 파서)과는 별개 기능이다.',
     '판매중은 판매 상태(saleStatus) 값이 아니라 방 카드 방 번호 줄 끝의 "판매중" 글자+토글(테두리 없음)로 켜고 끄는 플래그(room.forSale)다(처음엔 "판매중/판매취소" 글자 버튼 → 꺼진 방의 "판매중"이 상태 배지로 읽힘, 다음엔 배지 줄의 "판매" 글자+스위치 알약 → 모양·위치가 어색하다는 지적으로 토글만 남겨 방 번호 줄로 옮겼고, 다시 토글만으로는 무슨 설정인지 모른다는 지적으로 테두리 없는 "판매중" 글자를 옆에 붙였다). 입실자 여부와 상관없이 적용되어, 사는 사람이 있으면 "이용중판매"(이용중·판매중 둘 다 집계)가 된다. 새 입실자가 들어와도 자동으로 꺼지지 않으니 판매가 끝나면 토글을 꺼야 한다. 예전 saleStatus "판매중"은 migrateForSaleFlag가 "그때 화면에 보이던 상태 그대로" 옮긴다 — 예전에는 사는 방의 판매중이 퇴실확정이 아니면 무시됐고 새 입실자가 들어와도 안 꺼져 숨은 값이 많아서, 그대로 플래그로 옮기면 입실 중인 방이 한꺼번에 판매중으로 잡힌다. 호실 추가 폼·엑셀 "판매상태" 열의 "판매중"도 플래그로 읽고 쓴다.',
     '관제센터 특성상 탭을 며칠씩 켜둔다. 그래서 실시간 동기화(onSnapshot)와 저장 시 충돌 검사가 들어가 있고, 날짜가 바뀌면 세션을 초기화한다. "고쳤는데 반영이 안 된다"는 제보는 대부분 오래된 탭이 옛 코드를 돌리고 있는 경우다.',
@@ -11170,10 +11250,22 @@ function showRoomMoveModal(p, room){
         close(); render();
       });
     } else {
-      showConfirm(`${room.number}호 → ${toRoom.number}호로 지금 방이동 처리할까요?${carryCount ? `\n이 사람의 계약 이력 ${carryCount}건도 ${toRoom.number}호로 옮깁니다.` : ''}`, ()=>{
-        executeRoomMove(p, room, toRoom, moveDate);
+      showConfirm(`${room.number}호 → ${toRoom.number}호로 지금 방이동 처리할까요?`, ()=>{
+        executeRoomMove(p, room, toRoom, moveDate, false);
         scheduleSave();
         close(); render();
+        // 계약을 옮길지는 방이동 확인과 분리해서 그 자리에서 따로 물어본다 — 매번 자동으로
+        // 옮기면, 실제로는 옮기면 안 되는 계약(예: 다른 사람 이름으로 잘못 매칭된 경우)까지
+        // 딸려가도 막을 방법이 없었다. 여기서 "아니요"를 선택해도 나중에 관리자 설정의
+        // "방이동 계약 옮기기"에서 한꺼번에 다시 옮길 수 있다.
+        if(carryCount > 0){
+          showConfirm(`이 사람의 계약 이력 ${carryCount}건을 ${toRoom.number}호로 함께 옮길까요?`, ()=>{
+            const names = personNameKeys(p);
+            const carried = moveContractsToRoom(contractsToCarry(room.id, names, p.sourceContractId, p.moveIn), toRoom.id, moveDate, names);
+            logChange(`${room.number}호 → ${toRoom.number}호 계약 ${carried}건 이동 ("${p.name}")`);
+            scheduleSave(); render();
+          });
+        }
       });
     }
   };
@@ -11185,7 +11277,11 @@ function showRoomMoveModal(p, room){
   document.body.appendChild(overlay);
 }
 
-function executeRoomMove(p, fromRoom, toRoom, moveDate){
+// carryContracts: 방 카드에서 지금 바로 처리하는 이동은 showRoomMoveModal에서 계약을 함께
+// 옮길지 그 자리에서 따로 물어보므로 여기서는 자동으로 옮기지 않는다(false로 호출). 예약된
+// 이동(processPendingRoomMoves)은 아무도 지켜보지 않는 상태에서 자동 실행되므로 기본값(true)대로
+// 자동으로 옮긴다 — 물어볼 사람이 없기 때문이다.
+function executeRoomMove(p, fromRoom, toRoom, moveDate, carryContracts=true){
   moveResidentToHistory(p, moveDate);
   const carriedMoveOut = (p.moveOut && p.moveOut > moveDate) ? p.moveOut : '';
   // 방이동은 새 방으로 자리만 옮기는 것일 뿐 다른 사람이 되는 게 아니므로, 대리결제·메모(색상/굵기
@@ -11200,9 +11296,12 @@ function executeRoomMove(p, fromRoom, toRoom, moveDate){
   });
   newP.resStatus = computeResStatus(newP);
   DB.residents.push(newP);
-  // 그 사람의 계약 이력도 새 방으로 옮긴다(contractsToCarry·moveContractsToRoom 참고).
-  const names = personNameKeys(p);
-  const carried = moveContractsToRoom(contractsToCarry(fromRoom.id, names, p.sourceContractId, p.moveIn), toRoom.id, moveDate, names);
+  let carried = 0;
+  if(carryContracts){
+    // 그 사람의 계약 이력도 새 방으로 옮긴다(contractsToCarry·moveContractsToRoom 참고).
+    const names = personNameKeys(p);
+    carried = moveContractsToRoom(contractsToCarry(fromRoom.id, names, p.sourceContractId, p.moveIn), toRoom.id, moveDate, names);
+  }
   logChange(`${fromRoom.number}호 → ${toRoom.number}호 방이동 처리 ("${p.name}")${carried ? ` · 계약 ${carried}건 함께 이동` : ''}`);
 }
 
@@ -11361,6 +11460,12 @@ async function initApp(user){
   if(roomPricesUnsubscribe) roomPricesUnsubscribe();
   roomPricesUnsubscribe = ROOM_PRICES_DOC.onSnapshot(applyRoomPricesSnapshot,
     err=> console.error('방 가격 실시간 구독 실패:', err));
+
+  // 호텔 스테이 매출도 같은 방식으로 구독 — 문서 하나라 비용은 연결 시 1회 +
+  // 자동화 스크립트가 하루 3번 쓸 때마다 1회.
+  if(hotelSalesUnsubscribe) hotelSalesUnsubscribe();
+  hotelSalesUnsubscribe = HOTEL_SALES_DOC.onSnapshot(applyHotelSalesSnapshot,
+    err=> console.error('호텔 스테이 매출 실시간 구독 실패:', err));
 
   // 계약(DB.contracts)은 별도 컬렉션이라 위 구독의 대상이 아니다. 컬렉션 전체를 구독하면
   // 로그인마다 전체를 다시 읽어 무료 요금제 일일 읽기 한도를 넘긴 적이 있어(efb106e →
@@ -11685,6 +11790,7 @@ if(isPublicDoorlockShareUrl()){
       if(contractsUnsubscribe){ contractsUnsubscribe(); contractsUnsubscribe = null; }
       if(historyUnsubscribe){ historyUnsubscribe(); historyUnsubscribe = null; }
       if(roomPricesUnsubscribe){ roomPricesUnsubscribe(); roomPricesUnsubscribe = null; }
+      if(hotelSalesUnsubscribe){ hotelSalesUnsubscribe(); hotelSalesUnsubscribe = null; }
       showLoginScreen();
     }
   });
